@@ -12702,37 +12702,38 @@ fn push_tab_leader(
     let color = style_color(document, &style);
     match run.tab_leader {
         TabLeader::None => {}
-        TabLeader::Underline => {
-            page.items.push(LayoutItem::Line {
-                x1: cursor_x,
-                y1: baseline_y - 2.0,
-                x2: cursor_x + width,
-                y2: baseline_y - 2.0,
-                width: 0.5,
-                color,
-                style: LineStyle::Solid,
-            });
-        }
-        TabLeader::Dots | TabLeader::Hyphens | TabLeader::MiddleDots | TabLeader::Equals => {
+        TabLeader::Dots
+        | TabLeader::Hyphens
+        | TabLeader::Underline
+        | TabLeader::MiddleDots
+        | TabLeader::Equals => {
             let leader = match run.tab_leader {
                 TabLeader::Dots => ".",
                 TabLeader::Hyphens => "-",
+                TabLeader::Underline => "_",
                 TabLeader::MiddleDots => "\u{00b7}",
                 TabLeader::Equals => "=",
-                TabLeader::None | TabLeader::Underline => unreachable!("handled above"),
+                TabLeader::None => unreachable!("handled above"),
             };
             let family = font_family_for_style(document, &style);
             let leader_width = measure_text_with_family(leader, &style, family).max(1.0);
-            let (leader_x, count, style) = if run.tab_leader == TabLeader::Dots {
-                let word_dot_advance = style.font_size_points() * 0.28 * style.horizontal_scale();
-                let word_dot_advance = word_dot_advance.max(1.0);
-                let leader_x = ((cursor_x / word_dot_advance).floor() + 1.0) * word_dot_advance;
-                let count = ((cursor_x + width - leader_x) / word_dot_advance).floor() as usize;
+            let word_advance_em = match run.tab_leader {
+                TabLeader::Dots => Some(0.28),
+                TabLeader::Hyphens | TabLeader::MiddleDots => Some(0.33),
+                TabLeader::Underline => Some(0.56),
+                TabLeader::None | TabLeader::Equals => None,
+            };
+            let (leader_x, count, style) = if let Some(word_advance_em) = word_advance_em {
+                let word_advance =
+                    style.font_size_points() * word_advance_em * style.horizontal_scale();
+                let word_advance = word_advance.max(1.0);
+                let leader_x = ((cursor_x / word_advance).floor() + 1.0) * word_advance;
+                let count = ((cursor_x + width - leader_x) / word_advance).floor() as usize;
                 if count == 0 {
                     return;
                 }
                 let mut leader_style = style;
-                let width_scale = (word_dot_advance / leader_width).clamp(0.5, 2.0);
+                let width_scale = (word_advance / leader_width).clamp(0.5, 2.0);
                 leader_style.character_scaling_percent =
                     ((leader_style.character_scaling_percent.max(1) as f32 * width_scale)
                         .round()
@@ -14041,14 +14042,23 @@ fn base14_char_width_points(
         return 0.0;
     }
 
-    let units = match family {
-        PdfFontFamily::Courier => 600,
-        PdfFontFamily::Helvetica if style.bold => helvetica_bold_width_units(ch),
-        PdfFontFamily::Helvetica => helvetica_width_units(ch),
-        PdfFontFamily::Times if style.bold => times_bold_width_units(ch),
-        PdfFontFamily::Times if style.italic => times_italic_width_units(ch),
-        PdfFontFamily::Times => times_width_units(ch),
-        PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats => symbol_width_units(ch),
+    let units = if ch == '\u{00b7}' {
+        match family {
+            PdfFontFamily::Courier => 600,
+            PdfFontFamily::Helvetica => 278,
+            PdfFontFamily::Times => 250,
+            PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats => symbol_width_units(ch),
+        }
+    } else {
+        match family {
+            PdfFontFamily::Courier => 600,
+            PdfFontFamily::Helvetica if style.bold => helvetica_bold_width_units(ch),
+            PdfFontFamily::Helvetica => helvetica_width_units(ch),
+            PdfFontFamily::Times if style.bold => times_bold_width_units(ch),
+            PdfFontFamily::Times if style.italic => times_italic_width_units(ch),
+            PdfFontFamily::Times => times_width_units(ch),
+            PdfFontFamily::Symbol | PdfFontFamily::ZapfDingbats => symbol_width_units(ch),
+        }
     };
     size * units as f32 / 1000.0
 }
@@ -24285,6 +24295,74 @@ mod tests {
             vec![15, 26, 37, 47, 58]
         );
         assert!(leaders.iter().all(|leader| (leader.x - 47.04).abs() < 0.01));
+    }
+
+    #[test]
+    fn word_tab_leader_variants_snap_to_measured_page_grids() {
+        let paragraph = |label: &str, leader| {
+            let mut style = ParagraphStyle::default();
+            style.tab_stops_twips = vec![2880];
+            style.tab_stop_leaders = vec![leader];
+            style.tab_stop_alignments = vec![TabAlignment::Right];
+            Block::Paragraph(Paragraph {
+                style,
+                runs: vec![Run {
+                    text: format!("{label}\tX"),
+                    style: CharacterStyle {
+                        font_size_half_points: 24,
+                        ..CharacterStyle::default()
+                    },
+                }],
+            })
+        };
+        let mut document = Document::default();
+        document.page.margin_left_twips = 720;
+        document.blocks = vec![
+            paragraph("Hyphen A", TabLeader::Hyphens),
+            paragraph("Underline A", TabLeader::Underline),
+            paragraph("Thick A", TabLeader::Underline),
+            paragraph("Middle A", TabLeader::MiddleDots),
+        ];
+
+        let layout = LayoutEngine::layout(&document);
+        let leaders = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment)
+                    if !fragment.text.is_empty()
+                        && fragment
+                            .text
+                            .chars()
+                            .all(|ch| matches!(ch, '-' | '_' | '\u{00b7}')) =>
+                {
+                    Some(fragment)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(leaders.len(), 4);
+        for (leader, text, x, scaling) in [
+            (leaders[0], "-".repeat(20), 91.08, 99),
+            (leaders[1], "_".repeat(10), 100.8, 101),
+            (leaders[2], "_".repeat(13), 80.64, 101),
+            (leaders[3], "\u{00b7}".repeat(22), 83.16, 119),
+        ] {
+            assert_eq!(leader.text, text);
+            assert!(
+                (leader.x - x).abs() < 0.01,
+                "unexpected leader x {}",
+                leader.x
+            );
+            assert_eq!(leader.style.character_scaling_percent, scaling);
+        }
+        assert!(
+            layout.pages[0]
+                .items
+                .iter()
+                .all(|item| !matches!(item, LayoutItem::Line { .. }))
+        );
     }
 
     #[test]

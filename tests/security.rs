@@ -28513,7 +28513,7 @@ fn tab_leaders_render_as_passive_pdf_text_without_control_leakage() {
     );
     assert_eq!(
         paragraphs[2].style.tab_stop_leaders,
-        vec![open_rtf_converter::model::TabLeader::Equals]
+        vec![open_rtf_converter::model::TabLeader::None]
     );
 
     let dir = tempdir().unwrap();
@@ -28530,7 +28530,13 @@ fn tab_leaders_render_as_passive_pdf_text_without_control_leakage() {
     )
     .unwrap();
     let pdf = fs::read(&output_path).unwrap();
-    assert!(PdfDocument::load_mem(&pdf).is_ok());
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    assert!(
+        !decoded_pdf_text(&content).contains('='),
+        "Word-compatible equal-sign tab leader should remain nonvisual"
+    );
     for forbidden in [
         b"tldot".as_slice(),
         b"tlmdot",

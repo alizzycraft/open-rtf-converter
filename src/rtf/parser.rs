@@ -6397,9 +6397,24 @@ impl Parser {
             "linecont" => self.set_line_number_restart(LineNumberRestart::Continuous, offset),
             "tldot" => self.state.current_tab_leader = TabLeader::Dots,
             "tlhyph" => self.state.current_tab_leader = TabLeader::Hyphens,
-            "tlul" | "tlth" | "tluldb" => self.state.current_tab_leader = TabLeader::Underline,
+            "tlul" | "tlth" => self.state.current_tab_leader = TabLeader::Underline,
+            "tluldb" => {
+                self.state.current_tab_leader =
+                    if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                        TabLeader::None
+                    } else {
+                        TabLeader::Underline
+                    }
+            }
             "tlmdot" => self.state.current_tab_leader = TabLeader::MiddleDots,
-            "tleq" => self.state.current_tab_leader = TabLeader::Equals,
+            "tleq" => {
+                self.state.current_tab_leader =
+                    if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                        TabLeader::None
+                    } else {
+                        TabLeader::Equals
+                    }
+            }
             "tlnone" => self.state.current_tab_leader = TabLeader::None,
             "tql" => self.state.current_tab_alignment = TabAlignment::Left,
             "tqc" => self.state.current_tab_alignment = TabAlignment::Center,
@@ -58759,7 +58774,37 @@ After\par}"#;
         assert_eq!(second.style.tab_stops_twips, vec![1440]);
         assert_eq!(second.style.tab_stop_leaders, vec![TabLeader::MiddleDots]);
         assert_eq!(third.style.tab_stops_twips, vec![1440]);
-        assert_eq!(third.style.tab_stop_leaders, vec![TabLeader::Equals]);
+        assert_eq!(third.style.tab_stop_leaders, vec![TabLeader::None]);
+    }
+
+    #[test]
+    fn strict_spec_retains_non_word_equal_and_double_underline_tab_leaders() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\tleq\tx1440 Equal\tab Right\par\pard\tluldb\tx1440 Double\tab Right\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paragraphs[0].style.tab_stop_leaders,
+            vec![TabLeader::Equals]
+        );
+        assert_eq!(
+            paragraphs[1].style.tab_stop_leaders,
+            vec![TabLeader::Underline]
+        );
     }
 
     #[test]

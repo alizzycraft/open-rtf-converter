@@ -4906,6 +4906,50 @@
       ]
     },
     {
+      "id": "tab-leader-variants-passive-layout",
+      "input": "fixtures/tab-leader-variants-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/tab-leader-variants-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Dot A",
+        "Hyphen A",
+        "Underline A",
+        "Thick A",
+        "Double A",
+        "Middle A",
+        "Equals A",
+        "X"
+      ],
+      "intentional_security_differences": [
+        "Tab controls become bounded passive text positions and leader glyphs. Editable tab metadata and active PDF behavior are not retained."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "tqr",
+        "tldot",
+        "tlhyph",
+        "tlul",
+        "tlth",
+        "tluldb",
+        "tlmdot",
+        "tleq",
+        "tx2880",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe establishes 12-point page-coordinate leader grids: hyphens and middle dots use 0.33-em pitch, while underline and thick-underline controls use repeated underscore glyphs at 0.56-em pitch. Word emits 20 hyphens, 10/13 underscores, and 22 middle dots; the converter now matches those exact counts with first origins within 0.05 points and last origins within 0.21 points. Word treats tluldb and tleq as nonvisual in this context, which WordCompatiblePassive now matches while StrictSpec retains bounded authored fallbacks. Both outputs are one-page text-only PDFs with identical seven-line flow, X origins within 0.04 points, and no drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "legacy-textbox-passive-shape",
       "input": "fixtures/legacy-textbox-passive.rtf",
       "category": "intentional_security_difference",
