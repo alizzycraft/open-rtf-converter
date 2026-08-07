@@ -7854,10 +7854,9 @@ fn layout_framed_drop_cap_paragraph(
     if paragraph.style.drop_cap_lines <= 1 {
         return false;
     }
-    let Some(frame_width_twips) = paragraph.style.frame_width_twips else {
+    if paragraph.style.frame_width_twips.is_none() && paragraph.style.frame_height_twips.is_none() {
         return false;
-    };
-    let frame_width = twips_to_points(frame_width_twips).clamp(1.0, content_width.max(1.0));
+    }
     let mut passive_frame_paragraph = paragraph.clone();
     passive_frame_paragraph.style.drop_cap_lines = 0;
     passive_frame_paragraph.style.frame_width_twips = None;
@@ -7865,21 +7864,41 @@ fn layout_framed_drop_cap_paragraph(
     passive_frame_paragraph.style.space_before_twips = 0;
     passive_frame_paragraph.style.space_after_twips = 0;
     let markers = current_marker_context(pages, document_stats);
-    let fallback_height = wrap_paragraph_with_font_provider(
+    let natural_lines = wrap_paragraph_with_font_provider(
+        &passive_frame_paragraph,
+        content_width,
+        &markers,
+        document,
+        font_provider,
+    );
+    let natural_width = natural_lines
+        .iter()
+        .map(|line| line.width)
+        .fold(0.0_f32, f32::max)
+        .max(1.0);
+    let frame_width = paragraph
+        .style
+        .frame_width_twips
+        .map(twips_to_points)
+        .unwrap_or(natural_width)
+        .clamp(1.0, content_width.max(1.0));
+    let framed_lines = wrap_paragraph_with_font_provider(
         &passive_frame_paragraph,
         frame_width,
         &markers,
         document,
         font_provider,
-    )
-    .first()
-    .map_or(12.0, |line| line.height)
-        * paragraph.style.drop_cap_lines as f32;
+    );
+    let natural_height = framed_lines
+        .iter()
+        .map(|line| line.height)
+        .sum::<f32>()
+        .max(1.0);
     let frame_height = paragraph
         .style
         .frame_height_twips
         .map(twips_to_points)
-        .unwrap_or(fallback_height)
+        .unwrap_or(natural_height)
         .clamp(
             1.0,
             (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
@@ -22824,6 +22843,61 @@ mod tests {
         assert!((first_full_width.x - 36.0).abs() < 0.01);
         assert!((first_cap.baseline_y - first_wrapped.baseline_y).abs() < 0.01);
         assert!((second_cap.baseline_y - second_wrapped.baseline_y).abs() < 0.01);
+        assert_eq!(layout.pages[0].flow_exclusions.len(), 2);
+    }
+
+    #[test]
+    fn framed_word_drop_cap_derives_each_missing_dimension_from_content() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-derived-dimensions-passive.rtf"
+        ))
+        .expect("derived drop-cap fixture should parse");
+        let layout = LayoutEngine::layout(&parsed.document);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let containing = |text: &str| {
+            fragments
+                .iter()
+                .copied()
+                .find(|fragment| fragment.text.contains(text))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing text fragment containing {text:?}: {:?}",
+                        fragments
+                            .iter()
+                            .map(|fragment| fragment.text.as_str())
+                            .collect::<Vec<_>>()
+                    )
+                })
+        };
+
+        let width_cap = fragments
+            .iter()
+            .copied()
+            .find(|fragment| fragment.text == "W")
+            .expect("width cap");
+        let width_first_line = containing("Width-");
+        let width_second_line = containing("continues ");
+        let height_cap = fragments
+            .iter()
+            .copied()
+            .find(|fragment| fragment.text == "H")
+            .expect("height cap");
+        let height_first_line = containing("Height-");
+        let height_fourth_line = containing("and ");
+        assert!((width_cap.x - 36.0).abs() < 0.01);
+        assert!((width_first_line.x - 72.0).abs() < 0.01);
+        assert!((width_second_line.x - 36.0).abs() < 0.01);
+        assert!((height_cap.x - 36.0).abs() < 0.01);
+        assert!((height_first_line.x - 44.666).abs() < 0.01);
+        assert!((height_fourth_line.x - 36.0).abs() < 0.01);
+        assert!((height_cap.baseline_y - height_first_line.baseline_y).abs() < 0.01);
         assert_eq!(layout.pages[0].flow_exclusions.len(), 2);
     }
 

@@ -4594,6 +4594,47 @@
       ]
     },
     {
+      "id": "framed-drop-cap-derived-dimensions-passive-layout",
+      "input": "fixtures/framed-drop-cap-derived-dimensions-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-derived-dimensions-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "W",
+        "Width-only frame paragraph",
+        "returning to full body width.",
+        "H",
+        "Height-only frame paragraph",
+        "and ordinary flow.",
+        "Plain paragraph after derived frame"
+      ],
+      "intentional_security_differences": [
+        "Partial drop-cap frame dimensions become bounded passive natural text geometry and flow exclusions; raw controls and editable frame metadata are not retained in the PDF."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves that a width-only drop-cap frame derives its height from the framed text's natural one-line box, while a height-only frame derives its width from the framed glyph's natural advance. Word and current have identical eleven-line flow. The width-only following line begins at x=72 and the next line returns to x=36 in both outputs; the height-only body begins at x=44.664 in Word and x=44.666 currently for three lines before returning to x=36. Other x origins differ by 0.024 points, glyph endpoints by at most 0.14 points, and baselines retain the established 0.95-1.00-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

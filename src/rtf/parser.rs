@@ -57679,6 +57679,26 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_mode_retains_each_independent_drop_cap_frame_dimension() {
+        let output = parse_rtf(
+            r"{\rtf1\absw720\dropcapli3\dropcapt1 W\par\pard\absh720\dropcapli3\dropcapt1 H\par}",
+        )
+        .unwrap();
+        let Block::Paragraph(width_only) = &output.document.blocks[0] else {
+            panic!("expected width-only paragraph");
+        };
+        let Block::Paragraph(height_only) = &output.document.blocks[1] else {
+            panic!("expected height-only paragraph");
+        };
+        assert_eq!(width_only.style.drop_cap_lines, 3);
+        assert_eq!(width_only.style.frame_width_twips, Some(720));
+        assert_eq!(width_only.style.frame_height_twips, None);
+        assert_eq!(height_only.style.drop_cap_lines, 3);
+        assert_eq!(height_only.style.frame_width_twips, None);
+        assert_eq!(height_only.style.frame_height_twips, Some(720));
+    }
+
+    #[test]
     fn word_compatible_mode_ignores_drop_cap_after_frame_dimension_reset() {
         let input = [
             "{\\rtf1",
