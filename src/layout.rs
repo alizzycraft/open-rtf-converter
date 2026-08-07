@@ -903,8 +903,12 @@ impl LayoutEngine {
             Vec<PlannedAbsoluteFrameExclusion>,
         > = HashMap::new();
         let mut absolute_frame_segment_scanned = false;
+        let mut consumed_absolute_frame_blocks = HashSet::new();
 
         for (block_idx, block) in document.blocks.iter().enumerate() {
+            if consumed_absolute_frame_blocks.contains(&block_idx) {
+                continue;
+            }
             if body_clipped_past_page_end {
                 if matches!(
                     block,
@@ -1212,7 +1216,11 @@ impl LayoutEngine {
                     );
                 }
                 Block::Paragraph(paragraph) => {
-                    if is_complete_absolute_drop_cap_frame(paragraph) {
+                    let framed_paragraphs =
+                        absolute_paragraph_frame_group(&document.blocks, block_idx);
+                    if is_complete_absolute_paragraph_frame(paragraph)
+                        && !framed_paragraphs.is_empty()
+                    {
                         observed_absolute_frame_pages.insert(block_idx, pages.len() - 1);
                     }
                     let pending_absolute_frame_preview = take_pending_absolute_frame_preview(
@@ -1241,18 +1249,22 @@ impl LayoutEngine {
                         });
                     let absolute_frame_preview =
                         pending_absolute_frame_preview.or(planned_absolute_frame_preview);
-                    if layout_framed_drop_cap_paragraph(
-                        &mut pages,
-                        &mut cursor_y,
-                        paragraph,
-                        geometry.body_width(current_column),
-                        &mut geometry,
-                        &mut current_column,
-                        document,
-                        document_stats,
-                        font_provider,
-                        absolute_frame_preview,
-                    ) {
+                    if !framed_paragraphs.is_empty()
+                        && layout_framed_paragraph_group(
+                            &mut pages,
+                            &mut cursor_y,
+                            &framed_paragraphs,
+                            geometry.body_width(current_column),
+                            &mut geometry,
+                            &mut current_column,
+                            document,
+                            document_stats,
+                            font_provider,
+                            absolute_frame_preview,
+                        )
+                    {
+                        consumed_absolute_frame_blocks
+                            .extend((block_idx + 1)..(block_idx + framed_paragraphs.len()));
                         last_paragraph_anchor = Some((pages.len(), current_column, cursor_y));
                         continue;
                     }
@@ -7976,10 +7988,10 @@ fn layout_paragraph(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn layout_framed_drop_cap_paragraph(
+fn layout_framed_paragraph_group(
     pages: &mut Vec<LayoutPage>,
     cursor_y: &mut f32,
-    paragraph: &Paragraph,
+    paragraphs: &[&Paragraph],
     content_width: f32,
     geometry: &mut PageGeometry,
     current_column: &mut usize,
@@ -7988,34 +8000,28 @@ fn layout_framed_drop_cap_paragraph(
     font_provider: Option<&FontProvider>,
     absolute_frame_preview: Option<FlowExclusion>,
 ) -> bool {
-    if paragraph.style.drop_cap_lines <= 1 {
+    let Some(paragraph) = paragraphs.first().copied() else {
         return false;
-    }
+    };
     if paragraph.style.frame_width_twips.is_none() && paragraph.style.frame_height_twips.is_none() {
         return false;
     }
-    let mut passive_frame_paragraph = paragraph.clone();
-    passive_frame_paragraph.style.drop_cap_lines = 0;
-    passive_frame_paragraph.style.frame_width_twips = None;
-    passive_frame_paragraph.style.frame_height_twips = None;
-    passive_frame_paragraph.style.frame_text_distance_twips = 0;
-    passive_frame_paragraph.style.frame_horizontal_anchor = StaticShapeHorizontalAnchor::Column;
-    passive_frame_paragraph.style.frame_horizontal_alignment = None;
-    passive_frame_paragraph.style.frame_horizontal_offset_twips = 0;
-    passive_frame_paragraph.style.frame_vertical_anchor = StaticShapeVerticalAnchor::Paragraph;
-    passive_frame_paragraph.style.frame_vertical_offset_twips = 0;
-    passive_frame_paragraph.style.space_before_twips = 0;
-    passive_frame_paragraph.style.space_after_twips = 0;
-    let markers = current_marker_context(pages, document_stats);
-    let natural_lines = wrap_paragraph_with_font_provider(
-        &passive_frame_paragraph,
-        content_width,
-        &markers,
-        document,
-        font_provider,
-    );
-    let natural_width = natural_lines
+    let passive_frame_paragraphs = paragraphs
         .iter()
+        .map(|paragraph| passive_frame_content_paragraph(paragraph))
+        .collect::<Vec<_>>();
+    let markers = current_marker_context(pages, document_stats);
+    let natural_width = passive_frame_paragraphs
+        .iter()
+        .flat_map(|paragraph| {
+            wrap_paragraph_with_font_provider(
+                paragraph,
+                content_width,
+                &markers,
+                document,
+                font_provider,
+            )
+        })
         .map(|line| line.width)
         .fold(0.0_f32, f32::max)
         .max(1.0);
@@ -8025,15 +8031,21 @@ fn layout_framed_drop_cap_paragraph(
         .map(|twips| twips_to_points(twips.saturating_abs()))
         .unwrap_or(natural_width)
         .clamp(1.0, content_width.max(1.0));
-    let framed_lines = wrap_paragraph_with_font_provider(
-        &passive_frame_paragraph,
-        frame_width,
-        &markers,
-        document,
-        font_provider,
-    );
+    let framed_lines = passive_frame_paragraphs
+        .iter()
+        .map(|paragraph| {
+            wrap_paragraph_with_font_provider(
+                paragraph,
+                frame_width,
+                &markers,
+                document,
+                font_provider,
+            )
+        })
+        .collect::<Vec<_>>();
     let natural_height = framed_lines
         .iter()
+        .flatten()
         .map(|line| line.height)
         .sum::<f32>()
         .max(1.0);
@@ -8081,23 +8093,25 @@ fn layout_framed_drop_cap_paragraph(
         let mut frame_cursor_y = frame_top_y;
         let mut frame_geometry = *geometry;
         let mut frame_column = *current_column;
-        layout_paragraph(
-            pages,
-            &mut frame_cursor_y,
-            &passive_frame_paragraph,
-            false,
-            false,
-            false,
-            frame_width,
-            geometry.margin_bottom,
-            &mut frame_geometry,
-            &mut frame_column,
-            document,
-            document_stats,
-            None,
-            &markers,
-            font_provider,
-        );
+        for passive_frame_paragraph in &passive_frame_paragraphs {
+            layout_paragraph(
+                pages,
+                &mut frame_cursor_y,
+                passive_frame_paragraph,
+                false,
+                false,
+                false,
+                frame_width,
+                geometry.margin_bottom,
+                &mut frame_geometry,
+                &mut frame_column,
+                document,
+                document_stats,
+                None,
+                &markers,
+                font_provider,
+            );
+        }
         if let Some(page) = pages.last_mut() {
             let frame_x_shift = frame_left - geometry.body_left(*current_column);
             for item in page.items.iter_mut().skip(frame_item_start) {
@@ -8113,6 +8127,7 @@ fn layout_framed_drop_cap_paragraph(
     if paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph {
         let stack_advance = framed_lines
             .first()
+            .and_then(|lines| lines.first())
             .map(|line| line.height)
             .unwrap_or(14.0)
             .max(1.0);
@@ -8134,7 +8149,7 @@ fn layout_framed_drop_cap_paragraph(
         y: frame_top_y - frame_height,
         width: exclusion_width,
         height: frame_height,
-        wrap_side: StaticImageWrapSide::Both,
+        wrap_side: paragraph_frame_wrap_side(paragraph),
         wrap_bottom_inset: if paragraph.style.frame_vertical_anchor
             == StaticShapeVerticalAnchor::Paragraph
         {
@@ -8174,23 +8189,25 @@ fn layout_framed_drop_cap_paragraph(
     let mut frame_cursor_y = frame_top_y;
     let mut frame_geometry = *geometry;
     let mut frame_column = *current_column;
-    layout_paragraph(
-        pages,
-        &mut frame_cursor_y,
-        &passive_frame_paragraph,
-        false,
-        false,
-        false,
-        frame_width,
-        geometry.margin_bottom,
-        &mut frame_geometry,
-        &mut frame_column,
-        document,
-        document_stats,
-        None,
-        &markers,
-        font_provider,
-    );
+    for passive_frame_paragraph in &passive_frame_paragraphs {
+        layout_paragraph(
+            pages,
+            &mut frame_cursor_y,
+            passive_frame_paragraph,
+            false,
+            false,
+            false,
+            frame_width,
+            geometry.margin_bottom,
+            &mut frame_geometry,
+            &mut frame_column,
+            document,
+            document_stats,
+            None,
+            &markers,
+            font_provider,
+        );
+    }
     if let Some(page) = pages.last_mut() {
         let frame_x_shift = frame_left - geometry.body_left(*current_column);
         for item in page.items.iter_mut().skip(frame_item_start) {
@@ -8209,15 +8226,89 @@ fn layout_framed_drop_cap_paragraph(
     true
 }
 
-fn is_complete_absolute_drop_cap_frame(paragraph: &Paragraph) -> bool {
-    paragraph.style.drop_cap_lines > 1
-        && (paragraph.style.frame_width_twips.is_some()
-            || paragraph.style.frame_height_twips.is_some())
+fn passive_frame_content_paragraph(paragraph: &Paragraph) -> Paragraph {
+    let mut passive = paragraph.clone();
+    let is_drop_cap = passive.style.drop_cap_lines > 1;
+    passive.style.drop_cap_lines = 0;
+    passive.style.frame_width_twips = None;
+    passive.style.frame_height_twips = None;
+    passive.style.frame_text_distance_twips = 0;
+    passive.style.frame_horizontal_anchor = StaticShapeHorizontalAnchor::Column;
+    passive.style.frame_horizontal_alignment = None;
+    passive.style.frame_horizontal_offset_twips = 0;
+    passive.style.frame_vertical_anchor = StaticShapeVerticalAnchor::Paragraph;
+    passive.style.frame_vertical_offset_twips = 0;
+    if is_drop_cap {
+        passive.style.space_before_twips = 0;
+        passive.style.space_after_twips = 0;
+    }
+    passive
+}
+
+fn paragraph_frame_wrap_side(paragraph: &Paragraph) -> StaticImageWrapSide {
+    if paragraph.style.drop_cap_lines > 1 {
+        StaticImageWrapSide::Both
+    } else {
+        StaticImageWrapSide::Right
+    }
+}
+
+fn is_complete_absolute_paragraph_frame(paragraph: &Paragraph) -> bool {
+    (paragraph.style.frame_width_twips.is_some() || paragraph.style.frame_height_twips.is_some())
         && !paragraph
             .style
             .frame_width_twips
             .is_some_and(|width| width < 0)
         && paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph
+}
+
+fn same_absolute_paragraph_frame(first: &Paragraph, second: &Paragraph) -> bool {
+    first.style.drop_cap_lines <= 1
+        && second.style.drop_cap_lines <= 1
+        && first.style.frame_width_twips == second.style.frame_width_twips
+        && first.style.frame_height_twips == second.style.frame_height_twips
+        && first.style.frame_text_distance_twips == second.style.frame_text_distance_twips
+        && first.style.frame_horizontal_anchor == second.style.frame_horizontal_anchor
+        && first.style.frame_horizontal_alignment == second.style.frame_horizontal_alignment
+        && first.style.frame_horizontal_offset_twips == second.style.frame_horizontal_offset_twips
+        && first.style.frame_vertical_anchor == second.style.frame_vertical_anchor
+        && first.style.frame_vertical_offset_twips == second.style.frame_vertical_offset_twips
+}
+
+fn absolute_paragraph_frame_group<'a>(
+    blocks: &'a [Block],
+    block_index: usize,
+) -> Vec<&'a Paragraph> {
+    let Some(Block::Paragraph(first)) = blocks.get(block_index) else {
+        return Vec::new();
+    };
+    let has_frame_dimensions =
+        first.style.frame_width_twips.is_some() || first.style.frame_height_twips.is_some();
+    if first.style.drop_cap_lines > 1 {
+        return has_frame_dimensions.then_some(first).into_iter().collect();
+    }
+    if !is_complete_absolute_paragraph_frame(first) {
+        return Vec::new();
+    }
+    if block_index.checked_sub(1).is_some_and(|previous_index| {
+        matches!(
+            blocks.get(previous_index),
+            Some(Block::Paragraph(previous)) if same_absolute_paragraph_frame(previous, first)
+        )
+    }) {
+        return Vec::new();
+    }
+
+    blocks
+        .iter()
+        .skip(block_index)
+        .map_while(|block| match block {
+            Block::Paragraph(paragraph) if same_absolute_paragraph_frame(first, paragraph) => {
+                Some(paragraph)
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn take_pending_absolute_frame_preview(
@@ -8300,9 +8391,13 @@ fn preview_future_absolute_frame_exclusions(
         ) {
             break;
         }
-        let Block::Paragraph(paragraph) = block else {
+        let Block::Paragraph(_) = block else {
             continue;
         };
+        let frame_group = absolute_paragraph_frame_group(blocks, future_index);
+        if frame_group.is_empty() {
+            continue;
+        }
         let Some(&target_page_index) = target_pages.get(&future_index) else {
             continue;
         };
@@ -8312,7 +8407,7 @@ fn preview_future_absolute_frame_exclusions(
         let Some(exclusion) = resolve_absolute_frame_exclusion(
             pages,
             cursor_y,
-            paragraph,
+            &frame_group,
             content_width,
             geometry,
             current_column,
@@ -8350,7 +8445,7 @@ fn preview_future_absolute_frame_exclusions(
 fn resolve_absolute_frame_exclusion(
     pages: &[LayoutPage],
     cursor_y: f32,
-    paragraph: &Paragraph,
+    paragraphs: &[&Paragraph],
     content_width: f32,
     geometry: PageGeometry,
     current_column: usize,
@@ -8358,40 +8453,27 @@ fn resolve_absolute_frame_exclusion(
     document_stats: DocumentStats,
     font_provider: Option<&FontProvider>,
 ) -> Option<FlowExclusion> {
-    if paragraph.style.drop_cap_lines <= 1
-        || (paragraph.style.frame_width_twips.is_none()
-            && paragraph.style.frame_height_twips.is_none())
-        || paragraph.style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph
-        || paragraph
-            .style
-            .frame_width_twips
-            .is_some_and(|width| width < 0)
-    {
+    let paragraph = paragraphs.first().copied()?;
+    if !is_complete_absolute_paragraph_frame(paragraph) {
         return None;
     }
 
-    let mut passive_frame_paragraph = paragraph.clone();
-    passive_frame_paragraph.style.drop_cap_lines = 0;
-    passive_frame_paragraph.style.frame_width_twips = None;
-    passive_frame_paragraph.style.frame_height_twips = None;
-    passive_frame_paragraph.style.frame_text_distance_twips = 0;
-    passive_frame_paragraph.style.frame_horizontal_anchor = StaticShapeHorizontalAnchor::Column;
-    passive_frame_paragraph.style.frame_horizontal_alignment = None;
-    passive_frame_paragraph.style.frame_horizontal_offset_twips = 0;
-    passive_frame_paragraph.style.frame_vertical_anchor = StaticShapeVerticalAnchor::Paragraph;
-    passive_frame_paragraph.style.frame_vertical_offset_twips = 0;
-    passive_frame_paragraph.style.space_before_twips = 0;
-    passive_frame_paragraph.style.space_after_twips = 0;
-    let markers = current_marker_context(pages, document_stats);
-    let natural_lines = wrap_paragraph_with_font_provider(
-        &passive_frame_paragraph,
-        content_width,
-        &markers,
-        document,
-        font_provider,
-    );
-    let natural_width = natural_lines
+    let passive_frame_paragraphs = paragraphs
         .iter()
+        .map(|paragraph| passive_frame_content_paragraph(paragraph))
+        .collect::<Vec<_>>();
+    let markers = current_marker_context(pages, document_stats);
+    let natural_width = passive_frame_paragraphs
+        .iter()
+        .flat_map(|paragraph| {
+            wrap_paragraph_with_font_provider(
+                paragraph,
+                content_width,
+                &markers,
+                document,
+                font_provider,
+            )
+        })
         .map(|line| line.width)
         .fold(0.0_f32, f32::max)
         .max(1.0);
@@ -8401,15 +8483,21 @@ fn resolve_absolute_frame_exclusion(
         .map(|twips| twips_to_points(twips.saturating_abs()))
         .unwrap_or(natural_width)
         .clamp(1.0, content_width.max(1.0));
-    let framed_lines = wrap_paragraph_with_font_provider(
-        &passive_frame_paragraph,
-        frame_width,
-        &markers,
-        document,
-        font_provider,
-    );
+    let framed_lines = passive_frame_paragraphs
+        .iter()
+        .map(|paragraph| {
+            wrap_paragraph_with_font_provider(
+                paragraph,
+                frame_width,
+                &markers,
+                document,
+                font_provider,
+            )
+        })
+        .collect::<Vec<_>>();
     let natural_height = framed_lines
         .iter()
+        .flatten()
         .map(|line| line.height)
         .sum::<f32>()
         .max(1.0);
@@ -8444,6 +8532,7 @@ fn resolve_absolute_frame_exclusion(
         requested_frame_top,
         framed_lines
             .first()
+            .and_then(|lines| lines.first())
             .map(|line| line.height)
             .unwrap_or(14.0)
             .max(1.0),
@@ -8453,7 +8542,7 @@ fn resolve_absolute_frame_exclusion(
         y: frame_top_y - frame_height,
         width: exclusion_width,
         height: frame_height,
-        wrap_side: StaticImageWrapSide::Both,
+        wrap_side: paragraph_frame_wrap_side(paragraph),
         wrap_bottom_inset: 1.0,
         kind: FlowExclusionKind::ParagraphFrame,
     })
@@ -23775,6 +23864,48 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2, 2, 2, 2, 2]
         );
+    }
+
+    #[test]
+    fn ordinary_absolute_paragraph_frames_group_and_reflow_body_text() {
+        let parsed = crate::rtf::parse_rtf(include_str!("../fixtures/paragraph-frame-passive.rtf"))
+            .expect("ordinary paragraph-frame fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 3);
+
+        let containing = |page_index: usize, text: &str| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.contains(text) => Some(fragment),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing page {} text {text:?}", page_index + 1))
+        };
+
+        assert!((containing(0, "Framed ").x - 36.0).abs() < 0.01);
+        assert!((containing(0, "After ").x - 108.0).abs() < 0.01);
+        assert!((containing(1, "Group ").x - 36.0).abs() < 0.01);
+        assert!(containing(1, "first ").baseline_y > containing(1, "second ").baseline_y);
+        assert!((containing(1, "After ").x - 126.0).abs() < 0.01);
+        assert!((containing(2, "Derived ").x - 72.0).abs() < 0.01);
+        assert!((containing(2, "After ").x - 144.0).abs() < 0.01);
+
+        let exclusions = layout
+            .pages
+            .iter()
+            .map(|page| &page.flow_exclusions)
+            .collect::<Vec<_>>();
+        assert!(exclusions.iter().all(|page| page.len() == 1));
+        assert!(exclusions.iter().all(|page| {
+            page[0].kind == FlowExclusionKind::ParagraphFrame
+                && page[0].wrap_side == StaticImageWrapSide::Right
+        }));
+        assert!((exclusions[0][0].height - 72.0).abs() < 0.01);
+        assert!((exclusions[1][0].height - 90.0).abs() < 0.01);
+        assert!((exclusions[2][0].height - 55.195).abs() < 0.01);
     }
 
     #[test]

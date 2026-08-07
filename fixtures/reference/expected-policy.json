@@ -5101,6 +5101,56 @@
       ]
     },
     {
+      "id": "paragraph-frame-passive-layout",
+      "input": "fixtures/paragraph-frame-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-frame-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "Before single frame alpha beta gamma",
+        "Framed one alpha beta gamma",
+        "After single frame alpha beta gamma",
+        "Before grouped frame alpha beta gamma",
+        "Group first alpha beta gamma",
+        "Group second delta epsilon zeta",
+        "After grouped frame alpha beta gamma",
+        "Before derived frame alpha beta gamma",
+        "Derived frame alpha beta gamma",
+        "After derived frame alpha beta gamma"
+      ],
+      "intentional_security_differences": [
+        "Ordinary Word paragraph frames are normalized into bounded passive text and flow exclusions; raw editable frame controls never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame horizontal anchor \\phpg interpreted as bounded passive origin",
+        "paragraph frame horizontal anchor \\phmrg interpreted as bounded passive origin",
+        "paragraph frame vertical anchor \\pvpg interpreted as bounded passive origin"
+      ],
+      "forbidden_pdf_markers": [
+        "absw",
+        "absh",
+        "phpg",
+        "phmrg",
+        "pvpg",
+        "posx",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused three-page Word 16.0 probe proves that ordinary absw/absh paragraphs form absolute passive frames without requiring dropcapli/dropcapt. Word wraps frame text at the authored width, derives an omitted height from all framed lines, groups consecutive paragraphs with identical frame properties into one frame, and reflows both preceding and following body paragraphs. Unlike drop-cap frames, an ordinary frame reserves the complete horizontal interval from the body origin through its right edge. Current and Word retain identical visible text, word order, and line grouping across all three pages. Text/frame x origins differ by at most 0.05 points, endpoints by at most 3.50 points under bundled Arial-compatible metrics, and y boxes retain the established 0.73-0.95-point residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

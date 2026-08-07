@@ -1015,8 +1015,8 @@ pub struct ParagraphStyle {
     pub hyphenation_zone_twips: i32,
     pub drop_cap_lines: i32,
     /// Bounded signed paragraph-frame width retained for complete Word
-    /// drop-cap frames. A negative width selects Word's in-flow frame
-    /// recovery; ordinary paragraphs leave this unset.
+    /// paragraph frames. A negative width selects Word's in-flow drop-cap
+    /// frame recovery.
     pub frame_width_twips: Option<i32>,
     /// Bounded signed paragraph-frame height retained for complete Word
     /// drop-cap frames. Layout uses its magnitude while preserving the sign
@@ -1026,7 +1026,7 @@ pub struct ParagraphStyle {
     /// body text. This enlarges only passive flow exclusion geometry.
     pub frame_text_distance_twips: i32,
     /// Coordinate system used for bounded horizontal paragraph-frame
-    /// placement. Complete Word drop-cap frames default to the current column.
+    /// placement. Complete Word frames default to the current column.
     pub frame_horizontal_anchor: StaticShapeHorizontalAnchor,
     /// Optional relative alignment inside the selected horizontal anchor.
     /// `None` uses `frame_horizontal_offset_twips` from the anchor origin.
