@@ -23566,8 +23566,12 @@ fn office_math_visible_nary_reference_uses_word_source_advances_and_wrap_lead_in
         "Cambria Math source advances should bound the product group: {after:?}"
     );
     assert!(
-        (product_base.1 - after.1).abs() < 0.01,
-        "linearized n-ary groups should retain ordinary math baselines"
+        ((product_base.1 - after.1) - 0.48).abs() < 0.02,
+        "linearized n-ary glyphs should use Word's raised Cambria Math baseline"
+    );
+    assert!(
+        ((between.1 - after.1) - 14.04).abs() < 0.03,
+        "visible n-ary lines should use Word's Cambria Math line pitch"
     );
 }
 

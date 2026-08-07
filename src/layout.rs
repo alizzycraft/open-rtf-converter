@@ -45,6 +45,7 @@ const PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS: f32 = 0.84;
 const PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS: f32 = 3.42;
 const PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER: f32 = 1.47;
 const WORD_ARIAL_BASELINE_INSET_EM: f32 = 19.0 / 240.0;
+const WORD_CAMBRIA_MATH_NARY_BASELINE_RISE_EM: f32 = 0.04;
 const MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS: usize = 4;
 const WORD_PARAGRAPH_FRAME_PAGE_EDGE_INSET_POINTS: f32 = 18.0;
 
@@ -13383,6 +13384,10 @@ fn source_word_compatible_line_height_points(
     let units = if font_uses_source_family(font, font_provider, &["calibri", "carlito", "aptos"]) {
         // Calibri/Carlito: 1536 - -512 + 452. Aptos: 1923 - -577.
         2_500.0
+    } else if font_uses_source_family(font, font_provider, &["cambria math"]) {
+        // Word's registered inline Office Math references use a 14.04-point
+        // line box at 12 points: 2396 / 2048 em after PDF-unit rounding.
+        2_396.0
     } else if font_uses_source_family(font, font_provider, &["cambria"]) {
         // Cambria: 1946 - -455.
         2_401.0
@@ -13864,7 +13869,9 @@ fn push_line_with_rotation(
             x,
             baseline_y,
             cursor_advance + border_inset,
-            cursor_baseline_delta + style.baseline_shift_points(),
+            cursor_baseline_delta
+                + style.baseline_shift_points()
+                + word_compatible_source_run_baseline_delta_points(&style, document),
             rotation,
         );
         let color = style_color(document, &style);
@@ -14006,19 +14013,35 @@ fn push_line_with_rotation(
 }
 
 fn word_compatible_source_line_baseline_delta_points(line: &Line, document: &Document) -> f32 {
-    let Some(run) = line.runs.iter().find(|run| {
-        !run.text.trim().is_empty()
-            && !contains_inline_marker(&run.text)
-            && inline_image_marker_index(&run.text).is_none()
-    }) else {
-        return 0.0;
-    };
-    let Some(font) = font_for_style(document, &run.style) else {
-        return 0.0;
-    };
-    let name = font.name.trim().to_ascii_lowercase();
-    if matches!(name.as_str(), "arial" | "liberation sans") {
-        -(run.style.font_size_points() * WORD_ARIAL_BASELINE_INSET_EM)
+    let arial_size = line
+        .runs
+        .iter()
+        .filter(|run| {
+            !run.text.trim().is_empty()
+                && !contains_inline_marker(&run.text)
+                && inline_image_marker_index(&run.text).is_none()
+        })
+        .filter_map(|run| {
+            let name = font_for_style(document, &run.style)?
+                .name
+                .trim()
+                .to_ascii_lowercase();
+            matches!(name.as_str(), "arial" | "liberation sans")
+                .then(|| run.style.font_size_points())
+        })
+        .reduce(f32::max);
+    arial_size.map_or(0.0, |size| -(size * WORD_ARIAL_BASELINE_INSET_EM))
+}
+
+fn word_compatible_source_run_baseline_delta_points(
+    style: &CharacterStyle,
+    document: &Document,
+) -> f32 {
+    let is_cambria_math_nary = style.passive_math_nary_id.is_some()
+        && font_for_style(document, style)
+            .is_some_and(|font| font.name.trim().eq_ignore_ascii_case("cambria math"));
+    if is_cambria_math_nary {
+        style.font_size_points() * WORD_CAMBRIA_MATH_NARY_BASELINE_RISE_EM
     } else {
         0.0
     }
@@ -28237,6 +28260,37 @@ mod tests {
             "following x={}",
             following.x
         );
+    }
+
+    #[test]
+    fn visible_nary_lines_use_word_cambria_math_line_boxes() {
+        let parsed = parse_rtf(include_str!(
+            "../fixtures/office-math-nary-visible-passive.rtf"
+        ))
+        .unwrap();
+        let paragraph = parsed
+            .document
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .expect("n-ary paragraph");
+        let lines = wrap_paragraph_with_font_provider(
+            paragraph,
+            234.0,
+            &test_markers("1", "1"),
+            &parsed.document,
+            Some(&FontProvider::browser_safe_defaults()),
+        );
+        assert_eq!(lines.len(), 2);
+        for line in &lines {
+            assert!((line.height - (12.0 * 2_396.0 / 2_048.0)).abs() < 0.001);
+            assert!((line.natural_height - line.height).abs() < 0.001);
+        }
+        assert!(lines[0].runs.iter().any(|run| run.text == "∑"));
+        assert!(lines[1].runs.iter().any(|run| run.text == "∏"));
     }
 
     #[test]

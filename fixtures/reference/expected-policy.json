@@ -2220,7 +2220,7 @@
     {
       "id": "office-math-nary-visible-passive-layout",
       "input": "fixtures/office-math-nary-visible-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/office-math-nary-visible-passive.pdf",
       "word_reference_pages": [],
@@ -2257,7 +2257,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word visibly linearizes both sub/sup and under/over n-ary limits at the ordinary 12-point math baseline. The converter preserves each complete expression as one atomic wrapping unit, applies the measured 1.92-point inline object lead-in only when content precedes it on the same line, and combines bounded Cambria Math source advances with Word's one-sixth-em operator gap. Current and Word retain identical two-line grouping; the first equation origin differs by 0.11 points, its following text by 0.15 points, the wrapped product starts at the exact body origin, and its following text differs by 0.03 points. Bundled Tinos still substitutes for Cambria Math glyph outlines and retains the established vertical font-metric residual."
+        "Word visibly linearizes both sub/sup and under/over n-ary limits at the ordinary 12-point math baseline. The converter preserves each complete expression as one atomic wrapping unit, applies the measured 1.92-point inline object lead-in only when content precedes it on the same line, and combines bounded Cambria Math source advances with Word's one-sixth-em operator gap. Current and Word retain identical two-line grouping; the first equation origin differs by 0.11 points, its following text by 0.15 points, the wrapped product starts within 0.02 points of the body origin, and its following text differs by 0.03 points. Mixed lines use Word's bounded 14.04-point Cambria Math box, retain the Arial source-baseline inset even when a wrapped equation begins the line, and raise linearized n-ary glyphs 0.48 points above surrounding text. Corresponding math and text baselines now differ from Word by 0.06 points; bundled Tinos retains only different Cambria Math glyph outlines."
       ]
     },
     {
