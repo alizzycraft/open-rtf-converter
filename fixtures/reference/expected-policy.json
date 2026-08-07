@@ -4866,7 +4866,43 @@
         " S"
       ],
       "known_gaps": [
-        "The registered Word baseline confirms right, decimal, center, default-width, and later-stop placement within 0.05 points. Word ignores the malformed parameterless bar-tab control and draws no bar; Word-compatible recovery now does the same while valid parameterized bar tabs remain supported. Dot-leader glyph count/spacing still differs slightly under bundled Arial metrics."
+        "The registered Word baseline confirms right, decimal, center, default-width, and later-stop placement within 0.05 points. Word ignores the malformed parameterless bar-tab control and draws no bar; Word-compatible recovery now does the same while valid parameterized bar tabs remain supported. Dot leaders now use Word's measured 0.28-em page-coordinate grid: the two registered leader starts differ by 0.02/0.05 points, their last-dot origins by at most 0.03 points, and both emit Word's exact four leader dots."
+      ]
+    },
+    {
+      "id": "tab-leader-spacing-passive-layout",
+      "input": "fixtures/tab-leader-spacing-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/tab-leader-spacing-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "A",
+        "X"
+      ],
+      "intentional_security_differences": [
+        "Tab controls are normalized into bounded passive text positions and leader glyphs; no editable tab metadata or active PDF behavior is retained."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "tqr",
+        "tldot",
+        "tx1440",
+        "tx2160",
+        "tx2880",
+        "tx3600",
+        "tx4320",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A five-width Word 16.0 probe establishes a page-coordinate dot grid with 0.28-em pitch: 12-point leaders begin at x=47.064 and emit 15/26/37/47/58 dots before right-aligned content. The converter now begins every probe at x=47.040 and emits the exact same counts. Its last-dot origins differ by 0.11/0.21/0.27/0.36/0.46 points as bundled Arial-compatible horizontal scaling accumulates across the five spans; tabbed X origins remain within 0.07 points. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
       ]
     },
     {

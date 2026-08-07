@@ -12723,10 +12723,31 @@ fn push_tab_leader(
             };
             let family = font_family_for_style(document, &style);
             let leader_width = measure_text_with_family(leader, &style, family).max(1.0);
-            let count = (width / leader_width).floor().max(1.0) as usize;
+            let (leader_x, count, style) = if run.tab_leader == TabLeader::Dots {
+                let word_dot_advance = style.font_size_points() * 0.28 * style.horizontal_scale();
+                let word_dot_advance = word_dot_advance.max(1.0);
+                let leader_x = ((cursor_x / word_dot_advance).floor() + 1.0) * word_dot_advance;
+                let count = ((cursor_x + width - leader_x) / word_dot_advance).floor() as usize;
+                if count == 0 {
+                    return;
+                }
+                let mut leader_style = style;
+                let width_scale = (word_dot_advance / leader_width).clamp(0.5, 2.0);
+                leader_style.character_scaling_percent =
+                    ((leader_style.character_scaling_percent.max(1) as f32 * width_scale)
+                        .round()
+                        .clamp(1.0, i32::MAX as f32)) as i32;
+                (leader_x, count, leader_style)
+            } else {
+                (
+                    cursor_x,
+                    (width / leader_width).floor().max(1.0) as usize,
+                    style,
+                )
+            };
             page.items.push(LayoutItem::Text(TextFragment {
                 text: leader.repeat(count.min(512)),
-                x: cursor_x,
+                x: leader_x,
                 baseline_y: baseline_y + style.baseline_shift_points(),
                 rotation: TextRotation::None,
                 color,
@@ -24200,12 +24221,70 @@ mod tests {
         let layout = LayoutEngine::layout(&document);
         let page = &layout.pages[0];
 
-        assert!(page.items.iter().any(
-            |item| matches!(item, LayoutItem::Text(fragment) if fragment.text.starts_with("..."))
-        ));
+        let leader = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.starts_with("...") => Some(fragment),
+                _ => None,
+            })
+            .expect("dot leader");
+        assert!(
+            (leader.x - 94.08).abs() < 0.01,
+            "unexpected dot leader x {}",
+            leader.x
+        );
+        assert_eq!(leader.style.character_scaling_percent, 101);
         assert!(page.items.iter().any(
             |item| matches!(item, LayoutItem::Text(fragment) if fragment.text == "Right" && (fragment.x - 144.0).abs() < 0.01)
         ));
+    }
+
+    #[test]
+    fn word_dot_tab_leaders_snap_to_bounded_page_grid() {
+        let mut document = Document::default();
+        document.page.margin_left_twips = 720;
+        document.blocks = [1440, 2160, 2880, 3600, 4320]
+            .into_iter()
+            .map(|stop| {
+                let mut style = ParagraphStyle::default();
+                style.tab_stops_twips = vec![stop];
+                style.tab_stop_leaders = vec![TabLeader::Dots];
+                style.tab_stop_alignments = vec![TabAlignment::Right];
+                Block::Paragraph(Paragraph {
+                    style,
+                    runs: vec![Run {
+                        text: "A\tX".to_string(),
+                        style: CharacterStyle {
+                            font_size_half_points: 24,
+                            ..CharacterStyle::default()
+                        },
+                    }],
+                })
+            })
+            .collect();
+
+        let layout = LayoutEngine::layout(&document);
+        let leaders = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment)
+                    if !fragment.text.is_empty() && fragment.text.chars().all(|ch| ch == '.') =>
+                {
+                    Some(fragment)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            leaders
+                .iter()
+                .map(|leader| leader.text.len())
+                .collect::<Vec<_>>(),
+            vec![15, 26, 37, 47, 58]
+        );
+        assert!(leaders.iter().all(|leader| (leader.x - 47.04).abs() < 0.01));
     }
 
     #[test]
@@ -24463,9 +24542,11 @@ mod tests {
         let prefix_width = measure_text_with_family("123", &amount.style, PdfFontFamily::Helvetica);
 
         assert!((amount.x + prefix_width - 144.0).abs() < 0.01);
-        assert!(page.items.iter().any(
-            |item| matches!(item, LayoutItem::Text(fragment) if fragment.text.starts_with("..."))
-        ));
+        assert!(page.items.iter().any(|item| matches!(
+            item,
+            LayoutItem::Text(fragment)
+                if !fragment.text.is_empty() && fragment.text.chars().all(|ch| ch == '.')
+        )));
     }
 
     #[test]
