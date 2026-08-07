@@ -38,6 +38,7 @@ const WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS: f32 = 1.92;
 const WORD_NARY_OPERATOR_GAP_EM: f32 = 1.0 / 6.0;
 const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
 const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
+const WORD_COMPACT_BOTTOM_NOTE_RESERVATION_LEAD_POINTS: f32 = 1.2;
 const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
 const MAX_VERTICAL_TABLE_TEXT_WRAP_POINTS: f32 = 720.0;
 const WORD_INLINE_IMAGE_BODY_EDGE_TOLERANCE_POINTS: f32 = 1.0;
@@ -1935,12 +1936,8 @@ fn push_default_note_separator(
         y1: *cursor_y - 3.0,
         x2: margin_left + content_width.min(144.0),
         y2: *cursor_y - 3.0,
-        width: 0.5,
-        color: PdfColor {
-            red: 0.35,
-            green: 0.35,
-            blue: 0.35,
-        },
+        width: 0.6,
+        color: PdfColor::default(),
         style: LineStyle::Solid,
     });
     *cursor_y -= 9.0;
@@ -1981,7 +1978,15 @@ fn footnote_entries_block_height(
     document_stats: DocumentStats,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
-    let mut height = 9.0;
+    let compact_word_band = entries
+        .first()
+        .is_some_and(|(idx, _)| footnote_numbering_for(document, *idx).word_compact_label);
+    let mut height = 9.0
+        + if compact_word_band {
+            WORD_COMPACT_BOTTOM_NOTE_RESERVATION_LEAD_POINTS
+        } else {
+            0.0
+        };
     let markers = marker_context("1".to_string(), "1".to_string(), document_stats);
     for (idx, footnote) in entries {
         let numbering = footnote_numbering_for(document, *idx);
@@ -26205,7 +26210,7 @@ mod tests {
             LayoutItem::Line { x1, x2, width, .. }
                 if (*x1 - 72.0).abs() < 0.01
                     && (*x2 - 216.0).abs() < 0.01
-                    && (*width - 0.5).abs() < 0.01
+                    && (*width - 0.6).abs() < 0.01
         )));
     }
 
@@ -26268,6 +26273,55 @@ mod tests {
     }
 
     #[test]
+    fn compact_word_footnotes_reserve_the_source_bottom_band_lead() {
+        let parsed = parse_rtf(include_str!(
+            "../fixtures/note-restart-numbering-passive.rtf"
+        ))
+        .unwrap();
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        let page = &layout.pages[0];
+        let separator_y = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Line { x1, x2, y1, y2, .. }
+                    if (*x1 - 36.0).abs() < 0.01
+                        && (*x2 - 180.0).abs() < 0.01
+                        && (*y1 - *y2).abs() < 0.01
+                        && *y1 < 120.0 =>
+                {
+                    Some(*y1)
+                }
+                _ => None,
+            })
+            .expect("bottom footnote separator");
+        let first_note = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.contains("First") => Some(text),
+                _ => None,
+            })
+            .expect("first compact footnote");
+        let second_note = page
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.contains("Second") => Some(text),
+                _ => None,
+            })
+            .expect("second compact footnote");
+
+        assert!(
+            (separator_y - 98.48).abs() < 0.10,
+            "separator={separator_y}"
+        );
+        assert!((first_note.baseline_y - 79.82).abs() < 0.03);
+        assert!((second_note.baseline_y - 52.20).abs() < 0.03);
+    }
+
+    #[test]
     fn lays_out_endnotes_after_body_with_separator() {
         let mut document = Document::default();
         document.blocks = vec![Block::Paragraph(Paragraph {
@@ -26303,7 +26357,7 @@ mod tests {
             LayoutItem::Line { x1, x2, width, .. }
                 if (*x1 - 72.0).abs() < 0.01
                     && (*x2 - 216.0).abs() < 0.01
-                    && (*width - 0.5).abs() < 0.01
+                    && (*width - 0.6).abs() < 0.01
         )));
     }
 

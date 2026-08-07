@@ -23708,6 +23708,46 @@ fn inline_wmf_establishes_word_baselines_without_payload_leakage() {
 }
 
 #[test]
+fn compact_word_footnote_band_reservation_matches_source_without_payload_leakage() {
+    let output = convert_rtf_to_pdf(
+        include_bytes!("../fixtures/note-restart-numbering-passive.rtf"),
+        &ConvertOptions::browser_safe_defaults(),
+    )
+    .unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let first = pdf_first_text_position_for_text(&content, "First").expect("first footnote");
+    let second = pdf_first_text_position_for_text(&content, "Second").expect("second footnote");
+
+    assert!(
+        (first.1 - 79.80).abs() < 0.03,
+        "first compact footnote should match Word's bottom band: {first:?}"
+    );
+    assert!(
+        (second.1 - 52.20).abs() < 0.03,
+        "second compact footnote should match Word's bottom band: {second:?}"
+    );
+    for forbidden in [
+        b"ftnrestart".as_slice(),
+        b"aftnrestart",
+        b"chftn",
+        b"objdata",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
     let input = rtf(&[
         "{",
