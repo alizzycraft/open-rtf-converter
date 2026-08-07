@@ -1266,7 +1266,7 @@
     {
       "id": "wmf-srccopy-cropped-jpeg-dib-passive-image",
       "input": "fixtures/wmf-srccopy-cropped-jpeg-dib-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],
@@ -6170,7 +6170,7 @@
     {
       "id": "carried-table-row-definitions-passive-layout",
       "input": "fixtures/carried-table-row-definitions-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "pending_word_export",
       "word_reference_pdf": null,
       "word_reference_pages": [],

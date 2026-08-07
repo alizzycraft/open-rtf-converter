@@ -214,14 +214,25 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         );
     }
 
-    for category in [
-        "must_match_closely",
-        "acceptable_approximation",
-        "intentional_security_difference",
-    ] {
+    for category in ["must_match_closely", "intentional_security_difference"] {
         assert!(
             MANIFEST.contains(&format!("\"category\": \"{category}\"")),
             "manifest must include category {category}"
+        );
+    }
+    for line in MANIFEST
+        .lines()
+        .filter(|line| line.contains("\"category\":"))
+    {
+        assert!(
+            [
+                "must_match_closely",
+                "acceptable_approximation",
+                "intentional_security_difference",
+            ]
+            .iter()
+            .any(|category| line.contains(&format!("\"{category}\""))),
+            "manifest contains unknown category: {line}"
         );
     }
 
