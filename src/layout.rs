@@ -13367,13 +13367,17 @@ fn source_word_compatible_line_height_points(
     size: f32,
     font_provider: Option<&FontProvider>,
 ) -> Option<f32> {
-    if !font_uses_calibri_source_metrics(font?, font_provider) {
+    let font = font?;
+    let units = if font_uses_source_family(font, font_provider, &["calibri", "carlito", "aptos"]) {
+        // Calibri/Carlito: 1536 - -512 + 452. Aptos: 1923 - -577.
+        2_500.0
+    } else if font_uses_source_family(font, font_provider, &["cambria"]) {
+        // Cambria: 1946 - -455.
+        2_401.0
+    } else {
         return None;
-    }
-
-    // Calibri and its OFL metric-compatible substitute Carlito share the
-    // bounded hhea metric (1536 - -512 + 452) / 2048 = 1.220703125 em.
-    Some(size * (2_500.0 / 2_048.0))
+    };
+    Some(size * (units / 2_048.0))
 }
 
 fn fallback_flow_run_line_height(run: &FlowRun) -> f32 {
@@ -15406,6 +15410,8 @@ pub(crate) fn source_word_compatible_advance_points(
     font_provider: Option<&FontProvider>,
 ) -> Option<f32> {
     source_calibri_advance_points(font, style, ch, size, font_provider)
+        .or_else(|| source_cambria_advance_points(font, style, ch, size, font_provider))
+        .or_else(|| source_aptos_advance_points(font, style, ch, size, font_provider))
         .or_else(|| source_dingbat_advance_points(font, ch, size))
         .or_else(|| {
             style
@@ -15423,7 +15429,7 @@ fn source_calibri_advance_points(
     size: f32,
     font_provider: Option<&FontProvider>,
 ) -> Option<f32> {
-    if !font_uses_calibri_source_metrics(font?, font_provider) {
+    if !font_uses_source_family(font?, font_provider, &["calibri", "carlito"]) {
         return None;
     }
     if !style.bold && !style.italic {
@@ -15482,13 +15488,79 @@ fn source_calibri_advance_points(
     Some(size * f32::from(units) / 2_048.0)
 }
 
-fn font_uses_calibri_source_metrics(font: &FontDef, provider: Option<&FontProvider>) -> bool {
-    let is_calibri = |name: &str| {
-        let name = name.trim().to_ascii_lowercase();
-        name == "calibri" || name == "carlito"
+fn source_cambria_advance_points(
+    font: Option<&FontDef>,
+    style: &CharacterStyle,
+    ch: char,
+    size: f32,
+    font_provider: Option<&FontProvider>,
+) -> Option<f32> {
+    if style.bold || style.italic || !font_uses_source_family(font?, font_provider, &["cambria"]) {
+        return None;
+    }
+    // Bounded regular-face hmtx values independently present in the registered
+    // Word font-family-hint reference. No proprietary font bytes are retained.
+    let units = match ch {
+        ' ' => 451,
+        '.' => 420,
+        'R' => 1272,
+        'a' => 1000,
+        'e' => 999,
+        'f' => 620,
+        'i' => 569,
+        'l' => 556,
+        'm' => 1704,
+        'n' => 1143,
+        'o' => 1087,
+        't' => 693,
+        'x' => 990,
+        'y' => 1032,
+        _ => return None,
     };
-    is_calibri(&font.name)
-        || (font.alternate_name.as_deref().is_some_and(is_calibri)
+    Some(size * units as f32 / 2_048.0)
+}
+
+fn source_aptos_advance_points(
+    font: Option<&FontDef>,
+    style: &CharacterStyle,
+    ch: char,
+    size: f32,
+    font_provider: Option<&FontProvider>,
+) -> Option<f32> {
+    if style.bold || style.italic || !font_uses_source_family(font?, font_provider, &["aptos"]) {
+        return None;
+    }
+    // Bounded regular-face hmtx values independently present in the registered
+    // Word font-family-hint reference. No proprietary font bytes are retained.
+    let units = match ch {
+        ' ' => 416,
+        '.' => 585,
+        'T' => 980,
+        'b' => 1149,
+        'd' => 1148,
+        'e' => 1079,
+        'h' => 1129,
+        'm' => 1747,
+        'o' => 1130,
+        't' => 662,
+        'x' => 906,
+        'y' => 926,
+        _ => return None,
+    };
+    Some(size * units as f32 / 2_048.0)
+}
+
+fn font_uses_source_family(
+    font: &FontDef,
+    provider: Option<&FontProvider>,
+    families: &[&str],
+) -> bool {
+    let matches_family = |name: &str| {
+        let name = name.trim().to_ascii_lowercase();
+        families.contains(&name.as_str())
+    };
+    matches_family(&font.name)
+        || (font.alternate_name.as_deref().is_some_and(matches_family)
             && !provider.is_some_and(|provider| provider.has_exact_asset_for_family(&font.name)))
 }
 
@@ -15979,7 +16051,10 @@ pub(crate) fn source_word_compatible_pair_kerning_points(
     right: char,
     font_provider: Option<&FontProvider>,
 ) -> Option<f32> {
-    if !font_uses_calibri_source_metrics(font?, font_provider) || style.bold || style.italic {
+    if !font_uses_source_family(font?, font_provider, &["calibri", "carlito"])
+        || style.bold
+        || style.italic
+    {
         return None;
     }
     // Bounded regular-face pairs independently present in the registered
@@ -27601,6 +27676,87 @@ mod tests {
                 Some(&font),
                 &style,
                 '\u{201c}',
+                12.0,
+                Some(&exact_provider),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn word_hint_substitutes_use_bounded_metrics_and_yield_to_exact_faces() {
+        let provider = FontProvider::browser_safe_defaults();
+        let style = CharacterStyle {
+            font_index: 0,
+            font_size_half_points: 24,
+            ..Default::default()
+        };
+        let source_font = |name: &str, alternate: &str, family| FontDef {
+            index: 0,
+            name: name.to_string(),
+            alternate_name: Some(alternate.to_string()),
+            charset: None,
+            code_page: None,
+            family,
+            pitch: FontPitch::Default,
+        };
+        let cambria = source_font("Mystery Serif", "Cambria", FontFamilyHint::Roman);
+        let aptos = source_font("Mystery Body", "Aptos", FontFamilyHint::Swiss);
+
+        assert!(
+            (source_word_compatible_line_height_points(Some(&cambria), 12.0, Some(&provider))
+                .expect("Cambria substitute line metric")
+                - (12.0 * 2_401.0 / 2_048.0))
+                .abs()
+                < 0.001
+        );
+        assert!(
+            (source_word_compatible_advance_points(
+                Some(&cambria),
+                &style,
+                'R',
+                12.0,
+                Some(&provider),
+            )
+            .expect("Cambria substitute advance")
+                - (12.0 * 1_272.0 / 2_048.0))
+                .abs()
+                < 0.001
+        );
+        assert!(
+            (source_word_compatible_line_height_points(Some(&aptos), 12.0, Some(&provider))
+                .expect("Aptos substitute line metric")
+                - (12.0 * 2_500.0 / 2_048.0))
+                .abs()
+                < 0.001
+        );
+        assert!(
+            (source_word_compatible_advance_points(
+                Some(&aptos),
+                &style,
+                'T',
+                12.0,
+                Some(&provider),
+            )
+            .expect("Aptos substitute advance")
+                - (12.0 * 980.0 / 2_048.0))
+                .abs()
+                < 0.001
+        );
+
+        let exact_provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Mystery Serif".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: FontProviderLimits::default(),
+        };
+        assert!(
+            source_word_compatible_advance_points(
+                Some(&cambria),
+                &style,
+                'R',
                 12.0,
                 Some(&exact_provider),
             )

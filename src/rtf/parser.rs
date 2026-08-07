@@ -1876,6 +1876,7 @@ struct Parser {
     stack: Vec<ParserState>,
     diagnostics: Vec<Diagnostic>,
     current_font: Option<FontDef>,
+    current_font_word_substitute: Option<&'static str>,
     current_font_alternate_terminated: bool,
     current_color: Color,
     current_color_seen: bool,
@@ -2094,6 +2095,7 @@ impl Parser {
             stack: Vec::new(),
             diagnostics: Vec::new(),
             current_font: None,
+            current_font_word_substitute: None,
             current_font_alternate_terminated: false,
             current_color: Color::default(),
             current_color_seen: false,
@@ -5147,6 +5149,7 @@ impl Parser {
             }
             "f" if self.state.destination == Destination::FontTable => {
                 self.flush_font(offset)?;
+                self.current_font_word_substitute = None;
                 self.current_font_alternate_terminated = false;
                 self.current_font = Some(FontDef {
                     index: control.parameter.unwrap_or(0),
@@ -5160,37 +5163,55 @@ impl Parser {
             }
             "fnil" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Nil);
+                self.current_font_word_substitute = None;
             }
             "froman" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Roman);
+                self.set_current_font_word_substitute("Cambria");
             }
-            "flomajor" | "fhimajor" | "fdbmajor" | "fbimajor"
+            "flomajor" if self.state.destination == Destination::FontTable => {
+                self.set_current_font_family(FontFamilyHint::Roman);
+                self.set_current_font_word_substitute("Times New Roman");
+            }
+            "fhimajor" | "fdbmajor" | "fbimajor"
                 if self.state.destination == Destination::FontTable =>
             {
                 self.set_current_font_family(FontFamilyHint::Roman);
+                self.current_font_word_substitute = None;
             }
             "fswiss" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Swiss);
+                self.current_font_word_substitute = None;
             }
-            "flominor" | "fhiminor" | "fdbminor" | "fbiminor"
+            "fhiminor" if self.state.destination == Destination::FontTable => {
+                self.set_current_font_family(FontFamilyHint::Swiss);
+                self.set_current_font_word_substitute("Aptos");
+            }
+            "flominor" | "fdbminor" | "fbiminor"
                 if self.state.destination == Destination::FontTable =>
             {
                 self.set_current_font_family(FontFamilyHint::Swiss);
+                self.current_font_word_substitute = None;
             }
             "fmodern" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Modern);
+                self.set_current_font_word_substitute("Calibri");
             }
             "fscript" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Script);
+                self.current_font_word_substitute = None;
             }
             "fdecor" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Decor);
+                self.current_font_word_substitute = None;
             }
             "ftech" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Tech);
+                self.current_font_word_substitute = None;
             }
             "fbidi" if self.state.destination == Destination::FontTable => {
                 self.set_current_font_family(FontFamilyHint::Bidi);
+                self.current_font_word_substitute = None;
             }
             "fcharset" if self.state.destination == Destination::FontTable => {
                 if let Some(font) = self.current_font.as_mut() {
@@ -19518,6 +19539,7 @@ impl Parser {
     }
 
     fn flush_font(&mut self, offset: usize) -> Result<(), ParseError> {
+        let word_substitute = self.current_font_word_substitute.take();
         let Some(mut font) = self.current_font.take() else {
             return Ok(());
         };
@@ -19528,6 +19550,12 @@ impl Parser {
             .take()
             .map(|name| name.trim().trim_end_matches(';').to_string())
             .filter(|name| !name.is_empty());
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            && font.alternate_name.is_none()
+            && let Some(substitute) = word_substitute
+        {
+            font.alternate_name = Some(substitute.to_string());
+        }
         if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
             && font.alternate_name.is_none()
             && (matches!(font.charset, Some(77 | 255))
@@ -19564,6 +19592,12 @@ impl Parser {
     fn set_current_font_family(&mut self, family: FontFamilyHint) {
         if let Some(font) = self.current_font.as_mut() {
             font.family = family;
+        }
+    }
+
+    fn set_current_font_word_substitute(&mut self, family: &'static str) {
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+            self.current_font_word_substitute = Some(family);
         }
     }
 
@@ -47674,6 +47708,44 @@ mod tests {
         assert_eq!(family_for("Mystery Serif"), FontFamilyHint::Roman);
         assert_eq!(family_for("Mystery Mono"), FontFamilyHint::Modern);
         assert_eq!(family_for("Symbolish"), FontFamilyHint::Tech);
+        assert_eq!(
+            output.document.fonts[0].alternate_name.as_deref(),
+            Some("Cambria")
+        );
+        assert_eq!(
+            output.document.fonts[1].alternate_name.as_deref(),
+            Some("Calibri")
+        );
+        assert_eq!(output.document.fonts[2].alternate_name, None);
+
+        let strict = parse_rtf_bytes_with_options(
+            input.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            strict
+                .document
+                .fonts
+                .iter()
+                .all(|font| font.alternate_name.is_none())
+        );
+    }
+
+    #[test]
+    fn authored_font_alternate_overrides_word_hint_substitute() {
+        let output = parse_rtf(
+            r"{\rtf1{\fonttbl{\f0\froman Mystery Serif{\*\falt Caller Serif;};}}\f0 A\par}",
+        )
+        .unwrap();
+
+        assert_eq!(
+            output.document.fonts[0].alternate_name.as_deref(),
+            Some("Caller Serif")
+        );
     }
 
     #[test]
@@ -47697,6 +47769,16 @@ mod tests {
             FontFamilyHint::Roman
         );
         assert_eq!(family_for("Mystery Bidi Body"), FontFamilyHint::Swiss);
+        assert_eq!(
+            output.document.fonts[0].alternate_name.as_deref(),
+            Some("Times New Roman")
+        );
+        assert_eq!(
+            output.document.fonts[1].alternate_name.as_deref(),
+            Some("Aptos")
+        );
+        assert_eq!(output.document.fonts[2].alternate_name, None);
+        assert_eq!(output.document.fonts[3].alternate_name, None);
     }
 
     #[test]

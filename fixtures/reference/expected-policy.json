@@ -6601,7 +6601,7 @@
     {
       "id": "font-family-hints-passive-substitution",
       "input": "fixtures/font-family-hints-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-family-hints-passive.pdf",
       "word_reference_pages": [],
@@ -6637,7 +6637,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit shows host substitution by hint category: froman Mystery Serif becomes Cambria, fmodern Mystery Mono becomes Calibri, flomajor Mystery Heading becomes Times New Roman, and fhiminor Mystery Body becomes Aptos. The bundled provider formerly let its Sans wildcard mask every family hint. Exact bundled family aliases now outrank that wildcard, producing Tinos serif for the Roman/major-heading lines and Liberation Sans for the Modern/minor-body lines; exact caller-provided names still win and a caller wildcard remains the final fallback. All four current/Word lines start within 0.02 points horizontally; bundled endpoint residuals range from 1.65 to 5.70 points and cumulative baselines from 1.07 to 2.03 points because the proprietary Word fonts are not copied or required. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; focused geometry was inspected."
+        "The focused Word 16.0 audit shows host substitution by hint category: froman Mystery Serif becomes Cambria, fmodern Mystery Mono becomes Calibri, flomajor Mystery Heading becomes Times New Roman, and fhiminor Mystery Body becomes Aptos. WordCompatiblePassive now retains those four safe normalized alternates while authored alternates and exact caller faces take precedence and StrictSpec remains uninferred. Bounded source line metrics and only the regular character advances independently present in this reference position safe Tinos/Liberation Sans output without retaining proprietary font bytes. All four line starts differ by 0.02 points, final glyph origins by at most 0.16 points, baselines by at most 0.87 points, and final safe contour edges by at most 0.63 points. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; three-times renders were visually inspected."
       ]
     },
     {
