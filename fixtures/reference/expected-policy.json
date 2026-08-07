@@ -5296,6 +5296,60 @@
       ]
     },
     {
+      "id": "paragraph-frame-vertical-precedence-passive-layout",
+      "input": "fixtures/paragraph-frame-vertical-precedence-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-frame-vertical-precedence-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 10,
+      "must_preserve_text": [
+        "Center then numeric frame",
+        "Numeric then center frame",
+        "Bottom then numeric frame",
+        "Numeric then bottom frame",
+        "Inside odd frame",
+        "Inside even frame",
+        "Outside odd frame",
+        "Outside even frame",
+        "Inline page frame",
+        "Inline margin frame"
+      ],
+      "intentional_security_differences": [
+        "Frame edge and inline controls are normalized into bounded passive geometry; raw parity, anchor, and offset metadata never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame vertical alignment \\posyin interpreted as bounded passive placement",
+        "paragraph frame vertical alignment \\posyout interpreted as bounded passive placement",
+        "paragraph frame vertical alignment \\posyil interpreted as bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "posyin",
+        "posyout",
+        "posyil",
+        "posyc",
+        "posyb",
+        "posy",
+        "pvpg",
+        "pvmrg",
+        "absw",
+        "absh",
+        "phpg",
+        "posx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused ten-page Word 16.0 probe proves last-control precedence between numeric posy and posyc/posyb. With facing pages, posyin selects the top page edge on odd pages and bottom edge on even pages while posyout reverses that mapping; page-edge placement uses a fixed 18-point inset independent of asymmetric margins, whereas margin-edge placement uses authored body bounds. Page-anchored posyil selects page top, while margin/paragraph posyil uses the current flow position. Current and Word preserve identical visible text, word order, line grouping, and all ten frame placements. Frame x origins differ by 0.02 points and y boxes retain a 0.76-1.04-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "paragraph-frame-text-direction-passive-layout",
       "input": "fixtures/paragraph-frame-text-direction-passive.rtf",
       "category": "must_match_closely",

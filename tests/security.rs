@@ -13,14 +13,15 @@ use open_rtf_converter::model::{
     DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, ENDNOTE_REFERENCE_MARKER,
     ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
     FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, ImageToneAdjustment,
-    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment, PassiveMathFractionPart,
-    PassiveMathLimitPart, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageWrapSide,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
-    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection, TableCellVerticalAlign,
-    TableRowAlignment, TextRelief, UnderlineStyle, inline_image_marker_index,
+    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment,
+    ParagraphFrameVerticalAlignment, PassiveMathFractionPart, PassiveMathLimitPart,
+    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
+    StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment,
+    TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
+    inline_image_marker_index,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -75283,15 +75284,15 @@ fn framed_drop_cap_vertical_alignments_remain_passive_metadata() {
     assert_eq!(paragraphs[0].style.frame_vertical_alignment, None);
     assert_eq!(
         paragraphs[2].style.frame_vertical_alignment,
-        Some(TableCellVerticalAlign::Top)
+        Some(ParagraphFrameVerticalAlignment::Top)
     );
     assert_eq!(
         paragraphs[4].style.frame_vertical_alignment,
-        Some(TableCellVerticalAlign::Center)
+        Some(ParagraphFrameVerticalAlignment::Center)
     );
     assert_eq!(
         paragraphs[6].style.frame_vertical_alignment,
-        Some(TableCellVerticalAlign::Bottom)
+        Some(ParagraphFrameVerticalAlignment::Bottom)
     );
 
     let dir = tempdir().unwrap();
@@ -75346,13 +75347,13 @@ fn ordinary_frame_vertical_alignments_remain_bounded_passive_geometry() {
     assert_eq!(
         frames.iter().map(|frame| frame.1).collect::<Vec<_>>(),
         vec![
-            Some(TableCellVerticalAlign::Top),
-            Some(TableCellVerticalAlign::Center),
-            Some(TableCellVerticalAlign::Bottom),
-            Some(TableCellVerticalAlign::Top),
-            Some(TableCellVerticalAlign::Center),
-            Some(TableCellVerticalAlign::Bottom),
-            Some(TableCellVerticalAlign::Center),
+            Some(ParagraphFrameVerticalAlignment::Top),
+            Some(ParagraphFrameVerticalAlignment::Center),
+            Some(ParagraphFrameVerticalAlignment::Bottom),
+            Some(ParagraphFrameVerticalAlignment::Top),
+            Some(ParagraphFrameVerticalAlignment::Center),
+            Some(ParagraphFrameVerticalAlignment::Bottom),
+            Some(ParagraphFrameVerticalAlignment::Center),
         ]
     );
 
@@ -75384,6 +75385,86 @@ fn ordinary_frame_vertical_alignments_remain_bounded_passive_geometry() {
         b"pvpg",
         b"pvmrg",
         b"pvpara",
+        b"absw",
+        b"absh",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
+fn ordinary_frame_vertical_precedence_and_edges_remain_bounded_passive() {
+    let input = include_bytes!("../fixtures/paragraph-frame-vertical-precedence-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let alignments = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) if paragraph.style.frame_width_twips.is_some() => {
+                Some(paragraph.style.frame_vertical_alignment)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        alignments,
+        vec![
+            None,
+            Some(ParagraphFrameVerticalAlignment::Center),
+            None,
+            Some(ParagraphFrameVerticalAlignment::Bottom),
+            Some(ParagraphFrameVerticalAlignment::Inside),
+            Some(ParagraphFrameVerticalAlignment::Inside),
+            Some(ParagraphFrameVerticalAlignment::Outside),
+            Some(ParagraphFrameVerticalAlignment::Outside),
+            Some(ParagraphFrameVerticalAlignment::Inline),
+            Some(ParagraphFrameVerticalAlignment::Inline),
+        ]
+    );
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert_eq!(layout.pages.len(), 10);
+    let frame_baseline = |page_index: usize| {
+        layout.pages[page_index]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("frame.") => {
+                    Some(fragment.baseline_y)
+                }
+                _ => None,
+            })
+            .expect("frame baseline")
+    };
+    assert!(frame_baseline(4) > frame_baseline(5));
+    assert!((frame_baseline(5) - frame_baseline(6)).abs() < 0.01);
+    assert!(frame_baseline(7) > frame_baseline(6));
+    assert!(frame_baseline(8) > frame_baseline(9));
+
+    let output = convert_rtf_to_pdf(input, &ConvertOptions::default()).unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"posyin".as_slice(),
+        b"posyout",
+        b"posyil",
+        b"posyt",
+        b"posyc",
+        b"posyb",
+        b"posy1440",
+        b"pvpg",
+        b"pvmrg",
         b"absw",
         b"absh",
         b"/JavaScript",

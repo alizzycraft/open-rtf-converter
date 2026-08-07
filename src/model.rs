@@ -989,6 +989,16 @@ pub enum Alignment {
     Distributed,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ParagraphFrameVerticalAlignment {
+    Top,
+    Center,
+    Bottom,
+    Inside,
+    Outside,
+    Inline,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphStyle {
     pub alignment: Alignment,
@@ -1039,7 +1049,7 @@ pub struct ParagraphStyle {
     pub frame_vertical_anchor: StaticShapeVerticalAnchor,
     /// Optional top/center/bottom alignment inside a page or margin anchor.
     /// Paragraph-relative frames retain Word's inert alignment behavior.
-    pub frame_vertical_alignment: Option<TableCellVerticalAlign>,
+    pub frame_vertical_alignment: Option<ParagraphFrameVerticalAlignment>,
     /// Downward distance from the selected vertical anchor origin.
     pub frame_vertical_offset_twips: i32,
     /// Bounded passive text direction inside an ordinary paragraph frame.

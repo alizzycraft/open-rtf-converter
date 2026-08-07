@@ -12,14 +12,14 @@ use crate::model::{
     ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
     NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
     PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
-    PageSettings, PageVerticalAlignment, Paragraph, ParagraphStyle, PassiveMathFractionPart,
-    PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
-    StaticImage, StaticImageAlphaMask, StaticImagePlacement, StaticImageTextHorizontalAlign,
-    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageVectorPathSegment, StaticImageVectorRaster, StaticImageVectorTextBounds,
-    StaticImageWrapSide, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapePoint,
-    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    PageSettings, PageVerticalAlignment, Paragraph, ParagraphFrameVerticalAlignment,
+    ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
+    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
     TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
@@ -5734,7 +5734,7 @@ impl Parser {
                     offset,
                 ),
             "posyb" => self.set_paragraph_frame_vertical_alignment(
-                TableCellVerticalAlign::Bottom,
+                ParagraphFrameVerticalAlignment::Bottom,
                 control.name.as_str(),
                 offset,
             ),
@@ -5750,7 +5750,7 @@ impl Parser {
                     offset,
                 ),
             "posyc" => self.set_paragraph_frame_vertical_alignment(
-                TableCellVerticalAlign::Center,
+                ParagraphFrameVerticalAlignment::Center,
                 control.name.as_str(),
                 offset,
             ),
@@ -5764,15 +5764,35 @@ impl Parser {
                     offset,
                 ),
             "posyt" => self.set_paragraph_frame_vertical_alignment(
-                TableCellVerticalAlign::Top,
+                ParagraphFrameVerticalAlignment::Top,
                 control.name.as_str(),
                 offset,
             ),
-            "posyil" | "tposyil" | "posyin" | "tposyin" | "posyout" | "tposyout" => self
+            "tposyil" | "tposyin" | "tposyout" => self
                 .handle_current_table_row_passive_vertical_flow_control(
                     control.name.as_str(),
                     offset,
                 ),
+            "posyil" | "posyin" | "posyout" if self.current_table_row.is_some() => self
+                .handle_current_table_row_passive_vertical_flow_control(
+                    control.name.as_str(),
+                    offset,
+                ),
+            "posyil" => self.set_paragraph_frame_vertical_alignment(
+                ParagraphFrameVerticalAlignment::Inline,
+                control.name.as_str(),
+                offset,
+            ),
+            "posyin" => self.set_paragraph_frame_vertical_alignment(
+                ParagraphFrameVerticalAlignment::Inside,
+                control.name.as_str(),
+                offset,
+            ),
+            "posyout" => self.set_paragraph_frame_vertical_alignment(
+                ParagraphFrameVerticalAlignment::Outside,
+                control.name.as_str(),
+                offset,
+            ),
             "tdfrmtxtLeft" => self.set_current_table_row_wrap_margin(
                 TableRowWrapMarginSide::Left,
                 control.parameter,
@@ -8157,7 +8177,7 @@ impl Parser {
 
     fn set_paragraph_frame_vertical_alignment(
         &mut self,
-        alignment: TableCellVerticalAlign,
+        alignment: ParagraphFrameVerticalAlignment,
         control_name: &str,
         offset: usize,
     ) {
@@ -58510,15 +58530,15 @@ After\par}"#;
         assert_eq!(paragraphs[0].style.frame_vertical_alignment, None);
         assert_eq!(
             paragraphs[2].style.frame_vertical_alignment,
-            Some(TableCellVerticalAlign::Top)
+            Some(ParagraphFrameVerticalAlignment::Top)
         );
         assert_eq!(
             paragraphs[4].style.frame_vertical_alignment,
-            Some(TableCellVerticalAlign::Center)
+            Some(ParagraphFrameVerticalAlignment::Center)
         );
         assert_eq!(
             paragraphs[6].style.frame_vertical_alignment,
-            Some(TableCellVerticalAlign::Bottom)
+            Some(ParagraphFrameVerticalAlignment::Bottom)
         );
         for index in [1, 3, 5, 7] {
             assert_eq!(paragraphs[index].style, ParagraphStyle::default());
@@ -58551,31 +58571,31 @@ After\par}"#;
             vec![
                 (
                     StaticShapeVerticalAnchor::Page,
-                    Some(TableCellVerticalAlign::Top)
+                    Some(ParagraphFrameVerticalAlignment::Top)
                 ),
                 (
                     StaticShapeVerticalAnchor::Page,
-                    Some(TableCellVerticalAlign::Center)
+                    Some(ParagraphFrameVerticalAlignment::Center)
                 ),
                 (
                     StaticShapeVerticalAnchor::Page,
-                    Some(TableCellVerticalAlign::Bottom)
+                    Some(ParagraphFrameVerticalAlignment::Bottom)
                 ),
                 (
                     StaticShapeVerticalAnchor::Margin,
-                    Some(TableCellVerticalAlign::Top)
+                    Some(ParagraphFrameVerticalAlignment::Top)
                 ),
                 (
                     StaticShapeVerticalAnchor::Margin,
-                    Some(TableCellVerticalAlign::Center)
+                    Some(ParagraphFrameVerticalAlignment::Center)
                 ),
                 (
                     StaticShapeVerticalAnchor::Margin,
-                    Some(TableCellVerticalAlign::Bottom)
+                    Some(ParagraphFrameVerticalAlignment::Bottom)
                 ),
                 (
                     StaticShapeVerticalAnchor::Paragraph,
-                    Some(TableCellVerticalAlign::Center)
+                    Some(ParagraphFrameVerticalAlignment::Center)
                 ),
             ]
         );
@@ -58586,6 +58606,90 @@ After\par}"#;
                     .contains(&format!("paragraph frame vertical alignment \\{control}"))
             }));
         }
+    }
+
+    #[test]
+    fn ordinary_frame_vertical_precedence_and_edge_controls_are_normalized() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/paragraph-frame-vertical-precedence-passive.rtf"
+        ))
+        .unwrap();
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) if paragraph.style.frame_width_twips.is_some() => {
+                    Some((
+                        paragraph.style.frame_vertical_anchor,
+                        paragraph.style.frame_vertical_alignment,
+                        paragraph.style.frame_vertical_offset_twips,
+                    ))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            frames,
+            vec![
+                (StaticShapeVerticalAnchor::Page, None, 1440),
+                (
+                    StaticShapeVerticalAnchor::Page,
+                    Some(ParagraphFrameVerticalAlignment::Center),
+                    1440
+                ),
+                (StaticShapeVerticalAnchor::Margin, None, 720),
+                (
+                    StaticShapeVerticalAnchor::Margin,
+                    Some(ParagraphFrameVerticalAlignment::Bottom),
+                    720
+                ),
+                (
+                    StaticShapeVerticalAnchor::Page,
+                    Some(ParagraphFrameVerticalAlignment::Inside),
+                    0
+                ),
+                (
+                    StaticShapeVerticalAnchor::Page,
+                    Some(ParagraphFrameVerticalAlignment::Inside),
+                    0
+                ),
+                (
+                    StaticShapeVerticalAnchor::Page,
+                    Some(ParagraphFrameVerticalAlignment::Outside),
+                    0
+                ),
+                (
+                    StaticShapeVerticalAnchor::Page,
+                    Some(ParagraphFrameVerticalAlignment::Outside),
+                    0
+                ),
+                (
+                    StaticShapeVerticalAnchor::Page,
+                    Some(ParagraphFrameVerticalAlignment::Inline),
+                    0
+                ),
+                (
+                    StaticShapeVerticalAnchor::Margin,
+                    Some(ParagraphFrameVerticalAlignment::Inline),
+                    0
+                ),
+            ]
+        );
+        for control in ["posyin", "posyout", "posyil"] {
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains(&format!("paragraph frame vertical alignment \\{control}"))
+            }));
+        }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]

@@ -13,16 +13,16 @@ use crate::model::{
     NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER,
     PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER,
     PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
-    ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
-    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
-    TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
-    inline_image_marker_index,
+    ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart,
+    Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TableRowWrapMargins, UnderlineStyle, inline_image_marker_index,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -42,6 +42,7 @@ const PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS: f32 = 0.84;
 const PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS: f32 = 3.42;
 const PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER: f32 = 1.47;
 const MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS: usize = 4;
+const WORD_PARAGRAPH_FRAME_PAGE_EDGE_INSET_POINTS: f32 = 18.0;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -8191,6 +8192,7 @@ fn layout_framed_paragraph_group(
     let frame_width = prepared_frame.width;
     let frame_height = prepared_frame.height;
     let framed_lines = prepared_frame.lines;
+    let frame_uses_flow_position = paragraph_frame_uses_flow_position(&paragraph.style);
     if negative_width_frame && paragraph.style.frame_height_twips.is_none() {
         return true;
     }
@@ -8201,8 +8203,7 @@ fn layout_framed_paragraph_group(
             paragraph_frame_top(&paragraph.style, frame_height, cursor_y, *geometry)
         }
     };
-    if (negative_width_frame
-        || paragraph.style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph)
+    if (negative_width_frame || frame_uses_flow_position)
         && requested_frame_top(*cursor_y, geometry) - frame_height < geometry.margin_bottom
     {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
@@ -8260,7 +8261,7 @@ fn layout_framed_paragraph_group(
         frame_vertical_text_distance,
         geometry.height,
     );
-    if paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph {
+    if !frame_uses_flow_position {
         let stack_advance = framed_lines
             .first()
             .and_then(|lines| lines.first())
@@ -8294,18 +8295,12 @@ fn layout_framed_paragraph_group(
         width: exclusion_width,
         height: exclusion_height,
         wrap_side: paragraph_frame_wrap_side(paragraph),
-        wrap_bottom_inset: if paragraph.style.frame_vertical_anchor
-            == StaticShapeVerticalAnchor::Paragraph
-        {
-            0.0
-        } else {
-            1.0
-        },
+        wrap_bottom_inset: if frame_uses_flow_position { 0.0 } else { 1.0 },
         kind: FlowExclusionKind::ParagraphFrame,
     };
     let frame_page_index = pages.len().saturating_sub(1);
     let mut removed_frame_exclusions = Vec::new();
-    if paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph {
+    if !frame_uses_flow_position {
         if let Some(page) = pages.get_mut(frame_page_index) {
             let mut index = 0;
             while index < page.flow_exclusions.len() {
@@ -8496,7 +8491,13 @@ fn is_complete_absolute_paragraph_frame(paragraph: &Paragraph) -> bool {
             .style
             .frame_width_twips
             .is_some_and(|width| width < 0)
-        && paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph
+        && !paragraph_frame_uses_flow_position(&paragraph.style)
+}
+
+fn paragraph_frame_uses_flow_position(style: &ParagraphStyle) -> bool {
+    style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph
+        || (style.frame_vertical_anchor != StaticShapeVerticalAnchor::Page
+            && style.frame_vertical_alignment == Some(ParagraphFrameVerticalAlignment::Inline))
 }
 
 fn same_absolute_paragraph_frame(first: &Paragraph, second: &Paragraph) -> bool {
@@ -8828,6 +8829,11 @@ fn paragraph_frame_top(
     if style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph {
         return paragraph_top - twips_to_points(style.frame_vertical_offset_twips);
     }
+    if alignment == ParagraphFrameVerticalAlignment::Inline
+        && style.frame_vertical_anchor != StaticShapeVerticalAnchor::Page
+    {
+        return paragraph_top;
+    }
     let (anchor_bottom, anchor_top) = match style.frame_vertical_anchor {
         StaticShapeVerticalAnchor::Paragraph => unreachable!(),
         StaticShapeVerticalAnchor::Margin => (
@@ -8836,12 +8842,42 @@ fn paragraph_frame_top(
         ),
         StaticShapeVerticalAnchor::Page => (0.0, geometry.height),
     };
-    match alignment {
-        TableCellVerticalAlign::Top => anchor_top,
-        TableCellVerticalAlign::Center => {
+    let physical_alignment = match alignment {
+        ParagraphFrameVerticalAlignment::Inside => {
+            if geometry.facing_pages && geometry.physical_page_number % 2 == 0 {
+                ParagraphFrameVerticalAlignment::Bottom
+            } else {
+                ParagraphFrameVerticalAlignment::Top
+            }
+        }
+        ParagraphFrameVerticalAlignment::Outside => {
+            if geometry.facing_pages && geometry.physical_page_number % 2 == 0 {
+                ParagraphFrameVerticalAlignment::Top
+            } else {
+                ParagraphFrameVerticalAlignment::Bottom
+            }
+        }
+        ParagraphFrameVerticalAlignment::Inline => ParagraphFrameVerticalAlignment::Top,
+        other => other,
+    };
+    let page_edge_inset = if style.frame_vertical_anchor == StaticShapeVerticalAnchor::Page
+        && matches!(
+            alignment,
+            ParagraphFrameVerticalAlignment::Inside | ParagraphFrameVerticalAlignment::Outside
+        ) {
+        WORD_PARAGRAPH_FRAME_PAGE_EDGE_INSET_POINTS
+    } else {
+        0.0
+    };
+    match physical_alignment {
+        ParagraphFrameVerticalAlignment::Top => anchor_top - page_edge_inset,
+        ParagraphFrameVerticalAlignment::Center => {
             anchor_bottom + ((anchor_top - anchor_bottom + frame_height) / 2.0)
         }
-        TableCellVerticalAlign::Bottom => anchor_bottom + frame_height,
+        ParagraphFrameVerticalAlignment::Bottom => anchor_bottom + frame_height + page_edge_inset,
+        ParagraphFrameVerticalAlignment::Inside
+        | ParagraphFrameVerticalAlignment::Outside
+        | ParagraphFrameVerticalAlignment::Inline => unreachable!(),
     }
 }
 
@@ -24405,6 +24441,45 @@ mod tests {
         assert!(frame_fragment(1).baseline_y > frame_fragment(2).baseline_y);
         assert!(frame_fragment(3).baseline_y > frame_fragment(4).baseline_y);
         assert!(frame_fragment(4).baseline_y > frame_fragment(5).baseline_y);
+    }
+
+    #[test]
+    fn ordinary_frame_vertical_precedence_and_facing_edges_match_word() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/paragraph-frame-vertical-precedence-passive.rtf"
+        ))
+        .expect("paragraph-frame vertical-precedence fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 10);
+
+        let expected_exclusion_tops = [
+            432.0, 288.0, 432.0, 108.0, 486.0, 90.0, 90.0, 486.0, 504.0, 440.201,
+        ];
+        for (page_index, expected_top) in expected_exclusion_tops.into_iter().enumerate() {
+            let exclusions = &layout.pages[page_index].flow_exclusions;
+            assert_eq!(exclusions.len(), 1);
+            let top = exclusions[0].y + exclusions[0].height;
+            assert!(
+                (top - expected_top).abs() < 0.02,
+                "page {} exclusion top {top} != {expected_top}",
+                page_index + 1
+            );
+        }
+
+        let frame_baseline = |page_index: usize| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(layout_item_text_fragment)
+                .find(|fragment| fragment.text.contains("frame."))
+                .expect("frame text")
+                .baseline_y
+        };
+        assert!(frame_baseline(4) > frame_baseline(5));
+        assert!((frame_baseline(5) - frame_baseline(6)).abs() < 0.01);
+        assert!(frame_baseline(7) > frame_baseline(6));
+        assert!(frame_baseline(8) > frame_baseline(9));
     }
 
     #[test]
