@@ -23098,6 +23098,45 @@ mod tests {
     }
 
     #[test]
+    fn framed_word_drop_cap_vertical_alignments_remain_inert() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-vertical-alignment-passive.rtf"
+        ))
+        .expect("framed drop-cap vertical-alignment fixture should parse");
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert_eq!(layout.pages.len(), 1);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let containing = |text: &str| {
+            fragments
+                .iter()
+                .copied()
+                .find(|fragment| fragment.text.contains(text))
+                .unwrap_or_else(|| panic!("missing text fragment {text:?}"))
+        };
+
+        let caps = fragments
+            .iter()
+            .copied()
+            .filter(|fragment| fragment.text == "X")
+            .collect::<Vec<_>>();
+        assert_eq!(caps.len(), 4);
+        for (cap, body) in caps.into_iter().zip(["Zero ", "Tops ", "Cent ", "Bott "]) {
+            let body = containing(body);
+            assert!((cap.x - 36.0).abs() < 0.01);
+            assert!((body.x - 72.0).abs() < 0.01);
+            assert!((cap.baseline_y - body.baseline_y).abs() < 0.01);
+        }
+        assert_eq!(layout.pages[0].flow_exclusions.len(), 4);
+    }
+
+    #[test]
     fn hidden_runs_do_not_layout_as_text() {
         let mut document = Document::default();
         let mut hidden_style = CharacterStyle::default();

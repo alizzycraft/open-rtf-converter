@@ -18,9 +18,9 @@ use open_rtf_converter::model::{
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
     StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageWrapSide,
     StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
-    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment,
-    TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
-    inline_image_marker_index,
+    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief,
+    UnderlineStyle, inline_image_marker_index,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -75162,6 +75162,60 @@ fn framed_drop_cap_positioning_remains_bounded_passive_geometry() {
         "pvpara",
         "posy",
     ] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
+fn framed_drop_cap_vertical_alignments_remain_passive_metadata() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-vertical-alignment-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(paragraphs.len(), 8);
+    for index in [0, 2, 4, 6] {
+        assert_eq!(
+            paragraphs[index].style.frame_vertical_anchor,
+            StaticShapeVerticalAnchor::Paragraph
+        );
+        assert_eq!(paragraphs[index].style.frame_vertical_offset_twips, 0);
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-vertical-alignment.rtf");
+    let output_path = dir.path().join("framed-drop-cap-vertical-alignment.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in ["Zero alpha", "Tops alpha", "Cent alpha", "Bott alpha"] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in ["dropcapli", "dropcapt", "pvpara", "posyt", "posyc", "posyb"] {
         assert!(!rendered_text.contains(forbidden));
     }
     for forbidden in [

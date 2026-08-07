@@ -58097,6 +58097,35 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_mode_keeps_drop_cap_vertical_alignments_passive() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-vertical-alignment-passive.rtf"
+        ))
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs.len(), 8);
+        for index in [0, 2, 4, 6] {
+            assert_eq!(
+                paragraphs[index].style.frame_vertical_anchor,
+                StaticShapeVerticalAnchor::Paragraph
+            );
+            assert_eq!(paragraphs[index].style.frame_vertical_offset_twips, 0);
+        }
+        for index in [1, 3, 5, 7] {
+            assert_eq!(paragraphs[index].style, ParagraphStyle::default());
+        }
+    }
+
+    #[test]
     fn paragraph_frame_position_offsets_clamp_malformed_values() {
         let options = RtfParseOptions {
             limits: RtfLimits {

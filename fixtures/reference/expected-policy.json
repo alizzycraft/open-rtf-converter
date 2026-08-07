@@ -4729,6 +4729,49 @@
       ]
     },
     {
+      "id": "framed-drop-cap-vertical-alignment-passive-layout",
+      "input": "fixtures/framed-drop-cap-vertical-alignment-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-vertical-alignment-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Zero alpha beta gamma",
+        "Tops alpha beta gamma",
+        "Cent alpha beta gamma",
+        "Bott alpha beta gamma",
+        "nu xi omicron."
+      ],
+      "intentional_security_differences": [
+        "Paragraph-frame vertical alignment controls are inert on Word's evidenced drop-cap path; they are normalized away and raw frame metadata never reaches the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "pvpara",
+        "posyt",
+        "posyc",
+        "posyb",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe uses identical frame glyphs and equal-width case labels to establish that paragraph-frame posyt, posyc, and posyb are inert for complete drop-cap frames anchored with pvpara. Word and current retain identical 68-word order and line grouping; corresponding x origins/endpoints differ by at most 0.12/0.14 points, while vertical boxes retain a 0.39-1.00-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions. A separate overlapping absolute-anchor probe exposed that Word can retroactively reflow preceding text around a later-declared page/margin frame; that behavior remains an explicit follow-up rather than being conflated with vertical alignment."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

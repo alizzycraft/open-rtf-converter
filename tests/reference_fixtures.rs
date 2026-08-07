@@ -3704,6 +3704,38 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
         },
         ReferenceFixture {
+            input: "fixtures/framed-drop-cap-vertical-alignment-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Zero alpha beta gamma",
+                "Tops alpha beta gamma",
+                "Cent alpha beta gamma",
+                "Bott alpha beta gamma",
+                "nu xi omicron.",
+            ],
+            must_not_leak: &[
+                b"dropcapli",
+                b"dropcapt",
+                b"absw",
+                b"absh",
+                b"pvpara",
+                b"posyt",
+                b"posyc",
+                b"posyb",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "paragraph frame dimensions interpreted through bounded passive flow layout",
+            ],
+        },
+        ReferenceFixture {
             input: "fixtures/text-effects-passive.rtf",
             expected_pages: 1,
             must_preserve_text: &[
