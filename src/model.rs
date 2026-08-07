@@ -1020,6 +1020,9 @@ pub struct ParagraphStyle {
     /// Bounded paragraph-frame height retained for complete Word drop-cap
     /// frames. Ordinary paragraphs leave this unset.
     pub frame_height_twips: Option<i32>,
+    /// Bounded horizontal distance between a paragraph frame and surrounding
+    /// body text. This enlarges only passive flow exclusion geometry.
+    pub frame_text_distance_twips: i32,
     pub left_indent_twips: i32,
     pub right_indent_twips: i32,
     pub first_line_indent_twips: i32,
@@ -1061,6 +1064,7 @@ impl Default for ParagraphStyle {
             drop_cap_lines: 0,
             frame_width_twips: None,
             frame_height_twips: None,
+            frame_text_distance_twips: 0,
             left_indent_twips: 0,
             right_indent_twips: 0,
             first_line_indent_twips: 0,

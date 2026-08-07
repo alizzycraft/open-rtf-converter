@@ -7861,6 +7861,7 @@ fn layout_framed_drop_cap_paragraph(
     passive_frame_paragraph.style.drop_cap_lines = 0;
     passive_frame_paragraph.style.frame_width_twips = None;
     passive_frame_paragraph.style.frame_height_twips = None;
+    passive_frame_paragraph.style.frame_text_distance_twips = 0;
     passive_frame_paragraph.style.space_before_twips = 0;
     passive_frame_paragraph.style.space_after_twips = 0;
     let markers = current_marker_context(pages, document_stats);
@@ -7928,10 +7929,11 @@ fn layout_framed_drop_cap_paragraph(
         font_provider,
     );
     if let Some(page) = pages.last_mut() {
+        let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
         page.flow_exclusions.push(FlowExclusion {
             x: geometry.body_left(*current_column),
             y: frame_top_y - frame_height,
-            width: frame_width,
+            width: (frame_width + frame_text_distance).min(content_width.max(1.0)),
             height: frame_height,
             wrap_side: StaticImageWrapSide::Right,
         });
@@ -22899,6 +22901,42 @@ mod tests {
         assert!((height_fourth_line.x - 36.0).abs() < 0.01);
         assert!((height_cap.baseline_y - height_first_line.baseline_y).abs() < 0.01);
         assert_eq!(layout.pages[0].flow_exclusions.len(), 2);
+    }
+
+    #[test]
+    fn framed_word_drop_cap_honors_horizontal_text_distance_only() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-wrap-distance-passive.rtf"
+        ))
+        .expect("framed drop-cap distance fixture should parse");
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert_eq!(layout.pages.len(), 1);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let containing = |text: &str| {
+            fragments
+                .iter()
+                .copied()
+                .find(|fragment| fragment.text.contains(text))
+                .unwrap_or_else(|| panic!("missing text fragment {text:?}"))
+        };
+
+        assert!((containing("No ").x - 72.0).abs() < 0.01);
+        assert!((containing("All ").x - 81.0).abs() < 0.01);
+        assert!((containing("X ").x - 84.0).abs() < 0.01);
+        assert!((containing("Y ").x - 72.0).abs() < 0.01);
+        let exclusions = &layout.pages[0].flow_exclusions;
+        assert_eq!(exclusions.len(), 4);
+        for (exclusion, expected_width) in exclusions.iter().zip([36.0, 45.0, 48.0, 36.0]) {
+            assert!((exclusion.width - expected_width).abs() < 0.01);
+            assert!((exclusion.height - 36.0).abs() < 0.01);
+        }
     }
 
     #[test]

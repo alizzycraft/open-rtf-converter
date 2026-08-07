@@ -75053,6 +75053,55 @@ fn derived_drop_cap_dimensions_remain_bounded_passive_geometry() {
 }
 
 #[test]
+fn framed_drop_cap_text_distance_remains_bounded_passive_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-wrap-distance-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(paragraphs[0].style.frame_text_distance_twips, 0);
+    assert_eq!(paragraphs[2].style.frame_text_distance_twips, 180);
+    assert_eq!(paragraphs[4].style.frame_text_distance_twips, 240);
+    assert_eq!(paragraphs[6].style.frame_text_distance_twips, 0);
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-distance.rtf");
+    let output_path = dir.path().join("framed-drop-cap-distance.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in ["No gap", "All gap", "X gap", "Y gap", "sigma tau."] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in ["dropcapli", "dropcapt", "dxfrtext", "dfrmtxtx", "dfrmtxty"] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

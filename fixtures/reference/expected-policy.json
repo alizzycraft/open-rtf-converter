@@ -4635,6 +4635,49 @@
       ]
     },
     {
+      "id": "framed-drop-cap-wrap-distance-passive-layout",
+      "input": "fixtures/framed-drop-cap-wrap-distance-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-wrap-distance-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "No gap alpha beta gamma delta",
+        "All gap alpha beta gamma delta",
+        "X gap alpha beta gamma delta",
+        "Y gap alpha beta gamma delta",
+        "sigma tau."
+      ],
+      "intentional_security_differences": [
+        "Horizontal paragraph-frame distance controls become bounded passive flow-exclusion geometry; vertical distance is inert for the evidenced Word drop-cap path, and raw frame controls never reach the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph wrap distance interpreted through bounded passive flow layout"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "dxfrtext",
+        "dfrmtxtx",
+        "dfrmtxty",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves that dxfrtext180 and dfrmtxtx240 enlarge a 36-point drop-cap frame's right-side text exclusion by exactly 9 and 12 points, moving following text from x=72.024 to x=81.024 and x=84.024. dfrmtxty360 is inert for this path and retains x=72.024 with the same three excluded lines. Current reproduces x=72/81/84/72 and identical four-group line flow; geometrically corresponding word origins and endpoints differ by at most 0.12 points, while vertical boxes retain the established 0.93-1.05-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

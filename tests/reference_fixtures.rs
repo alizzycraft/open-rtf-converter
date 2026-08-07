@@ -3632,6 +3632,38 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
         },
         ReferenceFixture {
+            input: "fixtures/framed-drop-cap-wrap-distance-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "No gap alpha beta gamma delta",
+                "All gap alpha beta gamma delta",
+                "X gap alpha beta gamma delta",
+                "Y gap alpha beta gamma delta",
+                "sigma tau.",
+            ],
+            must_not_leak: &[
+                b"dropcapli",
+                b"dropcapt",
+                b"absw",
+                b"absh",
+                b"dxfrtext",
+                b"dfrmtxtx",
+                b"dfrmtxty",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "paragraph frame dimensions interpreted through bounded passive flow layout",
+                "paragraph wrap distance interpreted through bounded passive flow layout",
+            ],
+        },
+        ReferenceFixture {
             input: "fixtures/text-effects-passive.rtf",
             expected_pages: 1,
             must_preserve_text: &[

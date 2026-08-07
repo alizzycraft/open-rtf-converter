@@ -6256,6 +6256,9 @@ impl Parser {
             name @ ("absw" | "absh") => {
                 self.set_paragraph_frame_dimension(name, control.parameter, offset)
             }
+            "dxfrtext" | "dfrmtxtx" => {
+                self.set_paragraph_frame_text_distance(control.parameter, offset)
+            }
             "li" | "lin" => {
                 if !self.suppress_word_legacy_list_paragraph {
                     self.state.paragraph.left_indent_twips =
@@ -7831,6 +7834,22 @@ impl Parser {
                 || self.state.paragraph.frame_height_twips.is_some();
         self.diagnostics.push(Diagnostic::warning(
             "paragraph frame dimensions interpreted through bounded passive flow layout",
+            Some(offset),
+        ));
+    }
+
+    fn set_paragraph_frame_text_distance(&mut self, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0);
+        let clamped = value.clamp(0, self.limits().max_shape_dimension_twips.max(0));
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("paragraph frame text distance clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        self.state.paragraph.frame_text_distance_twips = clamped;
+        self.diagnostics.push(Diagnostic::warning(
+            "paragraph wrap distance interpreted through bounded passive flow layout",
             Some(offset),
         ));
     }
@@ -26893,6 +26912,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.frame_height_twips == default.frame_height_twips {
         output.frame_height_twips = base.frame_height_twips;
+    }
+    if output.frame_text_distance_twips == default.frame_text_distance_twips {
+        output.frame_text_distance_twips = base.frame_text_distance_twips;
     }
     if output.left_indent_twips == default.left_indent_twips {
         output.left_indent_twips = base.left_indent_twips;
@@ -57696,6 +57718,71 @@ After\par}"#;
         assert_eq!(height_only.style.drop_cap_lines, 3);
         assert_eq!(height_only.style.frame_width_twips, None);
         assert_eq!(height_only.style.frame_height_twips, Some(720));
+    }
+
+    #[test]
+    fn word_compatible_mode_retains_bounded_horizontal_frame_text_distance() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-wrap-distance-passive.rtf"
+        ))
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs[0].style.frame_text_distance_twips, 0);
+        assert_eq!(paragraphs[2].style.frame_text_distance_twips, 180);
+        assert_eq!(paragraphs[4].style.frame_text_distance_twips, 240);
+        assert_eq!(paragraphs[6].style.frame_text_distance_twips, 0);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("paragraph wrap distance interpreted through bounded passive flow layout")
+        }));
+    }
+
+    #[test]
+    fn paragraph_frame_text_distance_clamps_malformed_values() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_shape_dimension_twips: 480,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\dfrmtxtx-120\absw720\dropcapli3\dropcapt1 N\par\pard\dxfrtext9999\absw720\dropcapli3\dropcapt1 X\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs[0].style.frame_text_distance_twips, 0);
+        assert_eq!(paragraphs[1].style.frame_text_distance_twips, 480);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("paragraph frame text distance clamped from -120 to 0 twips")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("paragraph frame text distance clamped from 9999 to 480 twips")
+        }));
     }
 
     #[test]
