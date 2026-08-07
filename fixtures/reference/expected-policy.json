@@ -6665,7 +6665,7 @@
     {
       "id": "font-charset-greek-passive-decoding",
       "input": "fixtures/font-charset-greek-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-charset-greek-passive.pdf",
       "word_reference_pages": [],
@@ -6695,13 +6695,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Greek decoding and PDF extraction for Αα Ππ Ωω. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the Greek endpoint by 3.96 points, and source-corrected baselines by at most 0.01 points."
+        "The focused Word 16.0 audit confirms exact semantic Greek decoding and PDF extraction for Αα Ππ Ωω. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, non-final decoded character origins by at most 0.13 points, and source-corrected baselines by at most 0.01 points. The bundled final omega contour ends 0.81 points short without affecting flow; five-times renders were visually inspected."
       ]
     },
     {
       "id": "font-charset-cyrillic-passive-decoding",
       "input": "fixtures/font-charset-cyrillic-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-charset-cyrillic-passive.pdf",
       "word_reference_pages": [],
@@ -6731,13 +6731,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Cyrillic decoding and PDF extraction for Привет. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the Cyrillic endpoint by 3.11 points, and source-corrected baselines by at most 0.01 points."
+        "The focused Word 16.0 audit confirms exact semantic Cyrillic decoding and PDF extraction for Привет. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, decoded character origins and the final contour edge by at most 0.09 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
       "id": "font-charset-central-european-passive-decoding",
       "input": "fixtures/font-charset-central-european-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-charset-central-european-passive.pdf",
       "word_reference_pages": [],
@@ -6767,13 +6767,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Central European decoding and PDF extraction for árvíztűrő. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the decoded endpoint by 3.01 points, and source-corrected baselines by at most 0.01 points."
+        "The focused Word 16.0 audit confirms exact semantic Central European decoding and PDF extraction for árvíztűrő. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, decoded character origins and the final contour edge by at most 0.17 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
       "id": "font-charset-turkish-passive-decoding",
       "input": "fixtures/font-charset-turkish-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-charset-turkish-passive.pdf",
       "word_reference_pages": [],
@@ -6803,13 +6803,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Turkish decoding and PDF extraction for ĞİŞ ğış. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the decoded endpoint by 3.06 points, and source-corrected baselines by at most 0.01 points."
+        "The focused Word 16.0 audit confirms exact semantic Turkish decoding and PDF extraction for ĞİŞ ğış. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, decoded character origins and the final contour edge by at most 0.10 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
       "id": "font-charset-baltic-passive-decoding",
       "input": "fixtures/font-charset-baltic-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/font-charset-baltic-passive.pdf",
       "word_reference_pages": [],
@@ -6839,7 +6839,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Baltic decoding and PDF extraction for Ąą Čč Ųų Śś Żż. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the decoded endpoint by 3.08 points, and source-corrected baselines by at most 0.01 points."
+        "The focused Word 16.0 audit confirms exact semantic Baltic decoding and PDF extraction for Ąą Čč Ųų Śś Żż. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, decoded character origins and the final contour edge by at most 0.08 points, and source-corrected baselines by at most 0.01 points. Five-times renders were visually inspected."
       ]
     },
     {
@@ -6969,7 +6969,7 @@
     {
       "id": "symbol-font-passive-glyph-decoding",
       "input": "fixtures/symbol-font-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/symbol-font-passive.pdf",
       "word_reference_pages": [],
