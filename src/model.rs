@@ -1023,6 +1023,17 @@ pub struct ParagraphStyle {
     /// Bounded horizontal distance between a paragraph frame and surrounding
     /// body text. This enlarges only passive flow exclusion geometry.
     pub frame_text_distance_twips: i32,
+    /// Coordinate system used for bounded horizontal paragraph-frame
+    /// placement. Complete Word drop-cap frames default to the current column.
+    pub frame_horizontal_anchor: StaticShapeHorizontalAnchor,
+    /// Optional relative alignment inside the selected horizontal anchor.
+    /// `None` uses `frame_horizontal_offset_twips` from the anchor origin.
+    pub frame_horizontal_alignment: Option<TableRowAlignment>,
+    pub frame_horizontal_offset_twips: i32,
+    /// Coordinate system used for bounded vertical paragraph-frame placement.
+    pub frame_vertical_anchor: StaticShapeVerticalAnchor,
+    /// Downward distance from the selected vertical anchor origin.
+    pub frame_vertical_offset_twips: i32,
     pub left_indent_twips: i32,
     pub right_indent_twips: i32,
     pub first_line_indent_twips: i32,
@@ -1065,6 +1076,11 @@ impl Default for ParagraphStyle {
             frame_width_twips: None,
             frame_height_twips: None,
             frame_text_distance_twips: 0,
+            frame_horizontal_anchor: StaticShapeHorizontalAnchor::Column,
+            frame_horizontal_alignment: None,
+            frame_horizontal_offset_twips: 0,
+            frame_vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
+            frame_vertical_offset_twips: 0,
             left_indent_twips: 0,
             right_indent_twips: 0,
             first_line_indent_twips: 0,

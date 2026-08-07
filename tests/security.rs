@@ -17,9 +17,10 @@ use open_rtf_converter::model::{
     PassiveMathLimitPart, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern,
     StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
     StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageWrapSide,
-    StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection,
-    TableRowAlignment, TextRelief, UnderlineStyle, inline_image_marker_index,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
+    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment,
+    TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
+    inline_image_marker_index,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -75084,6 +75085,83 @@ fn framed_drop_cap_text_distance_remains_bounded_passive_geometry() {
         assert!(rendered_text.contains(visible), "missing {visible:?}");
     }
     for forbidden in ["dropcapli", "dropcapt", "dxfrtext", "dfrmtxtx", "dfrmtxty"] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
+fn framed_drop_cap_positioning_remains_bounded_passive_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-positioning-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paragraphs[2].style.frame_horizontal_anchor,
+        StaticShapeHorizontalAnchor::Margin
+    );
+    assert_eq!(paragraphs[2].style.frame_horizontal_offset_twips, 720);
+    assert_eq!(
+        paragraphs[6].style.frame_horizontal_alignment,
+        Some(TableRowAlignment::Center)
+    );
+    assert_eq!(paragraphs[8].style.frame_vertical_offset_twips, 360);
+    assert_eq!(
+        paragraphs[10].style.frame_horizontal_alignment,
+        Some(TableRowAlignment::Right)
+    );
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-positioning.rtf");
+    let output_path = dir.path().join("framed-drop-cap-positioning.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 1);
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in [
+        "Normal alpha",
+        "Margin offset alpha",
+        "Page offset alpha",
+        "Centered alpha",
+        "Vertical alpha",
+        "Right alpha",
+    ] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in [
+        "dropcapli",
+        "dropcapt",
+        "phmrg",
+        "phpg",
+        "posx",
+        "posxc",
+        "posxr",
+        "pvpara",
+        "posy",
+    ] {
         assert!(!rendered_text.contains(forbidden));
     }
     for forbidden in [

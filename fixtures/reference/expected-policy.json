@@ -4678,6 +4678,57 @@
       ]
     },
     {
+      "id": "framed-drop-cap-positioning-passive-layout",
+      "input": "fixtures/framed-drop-cap-positioning-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-positioning-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Normal alpha beta gamma",
+        "Margin offset alpha beta",
+        "Page offset alpha beta",
+        "Centered alpha beta gamma",
+        "Vertical alpha beta gamma",
+        "Right alpha beta gamma"
+      ],
+      "intentional_security_differences": [
+        "Paragraph-frame anchors, alignments, and offsets become page-bounded passive placement and flow-exclusion geometry; raw positioning controls and editable frame metadata never reach the PDF layer."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame horizontal position interpreted as bounded passive placement",
+        "paragraph frame horizontal anchor \\phmrg interpreted as bounded passive origin",
+        "paragraph frame horizontal alignment \\posxc interpreted as bounded passive placement",
+        "paragraph frame vertical position interpreted as bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "phmrg",
+        "phpg",
+        "posx",
+        "posxc",
+        "posxr",
+        "pvpara",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves column-default x=36, margin-relative posx720 x=72, page-relative posx720 x=36, margin-centered x=135.05, margin-right x=234.10, and paragraph-relative posy360 as an 18-point downward frame shift. Positioned frames wrap through all bounded free intervals: an intact word that cannot fit the left interval advances to the right interval, later short words can use the left interval, and nonpainted trailing spaces do not force a visible word away from an exclusion edge. Current reproduces x=36/72/36/135/36/234 and identical 128-word line grouping; corresponding word origins and endpoints differ by at most 0.16 points, while vertical boxes retain the established 0.95-1.08-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

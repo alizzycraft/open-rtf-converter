@@ -5506,11 +5506,17 @@ impl Parser {
             "trowd" => self.start_table_row(offset)?,
             "trrh" => self.set_current_table_row_height(control.parameter, offset),
             "trleft" => self.set_current_table_row_left_offset(control.parameter, offset),
-            "posx" | "tposx" => self.add_current_table_row_horizontal_position_offset(
+            "tposx" => self.add_current_table_row_horizontal_position_offset(
                 control.parameter.unwrap_or(0),
                 offset,
             ),
-            "posnegx" | "tposnegx" => self.add_current_table_row_horizontal_position_offset(
+            "posx" if self.current_table_row.is_some() => self
+                .add_current_table_row_horizontal_position_offset(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                ),
+            "posx" => self.set_paragraph_frame_horizontal_offset(control.parameter, false, offset),
+            "tposnegx" => self.add_current_table_row_horizontal_position_offset(
                 control
                     .parameter
                     .unwrap_or(0)
@@ -5519,51 +5525,158 @@ impl Parser {
                     .unwrap_or(i32::MIN),
                 offset,
             ),
-            "posxl" | "tposxl" => self.set_current_table_row_floating_alignment(
+            "posnegx" if self.current_table_row.is_some() => self
+                .add_current_table_row_horizontal_position_offset(
+                    control
+                        .parameter
+                        .unwrap_or(0)
+                        .checked_abs()
+                        .and_then(|value| value.checked_neg())
+                        .unwrap_or(i32::MIN),
+                    offset,
+                ),
+            "posnegx" => {
+                self.set_paragraph_frame_horizontal_offset(control.parameter, true, offset)
+            }
+            "tposxl" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Left,
                 control.name.as_str(),
                 offset,
             ),
-            "posxi" | "tposxi" => self.set_current_table_row_floating_alignment(
+            "posxl" if self.current_table_row.is_some() => self
+                .set_current_table_row_floating_alignment(
+                    TableRowAlignment::Left,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "posxl" => self.set_paragraph_frame_horizontal_alignment(
+                TableRowAlignment::Left,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxi" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Inside,
                 control.name.as_str(),
                 offset,
             ),
-            "posxc" | "tposxc" => self.set_current_table_row_floating_alignment(
+            "posxi" if self.current_table_row.is_some() => self
+                .set_current_table_row_floating_alignment(
+                    TableRowAlignment::Inside,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "posxi" => self.set_paragraph_frame_horizontal_alignment(
+                TableRowAlignment::Inside,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxc" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Center,
                 control.name.as_str(),
                 offset,
             ),
-            "posxr" | "tposxr" => self.set_current_table_row_floating_alignment(
+            "posxc" if self.current_table_row.is_some() => self
+                .set_current_table_row_floating_alignment(
+                    TableRowAlignment::Center,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "posxc" => self.set_paragraph_frame_horizontal_alignment(
+                TableRowAlignment::Center,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxr" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Right,
                 control.name.as_str(),
                 offset,
             ),
-            "posxo" | "tposxo" => self.set_current_table_row_floating_alignment(
+            "posxr" if self.current_table_row.is_some() => self
+                .set_current_table_row_floating_alignment(
+                    TableRowAlignment::Right,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "posxr" => self.set_paragraph_frame_horizontal_alignment(
+                TableRowAlignment::Right,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposxo" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Outside,
                 control.name.as_str(),
                 offset,
             ),
-            "phcol" | "tphcol" => self.set_current_table_row_horizontal_anchor(
+            "posxo" if self.current_table_row.is_some() => self
+                .set_current_table_row_floating_alignment(
+                    TableRowAlignment::Outside,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "posxo" => self.set_paragraph_frame_horizontal_alignment(
+                TableRowAlignment::Outside,
+                control.name.as_str(),
+                offset,
+            ),
+            "tphcol" => self.set_current_table_row_horizontal_anchor(
                 TableRowHorizontalAnchor::Column,
                 control.name.as_str(),
                 offset,
             ),
-            "phmrg" | "tphmrg" => self.set_current_table_row_horizontal_anchor(
+            "phcol" if self.current_table_row.is_some() => self
+                .set_current_table_row_horizontal_anchor(
+                    TableRowHorizontalAnchor::Column,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "phcol" => self.set_paragraph_frame_horizontal_anchor(
+                StaticShapeHorizontalAnchor::Column,
+                control.name.as_str(),
+                offset,
+            ),
+            "tphmrg" => self.set_current_table_row_horizontal_anchor(
                 TableRowHorizontalAnchor::Margin,
                 control.name.as_str(),
                 offset,
             ),
-            "phpg" | "tphpg" => self.set_current_table_row_horizontal_anchor(
+            "phmrg" if self.current_table_row.is_some() => self
+                .set_current_table_row_horizontal_anchor(
+                    TableRowHorizontalAnchor::Margin,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "phmrg" => self.set_paragraph_frame_horizontal_anchor(
+                StaticShapeHorizontalAnchor::Margin,
+                control.name.as_str(),
+                offset,
+            ),
+            "tphpg" => self.set_current_table_row_horizontal_anchor(
                 TableRowHorizontalAnchor::Page,
                 control.name.as_str(),
                 offset,
             ),
-            "posy" | "tposy" => self.add_current_table_row_vertical_position_offset(
+            "phpg" if self.current_table_row.is_some() => self
+                .set_current_table_row_horizontal_anchor(
+                    TableRowHorizontalAnchor::Page,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "phpg" => self.set_paragraph_frame_horizontal_anchor(
+                StaticShapeHorizontalAnchor::Page,
+                control.name.as_str(),
+                offset,
+            ),
+            "tposy" => self.add_current_table_row_vertical_position_offset(
                 control.parameter.unwrap_or(0),
                 offset,
             ),
-            "posnegy" | "tposnegy" => self.add_current_table_row_vertical_position_offset(
+            "posy" if self.current_table_row.is_some() => self
+                .add_current_table_row_vertical_position_offset(
+                    control.parameter.unwrap_or(0),
+                    offset,
+                ),
+            "posy" => self.set_paragraph_frame_vertical_offset(control.parameter, false, offset),
+            "tposnegy" => self.add_current_table_row_vertical_position_offset(
                 control
                     .parameter
                     .unwrap_or(0)
@@ -5572,18 +5685,62 @@ impl Parser {
                     .unwrap_or(i32::MIN),
                 offset,
             ),
-            "pvpara" | "tpvpara" => self.set_current_table_row_vertical_anchor(
+            "posnegy" if self.current_table_row.is_some() => self
+                .add_current_table_row_vertical_position_offset(
+                    control
+                        .parameter
+                        .unwrap_or(0)
+                        .checked_abs()
+                        .and_then(|value| value.checked_neg())
+                        .unwrap_or(i32::MIN),
+                    offset,
+                ),
+            "posnegy" => self.set_paragraph_frame_vertical_offset(control.parameter, true, offset),
+            "tpvpara" => self.set_current_table_row_vertical_anchor(
                 TableRowVerticalAnchor::Paragraph,
                 control.name.as_str(),
                 offset,
             ),
-            "pvmrg" | "tpvmrg" => self.set_current_table_row_vertical_anchor(
+            "pvpara" if self.current_table_row.is_some() => self
+                .set_current_table_row_vertical_anchor(
+                    TableRowVerticalAnchor::Paragraph,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "pvpara" => self.set_paragraph_frame_vertical_anchor(
+                StaticShapeVerticalAnchor::Paragraph,
+                control.name.as_str(),
+                offset,
+            ),
+            "tpvmrg" => self.set_current_table_row_vertical_anchor(
                 TableRowVerticalAnchor::Margin,
                 control.name.as_str(),
                 offset,
             ),
-            "pvpg" | "tpvpg" => self.set_current_table_row_vertical_anchor(
+            "pvmrg" if self.current_table_row.is_some() => self
+                .set_current_table_row_vertical_anchor(
+                    TableRowVerticalAnchor::Margin,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "pvmrg" => self.set_paragraph_frame_vertical_anchor(
+                StaticShapeVerticalAnchor::Margin,
+                control.name.as_str(),
+                offset,
+            ),
+            "tpvpg" => self.set_current_table_row_vertical_anchor(
                 TableRowVerticalAnchor::Page,
+                control.name.as_str(),
+                offset,
+            ),
+            "pvpg" if self.current_table_row.is_some() => self
+                .set_current_table_row_vertical_anchor(
+                    TableRowVerticalAnchor::Page,
+                    control.name.as_str(),
+                    offset,
+                ),
+            "pvpg" => self.set_paragraph_frame_vertical_anchor(
+                StaticShapeVerticalAnchor::Page,
                 control.name.as_str(),
                 offset,
             ),
@@ -7850,6 +8007,102 @@ impl Parser {
         self.state.paragraph.frame_text_distance_twips = clamped;
         self.diagnostics.push(Diagnostic::warning(
             "paragraph wrap distance interpreted through bounded passive flow layout",
+            Some(offset),
+        ));
+    }
+
+    fn set_paragraph_frame_horizontal_offset(
+        &mut self,
+        value: Option<i32>,
+        force_negative: bool,
+        offset: usize,
+    ) {
+        let value = i64::from(value.unwrap_or(0));
+        let requested = if force_negative { -value.abs() } else { value };
+        let limit = i64::from(self.limits().max_shape_offset_twips.max(0));
+        let clamped = requested.clamp(-limit, limit) as i32;
+        if i64::from(clamped) != requested {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "paragraph frame horizontal position clamped from {requested} to {clamped} twips"
+                ),
+                Some(offset),
+            ));
+        }
+        self.state.paragraph.frame_horizontal_alignment = None;
+        self.state.paragraph.frame_horizontal_offset_twips = clamped;
+        self.diagnostics.push(Diagnostic::warning(
+            "paragraph frame horizontal position interpreted as bounded passive placement",
+            Some(offset),
+        ));
+    }
+
+    fn set_paragraph_frame_horizontal_alignment(
+        &mut self,
+        alignment: TableRowAlignment,
+        control_name: &str,
+        offset: usize,
+    ) {
+        self.state.paragraph.frame_horizontal_alignment = Some(alignment);
+        self.diagnostics.push(Diagnostic::warning(
+            format!(
+                "paragraph frame horizontal alignment \\{control_name} interpreted as bounded passive placement"
+            ),
+            Some(offset),
+        ));
+    }
+
+    fn set_paragraph_frame_horizontal_anchor(
+        &mut self,
+        anchor: StaticShapeHorizontalAnchor,
+        control_name: &str,
+        offset: usize,
+    ) {
+        self.state.paragraph.frame_horizontal_anchor = anchor;
+        self.diagnostics.push(Diagnostic::warning(
+            format!(
+                "paragraph frame horizontal anchor \\{control_name} interpreted as bounded passive origin"
+            ),
+            Some(offset),
+        ));
+    }
+
+    fn set_paragraph_frame_vertical_offset(
+        &mut self,
+        value: Option<i32>,
+        force_negative: bool,
+        offset: usize,
+    ) {
+        let value = i64::from(value.unwrap_or(0));
+        let requested = if force_negative { -value.abs() } else { value };
+        let limit = i64::from(self.limits().max_shape_offset_twips.max(0));
+        let clamped = requested.clamp(-limit, limit) as i32;
+        if i64::from(clamped) != requested {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "paragraph frame vertical position clamped from {requested} to {clamped} twips"
+                ),
+                Some(offset),
+            ));
+        }
+        self.state.paragraph.frame_vertical_offset_twips = clamped;
+        self.diagnostics.push(Diagnostic::warning(
+            "paragraph frame vertical position interpreted as bounded passive placement",
+            Some(offset),
+        ));
+    }
+
+    fn set_paragraph_frame_vertical_anchor(
+        &mut self,
+        anchor: StaticShapeVerticalAnchor,
+        control_name: &str,
+        offset: usize,
+    ) {
+        self.state.paragraph.frame_vertical_anchor = anchor;
+        self.diagnostics.push(Diagnostic::warning(
+            format!(
+                "paragraph frame vertical anchor \\{control_name} interpreted as bounded passive origin"
+            ),
             Some(offset),
         ));
     }
@@ -26915,6 +27168,21 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.frame_text_distance_twips == default.frame_text_distance_twips {
         output.frame_text_distance_twips = base.frame_text_distance_twips;
+    }
+    if output.frame_horizontal_anchor == default.frame_horizontal_anchor {
+        output.frame_horizontal_anchor = base.frame_horizontal_anchor;
+    }
+    if output.frame_horizontal_alignment == default.frame_horizontal_alignment {
+        output.frame_horizontal_alignment = base.frame_horizontal_alignment;
+    }
+    if output.frame_horizontal_offset_twips == default.frame_horizontal_offset_twips {
+        output.frame_horizontal_offset_twips = base.frame_horizontal_offset_twips;
+    }
+    if output.frame_vertical_anchor == default.frame_vertical_anchor {
+        output.frame_vertical_anchor = base.frame_vertical_anchor;
+    }
+    if output.frame_vertical_offset_twips == default.frame_vertical_offset_twips {
+        output.frame_vertical_offset_twips = base.frame_vertical_offset_twips;
     }
     if output.left_indent_twips == default.left_indent_twips {
         output.left_indent_twips = base.left_indent_twips;
@@ -57782,6 +58050,87 @@ After\par}"#;
             diagnostic
                 .message
                 .contains("paragraph frame text distance clamped from 9999 to 480 twips")
+        }));
+    }
+
+    #[test]
+    fn word_compatible_mode_retains_bounded_drop_cap_frame_positioning() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-positioning-passive.rtf"
+        ))
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paragraphs[2].style.frame_horizontal_anchor,
+            StaticShapeHorizontalAnchor::Margin
+        );
+        assert_eq!(paragraphs[2].style.frame_horizontal_offset_twips, 720);
+        assert_eq!(paragraphs[2].style.frame_horizontal_alignment, None);
+        assert_eq!(
+            paragraphs[4].style.frame_horizontal_anchor,
+            StaticShapeHorizontalAnchor::Page
+        );
+        assert_eq!(paragraphs[4].style.frame_horizontal_offset_twips, 720);
+        assert_eq!(
+            paragraphs[6].style.frame_horizontal_alignment,
+            Some(TableRowAlignment::Center)
+        );
+        assert_eq!(
+            paragraphs[8].style.frame_vertical_anchor,
+            StaticShapeVerticalAnchor::Paragraph
+        );
+        assert_eq!(paragraphs[8].style.frame_vertical_offset_twips, 360);
+        assert_eq!(
+            paragraphs[10].style.frame_horizontal_alignment,
+            Some(TableRowAlignment::Right)
+        );
+        assert_eq!(paragraphs[1].style, ParagraphStyle::default());
+    }
+
+    #[test]
+    fn paragraph_frame_position_offsets_clamp_malformed_values() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_shape_offset_twips: 480,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\posx9999\absw720\dropcapli3\dropcapt1 X\par\pard\posnegy9999\absw720\dropcapli3\dropcapt1 Y\par}",
+            &options,
+        )
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs[0].style.frame_horizontal_offset_twips, 480);
+        assert_eq!(paragraphs[1].style.frame_vertical_offset_twips, -480);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("paragraph frame horizontal position clamped from 9999 to 480 twips")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("paragraph frame vertical position clamped from -9999 to -480 twips")
         }));
     }
 

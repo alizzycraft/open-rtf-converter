@@ -7862,6 +7862,11 @@ fn layout_framed_drop_cap_paragraph(
     passive_frame_paragraph.style.frame_width_twips = None;
     passive_frame_paragraph.style.frame_height_twips = None;
     passive_frame_paragraph.style.frame_text_distance_twips = 0;
+    passive_frame_paragraph.style.frame_horizontal_anchor = StaticShapeHorizontalAnchor::Column;
+    passive_frame_paragraph.style.frame_horizontal_alignment = None;
+    passive_frame_paragraph.style.frame_horizontal_offset_twips = 0;
+    passive_frame_paragraph.style.frame_vertical_anchor = StaticShapeVerticalAnchor::Paragraph;
+    passive_frame_paragraph.style.frame_vertical_offset_twips = 0;
     passive_frame_paragraph.style.space_before_twips = 0;
     passive_frame_paragraph.style.space_after_twips = 0;
     let markers = current_marker_context(pages, document_stats);
@@ -7904,10 +7909,24 @@ fn layout_framed_drop_cap_paragraph(
             1.0,
             (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
         );
-    if *cursor_y - frame_height < geometry.margin_bottom {
+    let requested_frame_top = |cursor_y: f32, geometry: &PageGeometry| {
+        shape_vertical_origin(paragraph.style.frame_vertical_anchor, cursor_y, geometry)
+            - twips_to_points(paragraph.style.frame_vertical_offset_twips)
+    };
+    if paragraph.style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph
+        && requested_frame_top(*cursor_y, geometry) - frame_height < geometry.margin_bottom
+    {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
     }
-    let frame_top_y = *cursor_y;
+    let frame_top_y = requested_frame_top(*cursor_y, geometry).clamp(frame_height, geometry.height);
+    let frame_left = paragraph_frame_left(
+        &paragraph.style,
+        frame_width,
+        content_width,
+        *geometry,
+        *current_column,
+    );
+    let frame_item_start = pages.last().map(|page| page.items.len()).unwrap_or(0);
     let mut frame_cursor_y = frame_top_y;
     let mut frame_geometry = *geometry;
     let mut frame_column = *current_column;
@@ -7929,16 +7948,43 @@ fn layout_framed_drop_cap_paragraph(
         font_provider,
     );
     if let Some(page) = pages.last_mut() {
+        let frame_x_shift = frame_left - geometry.body_left(*current_column);
+        for item in page.items.iter_mut().skip(frame_item_start) {
+            shift_layout_item_x(item, frame_x_shift);
+        }
         let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
         page.flow_exclusions.push(FlowExclusion {
-            x: geometry.body_left(*current_column),
+            x: frame_left,
             y: frame_top_y - frame_height,
-            width: (frame_width + frame_text_distance).min(content_width.max(1.0)),
+            width: (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0)),
             height: frame_height,
-            wrap_side: StaticImageWrapSide::Right,
+            wrap_side: StaticImageWrapSide::Both,
         });
     }
     true
+}
+
+fn paragraph_frame_left(
+    style: &ParagraphStyle,
+    frame_width: f32,
+    content_width: f32,
+    geometry: PageGeometry,
+    current_column: usize,
+) -> f32 {
+    let (anchor_left, anchor_width) = match style.frame_horizontal_anchor {
+        StaticShapeHorizontalAnchor::Column => {
+            (geometry.body_left(current_column), content_width.max(1.0))
+        }
+        StaticShapeHorizontalAnchor::Margin => {
+            (geometry.margin_left, geometry.content_width.max(1.0))
+        }
+        StaticShapeHorizontalAnchor::Page => (0.0, geometry.width.max(1.0)),
+    };
+    let requested = style.frame_horizontal_alignment.map_or_else(
+        || anchor_left + twips_to_points(style.frame_horizontal_offset_twips),
+        |alignment| table_row_left(anchor_left, anchor_width, frame_width, alignment, geometry),
+    );
+    requested.clamp(0.0, (geometry.width - frame_width).max(0.0))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8881,7 +8927,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 && paragraph.style.first_line_indent_twips == 0
                 && paragraph.style.tab_stops_twips.is_empty()
                 && intervals.len() > 1;
-            let line_width = if supports_segmented_flow {
+            let (line_width, interval_ends_before_body_edge) = if supports_segmented_flow {
                 let current_interval = intervals
                     .iter()
                     .position(|(left, interval_width)| {
@@ -8894,7 +8940,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                     push_flow_exclusion_advance(&mut current, interval_left, &segment.style);
                 }
                 let interval_right = interval_left + interval_width;
-                if current.width > 0.0 && current.width + width > interval_right {
+                if current.width + width > interval_right {
                     if let Some((next_left, _)) = intervals
                         .iter()
                         .skip(current_interval + 1)
@@ -8905,26 +8951,29 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                         push_flow_exclusion_advance(&mut current, advance, &segment.style);
                     }
                 }
-                intervals
+                let line_width = intervals
                     .iter()
                     .find(|(left, interval_width)| {
                         current.width + 0.01 >= *left
                             && current.width <= *left + *interval_width + 0.01
                     })
                     .map(|(left, interval_width)| left + interval_width)
-                    .unwrap_or(interval_right)
+                    .unwrap_or(interval_right);
+                (line_width, line_width + 0.01 < content_width)
             } else {
-                let requested_content_width = intervals
+                let (requested_left, requested_content_width) = intervals
                     .into_iter()
-                    .map(|(_, width)| width)
-                    .max_by(f32::total_cmp)
-                    .unwrap_or(content_width);
+                    .max_by(|(_, width_a), (_, width_b)| width_a.total_cmp(width_b))
+                    .unwrap_or((0.0, content_width));
                 let active_content_width = if content_width >= 12.0 {
                     requested_content_width.clamp(12.0, content_width)
                 } else {
                     requested_content_width.clamp(0.0, content_width.max(0.0))
                 };
-                paragraph_line_width(active_content_width, &paragraph.style, is_first_line)
+                (
+                    paragraph_line_width(active_content_width, &paragraph.style, is_first_line),
+                    requested_left + requested_content_width + 0.01 < content_width,
+                )
             };
             let dynamic_word = segment
                 .text
@@ -9015,8 +9064,28 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                     font_provider,
                 );
             }
+            let boundary_fit_width = if interval_ends_before_body_edge
+                && segment.text.ends_with(char::is_whitespace)
+                && !contains_inline_marker(&segment.text)
+            {
+                let mut visible_segment = segment.clone();
+                visible_segment.text = visible_segment
+                    .text
+                    .trim_end_matches(char::is_whitespace)
+                    .to_string();
+                measure_flow_run(
+                    &visible_segment,
+                    current.width,
+                    &paragraph.style,
+                    document,
+                    font_provider,
+                )
+            } else {
+                fit_width
+            };
             if current.width > 0.0
-                && current.width + fit_width > line_width + inline_image_body_edge_tolerance
+                && current.width + boundary_fit_width
+                    > line_width + inline_image_body_edge_tolerance
             {
                 let carried_whitespace = if paragraph.style.no_wrap {
                     take_trailing_whitespace(&mut current, document, font_provider)
@@ -9037,6 +9106,46 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 if trimmed.is_empty() {
                     continue;
                 }
+                let next_segment = FlowRun {
+                    text: trimmed,
+                    style: segment.style,
+                    width: 0.0,
+                    line_height_points: segment.line_height_points,
+                    tab_leader: TabLeader::None,
+                    tab_alignment: TabAlignment::Left,
+                    tab_stop_position: None,
+                    soft_hyphen_after: segment.soft_hyphen_after,
+                };
+                let mut next_intervals = line_content_intervals(current_line_top_y, current.height);
+                next_intervals.retain(|(_, interval_width)| *interval_width >= 12.0);
+                next_intervals.sort_by(|(left_a, _), (left_b, _)| left_a.total_cmp(left_b));
+                let next_supports_segmented_flow = paragraph.style.alignment == Alignment::Left
+                    && paragraph.style.left_indent_twips == 0
+                    && paragraph.style.right_indent_twips == 0
+                    && paragraph.style.first_line_indent_twips == 0
+                    && paragraph.style.tab_stops_twips.is_empty()
+                    && next_intervals.len() > 1;
+                if next_supports_segmented_flow {
+                    let mut next_width = measure_flow_run(
+                        &next_segment,
+                        0.0,
+                        &paragraph.style,
+                        document,
+                        font_provider,
+                    );
+                    if segment_index + 1 == segments.len() {
+                        next_width += trailing_character_spacing;
+                    }
+                    let next_left = next_intervals
+                        .iter()
+                        .find(|(_, interval_width)| next_width <= *interval_width + 0.01)
+                        .or_else(|| next_intervals.first())
+                        .map(|(left, _)| *left)
+                        .unwrap_or(0.0);
+                    if next_left > 0.01 {
+                        push_flow_exclusion_advance(&mut current, next_left, &next_segment.style);
+                    }
+                }
                 for whitespace in carried_whitespace {
                     push_segment(
                         &mut current,
@@ -9048,16 +9157,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 }
                 push_segment_with_trailing_character_spacing(
                     &mut current,
-                    FlowRun {
-                        text: trimmed,
-                        style: segment.style,
-                        width: 0.0,
-                        line_height_points: segment.line_height_points,
-                        tab_leader: TabLeader::None,
-                        tab_alignment: TabAlignment::Left,
-                        tab_stop_position: None,
-                        soft_hyphen_after: segment.soft_hyphen_after,
-                    },
+                    next_segment,
                     &paragraph.style,
                     document,
                     font_provider,
@@ -12140,6 +12240,9 @@ fn flow_run_line_height(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
+    if run.text.is_empty() {
+        return 0.0;
+    }
     if inline_image_marker_index(&run.text).is_some() {
         return 0.0;
     }
@@ -22936,6 +23039,61 @@ mod tests {
         for (exclusion, expected_width) in exclusions.iter().zip([36.0, 45.0, 48.0, 36.0]) {
             assert!((exclusion.width - expected_width).abs() < 0.01);
             assert!((exclusion.height - 36.0).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn framed_word_drop_cap_honors_bounded_positioning_and_segmented_flow() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-positioning-passive.rtf"
+        ))
+        .expect("framed drop-cap positioning fixture should parse");
+        let layout = LayoutEngine::layout(&parsed.document);
+        assert_eq!(layout.pages.len(), 1);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let containing = |text: &str| {
+            fragments
+                .iter()
+                .copied()
+                .find(|fragment| fragment.text.contains(text))
+                .unwrap_or_else(|| panic!("missing text fragment {text:?}"))
+        };
+
+        let margin_cap = containing("M");
+        let margin_body = containing("Margin ");
+        assert!((margin_cap.x - 72.0).abs() < 0.01);
+        assert!((margin_body.x - 108.0).abs() < 0.01);
+        assert!((margin_cap.baseline_y - margin_body.baseline_y).abs() < 0.01);
+        assert!(fragments.iter().all(|fragment| fragment.text != "Margi"));
+
+        assert!((containing("P").x - 36.0).abs() < 0.01);
+        assert!((containing("Page ").x - 72.0).abs() < 0.01);
+        assert!((containing("C").x - 135.0).abs() < 0.01);
+        assert!((containing("Centered ").x - 36.0).abs() < 0.01);
+
+        let vertical_cap = containing("V");
+        let vertical_body = containing("Vertical ");
+        assert!(((vertical_body.baseline_y - vertical_cap.baseline_y) - 18.0).abs() < 0.01);
+        assert!((containing("R").x - 234.0).abs() < 0.01);
+        assert!((containing("Right ").x - 72.0).abs() < 0.01);
+
+        let exclusions = &layout.pages[0].flow_exclusions;
+        assert_eq!(exclusions.len(), 6);
+        for (exclusion, expected_x) in exclusions
+            .iter()
+            .zip([36.0, 72.0, 36.0, 135.0, 36.0, 234.0])
+        {
+            assert!((exclusion.x - expected_x).abs() < 0.01);
+            assert!((exclusion.width - 36.0).abs() < 0.01);
+            assert!((exclusion.height - 36.0).abs() < 0.01);
+            assert_eq!(exclusion.wrap_side, StaticImageWrapSide::Both);
         }
     }
 
