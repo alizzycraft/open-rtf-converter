@@ -31,7 +31,7 @@
     {
       "id": "table-basic-visual",
       "input": "fixtures/table-ish.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/table-ish.pdf",
       "word_reference_pages": [],
@@ -53,7 +53,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference confirms the two borderless rows, authored 100-point cell boundaries, and zero post-table flow gap when `\\trgaph` is omitted. Source-corrected text origins differ by at most 0.03 points horizontally and 0.01 points vertically; bundled Times-compatible glyph widths remain up to about 3.0 points shorter than Word's Times New Roman."
+        "The registered Word 16.0 reference confirms the two borderless rows, authored 100-point cell boundaries, and zero post-table flow gap when `\\trgaph` is omitted. A current five-span audit confirms matching one-page structure with zero drawings or images; source-corrected text origins differ by at most 0.03 points horizontally and 0.01 points vertically. Bundled Times-compatible glyph widths remain up to about 3.0 points shorter than Word's Times New Roman without changing cell flow."
       ]
     },
     {
@@ -1963,7 +1963,7 @@
     {
       "id": "floating-table-passive-positioning",
       "input": "fixtures/floating-table-positioning.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/floating-table-positioning.pdf",
       "word_reference_pages": [],
@@ -1999,7 +1999,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The positioned rows now share Word's margin-relative floating origin, wrap margins affect only the surrounding exclusion, and an immediately preceding paragraph receives bounded exclusion lookahead. All visible text line breaks match Word; text origins remain within about 0.86 points vertically and 0.08 points horizontally because of bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.07 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The positioned rows share Word's margin-relative floating origin, wrap margins affect only the surrounding exclusion, and an immediately preceding paragraph receives bounded exclusion lookahead. A current eight-span audit confirms identical one-page line grouping with zero drawings or images; matching origins differ by at most 0.07 points both horizontally and vertically after bounded Arial source-baseline recovery."
       ]
     },
     {
@@ -3853,7 +3853,7 @@
     {
       "id": "table-row-keep-together-passive-pagination",
       "input": "fixtures/table-row-keep-together-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/table-row-keep-together-passive.pdf",
       "word_reference_pages": [],
@@ -3888,13 +3888,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, the 72-point kept row begins page two with both lines intact, and the normal row plus post-table paragraph follow at the same 36-point cadence. Origins differ by at most about 1.0 point vertically from bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.08 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, the 72-point kept row begins page two with both lines intact, and the normal row plus post-table paragraph follow at the same 36-point cadence. A current nine-span audit finds matching origins within 0.03 points horizontally and 0.08 points vertically after bounded Arial source-baseline recovery, with zero drawings or images; three-times page-two renders were visually inspected."
       ]
     },
     {
       "id": "table-row-keep-follow-passive-pagination",
       "input": "fixtures/table-row-keep-follow-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/table-row-keep-follow-passive.pdf",
       "word_reference_pages": [],
@@ -3928,7 +3928,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, and the keep-follow row plus its follower move together to page two before the post-table paragraph. Horizontal origins differ by 0.02 points and vertical origins by at most about 0.98 points from bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.06 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, and the keep-follow row plus its follower move together to page two before the post-table paragraph. A current seven-span audit finds matching origins within 0.03 points horizontally and 0.06 points vertically after bounded Arial source-baseline recovery, with zero drawings or images."
       ]
     },
     {
@@ -3974,7 +3974,7 @@
     {
       "id": "widow-control-passive-pagination",
       "input": "fixtures/widow-control-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/widow-control-passive.pdf",
       "word_reference_pages": [],
@@ -4011,7 +4011,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference and converter have identical four-page grouping: the first page ends after `Filler two`, the second after `Filler six`, the third after `Restored tail`, and `Alias plain tail` starts page four. Horizontal origins match exactly; bundled Arial-compatible glyph boxes differ from Word's Arial boxes without changing pagination."
+        "The registered Word 16.0 reference and converter have identical four-page grouping: the first page ends after `Filler two`, the second after `Filler six`, the third after `Restored tail`, and `Alias plain tail` starts page four. A current fifteen-span audit finds exact horizontal origins and vertical origins within 0.07 points after bounded Arial source-baseline recovery, with zero drawings or images."
       ]
     },
     {
@@ -4193,7 +4193,7 @@
     {
       "id": "page-vertical-alignment-passive-layout",
       "input": "fixtures/page-vertical-alignment-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/page-vertical-alignment-passive.pdf",
       "word_reference_pages": [],
@@ -4221,13 +4221,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word applies the final vertical-alignment setting retroactively to the whole section. The converter now does the same: the final `\\vertalt` places both paragraphs at the top, with origins differing by 0.02 points horizontally and at most 0.80 points vertically from bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "Word applies the final vertical-alignment setting retroactively to the whole section. The converter does the same: the final `\\vertalt` places both paragraphs at the top. A current two-span audit finds matching origins within 0.03 points horizontally and 0.01 points vertically after bounded Arial source-baseline recovery, with zero drawings or images."
       ]
     },
     {
       "id": "page-gutter-passive-binding-space",
       "input": "fixtures/page-gutter-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/page-gutter-passive.pdf",
       "word_reference_pages": [],
@@ -4261,7 +4261,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word treats `\\gutterprl` as a document-wide top gutter for horizontal text and ignores the fixture's nonstandard `\\margmirsxn` alias. The converter now matches all three pages at x=36 within 0.02 points and y=72 within 0.80 points; standard `\\margmirror` and bounded `\\rtlgutter` side geometry remain separately supported."
+        "Word treats `\\gutterprl` as a document-wide top gutter for horizontal text and ignores the fixture's nonstandard `\\margmirsxn` alias. The converter matches all three pages at x=36 within 0.03 points and y=72 within 0.01 points after bounded Arial source-baseline recovery; standard `\\margmirror` and bounded `\\rtlgutter` side geometry remain separately supported. A current four-span audit confirms identical page grouping with zero drawings or images."
       ]
     },
     {
@@ -4425,7 +4425,7 @@
     {
       "id": "paragraph-spacing-passive-flow",
       "input": "fixtures/paragraph-spacing-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/paragraph-spacing-passive.pdf",
       "word_reference_pages": [],
@@ -4459,13 +4459,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms that parameterless automatic spacing does not synthesize a gap and contextual spacing suppresses the boundary when either adjacent same-style paragraph opts in. All five converter baselines now follow Word's unspaced cadence; bundled Arial-compatible line metrics produce diminishing vertical residuals of 0.80, 0.60, 0.40, 0.20, and 0.00 points. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The Word baseline confirms that parameterless automatic spacing does not synthesize a gap and contextual spacing suppresses the boundary when either adjacent same-style paragraph opts in. All five converter baselines follow Word's unspaced cadence. A current five-span audit finds matching origins within 0.03 points horizontally and 0.01 points vertically after bounded Arial source-baseline recovery, with zero drawings or images."
       ]
     },
     {
       "id": "line-spacing-passive-flow",
       "input": "fixtures/line-spacing-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/line-spacing-passive.pdf",
       "word_reference_pages": [],
@@ -4502,7 +4502,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms one-page flow and automatic recovery for the extreme value. Multiple spacing now preserves the natural first-line glyph baseline while expanding bounded line advance: the second double-spaced line differs by 0.20 points vertically, exact-line two by 0.05 points, and subsequent lines by at most 0.39 points. The first double-spaced line remains 2.64 points high because bundled Arial-compatible leading differs from Word's font metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The Word baseline confirms one-page flow and automatic recovery for the extreme value. Multiple spacing preserves the natural first-line glyph baseline while expanding bounded line advance, and exact spacing retains its authored pitch. A current seven-span audit finds matching origins within 0.03 points horizontally and 0.04 points vertically after bounded Arial source-baseline recovery, with zero drawings or images; four-times renders were visually inspected."
       ]
     },
     {
@@ -5781,7 +5781,7 @@
     {
       "id": "section-columns-passive-layout",
       "input": "fixtures/section-columns-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/section-columns-passive.pdf",
       "word_reference_pages": [],
@@ -5810,7 +5810,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word reference confirms the explicit 90-point columns, 18-point gap, column-break flow, and text origins within 0.13 points. Word limits the black 0.72-point separator to the occupied 13.8-point section content band; the converter now matches that relative geometry instead of extending a gray rule through the full page body. The remaining roughly 0.95-point absolute vertical offset is the shared bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The registered Word reference confirms the explicit 90-point columns, 18-point gap, and column-break flow. Word limits the black 0.72-point separator to the occupied 13.8-point section content band; the converter matches that relative geometry instead of extending a gray rule through the full page body. A current audit finds both text origins within 0.05 points horizontally and 0.01 points vertically after bounded Arial source-baseline recovery, with one matching separator drawing and zero images; four-times renders were visually inspected."
       ]
     },
     {
@@ -6373,7 +6373,7 @@
     {
       "id": "old-style-list-passive-markers",
       "input": "fixtures/old-style-list-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/old-style-list-passive.pdf",
       "word_reference_pages": [],
@@ -6405,7 +6405,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that both standalone old-style pn destinations are non-printing compatibility metadata: Word emits neither the synthesized 3./IV. markers nor their pnindent, pnhang, or pnsp layout, and the following paragraph also remains at the 36-point body origin. WordCompatiblePassive now strips each destination as a group, while StrictSpec retains the bounded marker/indentation fallback and its existing security coverage. Current and Word have identical four-line text and 13.8-point cadence; corresponding word x origins differ by at most 0.15 points and y origins retain the established 0.95-point bundled Arial-compatible residual. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; focused geometry was inspected."
+        "The focused Word 16.0 audit confirms that both standalone old-style pn destinations are non-printing compatibility metadata: Word emits neither the synthesized 3./IV. markers nor their pnindent, pnhang, or pnsp layout, and the following paragraph also remains at the 36-point body origin. WordCompatiblePassive strips each destination as a group, while StrictSpec retains the bounded marker/indentation fallback and its existing security coverage. A current four-span audit confirms identical one-page text and 13.8-point cadence; matching origins differ by at most 0.03 points horizontally and 0.01 points vertically after bounded Arial source-baseline recovery. Both PDFs have zero drawings, images, links, annotations, widgets, or actions."
       ]
     },
     {
