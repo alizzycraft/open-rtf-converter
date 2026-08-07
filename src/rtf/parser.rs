@@ -11413,7 +11413,7 @@ impl Parser {
             .iter()
             .find(|font| font.index == font_index);
         let twips_at_12_points = match font.map(|font| font.name.trim().to_ascii_lowercase()) {
-            Some(name) if name == "calibri" || name == "carlito" => 118_i64,
+            Some(name) if name == "calibri" || name == "carlito" => 144_i64,
             Some(name) if name == "times new roman" || name == "tinos" => 82_i64,
             None => 82_i64,
             _ => return None,

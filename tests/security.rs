@@ -26921,7 +26921,7 @@ fn custom_xml_markup_preserves_visible_text_without_metadata_leakage() {
                 .map(|run| run.style.character_spacing_twips),
             _ => None,
         });
-    assert_eq!(calibri_marker_spacing, Some(118));
+    assert_eq!(calibri_marker_spacing, Some(144));
     let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
     assert!(
         visible_text.contains("Before tagged  After")

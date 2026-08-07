@@ -14,7 +14,7 @@ use crate::layout::{
     LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
     TextFragment, TextRotation, passive_pair_kerning_points, passive_supplied_font_fallback_name,
     source_dingbat_advance_points, source_word_compatible_advance_points,
-    style_uses_passive_kerning, twips_to_points,
+    source_word_compatible_pair_kerning_points, style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ImageToneAdjustment,
@@ -1761,12 +1761,20 @@ fn encode_supplied_text_fragment_with_text(
         let kerning_adjustment = if style_uses_passive_kerning(&fragment.style) {
             previous
                 .and_then(|left| {
-                    font_asset_pair_kerning_points(
-                        asset,
+                    source_word_compatible_pair_kerning_points(
+                        source_font,
+                        &fragment.style,
                         left,
                         ch,
-                        fragment.style.font_size_points(),
                     )
+                    .or_else(|| {
+                        font_asset_pair_kerning_points(
+                            asset,
+                            left,
+                            ch,
+                            fragment.style.font_size_points(),
+                        )
+                    })
                 })
                 .unwrap_or(0.0)
         } else {

@@ -7975,7 +7975,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Bundled Liberation Sans supplies safe glyph contours for Word's Calibri, while layout uses bounded Calibri/Carlito source line and ASCII advance metrics. Current and Word have matching one-page flow and 14.648/14.64-point cadence; corresponding baselines differ by 0.42-0.43 points. The first two lines' final glyph origins differ by 1.15 and 0.57 points. A bounded layout-only close-range advance now reproduces Word's invisible custom-XML boundary spacing: the tagged line's final glyph origin differs by 0.01 points instead of 5.89, with a 0.32-point final contour-edge residual from the bundled font."
+        "Bundled Liberation Sans supplies safe glyph contours for Word's Calibri, while layout uses bounded Calibri/Carlito source line, ASCII advance, and independently covered regular kerning metrics. Current and Word have matching one-page flow and 14.648/14.64-point cadence; corresponding baselines differ by 0.42-0.43 points, and all three final glyph origins differ by at most 0.07 points. A bounded layout-only close-range advance reproduces Word's invisible custom-XML boundary spacing. Remaining final contour-edge residuals are at most 0.30 points from the bundled font."
       ]
     },
     {

@@ -15926,12 +15926,53 @@ fn passive_kerning_width_with_document_font(
     let mut previous = None;
     for ch in text.chars().filter(|ch| !is_zero_width_format_char(*ch)) {
         if let Some(left) = previous {
-            total += supplied_font_pair_kerning_points(font_provider, source_font, style, left, ch)
+            total += source_word_compatible_pair_kerning_points(source_font, style, left, ch)
+                .or_else(|| {
+                    supplied_font_pair_kerning_points(font_provider, source_font, style, left, ch)
+                })
                 .unwrap_or_else(|| passive_pair_kerning_points(left, ch, family, style));
         }
         previous = Some(ch);
     }
     total
+}
+
+pub(crate) fn source_word_compatible_pair_kerning_points(
+    font: Option<&FontDef>,
+    style: &CharacterStyle,
+    left: char,
+    right: char,
+) -> Option<f32> {
+    let name = font?.name.trim().to_ascii_lowercase();
+    if (name != "calibri" && name != "carlito") || style.bold || style.italic {
+        return None;
+    }
+    // Bounded regular-face pairs independently present in the registered
+    // Calibri metadata references. Values are 2048-unit Calibri/Carlito kern
+    // metrics; uncovered pairs continue through the supplied safe font.
+    let units = match (left, right) {
+        ('W', 'o') => -86,
+        ('a', 'f') => -12,
+        ('a', 't') => -19,
+        ('a', 'y') => -38,
+        ('e', 'f') => -18,
+        ('e', 't') => -11,
+        ('e', 'x') => -31,
+        ('f', 'o') => -43,
+        ('g', 'e') => -17,
+        ('g', 'g') => 19,
+        ('k', 'e') => -66,
+        ('r', '.') => -206,
+        ('r', 'd') => -28,
+        ('r', 'e') => -27,
+        ('s', 't') => -23,
+        ('t', 'a') => -25,
+        ('t', 'e') => -22,
+        ('x', 't') => 6,
+        ('y', 'o') => -24,
+        _ => return None,
+    };
+    Some(style.font_size_points() * units as f32 / 2_048.0)
 }
 
 fn supplied_font_pair_kerning_points(
@@ -27435,6 +27476,32 @@ mod tests {
                 &CharacterStyle::default(),
                 '\u{03a9}',
                 12.0,
+            )
+            .is_none()
+        );
+        let regular = CharacterStyle {
+            font_index: 0,
+            font_size_half_points: 24,
+            ..Default::default()
+        };
+        for (left, right, units) in [('W', 'o', -86.0), ('r', '.', -206.0)] {
+            let kerning =
+                source_word_compatible_pair_kerning_points(Some(font), &regular, left, right)
+                    .expect("registered Calibri pair");
+            assert!((kerning - (12.0 * units / 2_048.0)).abs() < 0.001);
+        }
+        assert!(
+            source_word_compatible_pair_kerning_points(Some(font), &regular, 'H', 'e').is_none()
+        );
+        assert!(
+            source_word_compatible_pair_kerning_points(
+                Some(font),
+                &CharacterStyle {
+                    bold: true,
+                    ..regular
+                },
+                'W',
+                'o',
             )
             .is_none()
         );
