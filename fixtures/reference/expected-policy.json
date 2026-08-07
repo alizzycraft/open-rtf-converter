@@ -7975,7 +7975,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Bundled Liberation Sans supplies safe glyph contours for Word's Calibri, while layout now uses Calibri's bounded 2500/2048-em source line metric. Current and Word have matching one-page flow and 14.648/14.64-point cadence; corresponding baselines differ by 0.42-0.43 points instead of the former 1.07-point first-line and accumulating cadence residual. Line starts differ by 0.02 points and endpoints by 0.97-7.49 points under the remaining bundled glyph-width substitution."
+        "Bundled Liberation Sans supplies safe glyph contours for Word's Calibri, while layout uses bounded Calibri/Carlito source line and ASCII advance metrics. Current and Word have matching one-page flow and 14.648/14.64-point cadence; corresponding baselines differ by 0.42-0.43 points instead of the former 1.07-point first-line and accumulating cadence residual. The first two lines' final glyph origins differ by 1.15 and 0.57 points. The XML-tagged line retains a 5.89-point endpoint residual because Word assigns additional invisible spacing around its printed XML range; that separately evidenced metadata-boundary behavior remains open."
       ]
     },
     {
@@ -8029,7 +8029,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-compatible mode and Word both leave the fixture's paragraph and linked-character style references visually inert, producing three plain Calibri-category lines at the 72-point origin. Layout uses Calibri's bounded 2500/2048-em source line metric while embedding safe Liberation Sans contours: current and Word cadence is 14.648/14.64 points and baselines differ by 0.42-0.43 points instead of the former 1.07-point first-line and accumulating cadence residual. Bundled glyph-width substitution leaves endpoints 0.18-10.20 points apart. Three-times renders were visually inspected."
+        "Word-compatible mode and Word both leave the fixture's paragraph and linked-character style references visually inert, producing three plain Calibri-category lines at the 72-point origin. Layout uses bounded Calibri/Carlito source line and style-specific ASCII advance metrics while embedding safe Liberation Sans contours: current and Word cadence is 14.648/14.64 points, baselines differ by 0.42-0.43 points, and final non-space glyph origins differ by at most 0.12 points. The last bundled glyph contour edge differs by at most 0.90 points; Word's non-painted trailing paragraph spaces remain normalized away. Three-times renders were visually inspected."
       ]
     },
     {
