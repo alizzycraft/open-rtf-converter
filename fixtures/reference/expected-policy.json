@@ -2005,7 +2005,7 @@
     {
       "id": "office-math-passive-text",
       "input": "fixtures/office-math-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/office-math-passive.pdf",
       "word_reference_pages": [],
@@ -2051,7 +2051,7 @@
     {
       "id": "office-math-structures-passive-layout",
       "input": "fixtures/office-math-structures-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/office-math-structures-passive.pdf",
       "word_reference_pages": [],
@@ -2109,7 +2109,7 @@
     {
       "id": "office-math-flow-passive-layout",
       "input": "fixtures/office-math-flow-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/office-math-flow-passive.pdf",
       "word_reference_pages": [],
@@ -2171,7 +2171,7 @@
     {
       "id": "office-math-limits-arrays-passive-layout",
       "input": "fixtures/office-math-limits-arrays-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/office-math-limits-arrays-passive.pdf",
       "word_reference_pages": [],
@@ -2807,7 +2807,7 @@
     {
       "id": "generated-counter-fields-passive-numbering",
       "input": "fixtures/generated-counter-fields-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/generated-counter-fields-passive.pdf",
       "word_reference_pages": [],
@@ -2925,7 +2925,7 @@
     {
       "id": "styleref-resultless-passive-fields",
       "input": "fixtures/styleref-resultless-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/styleref-resultless-passive.pdf",
       "word_reference_pages": [],
@@ -2977,7 +2977,7 @@
     {
       "id": "styleref-multilevel-passive-fields",
       "input": "fixtures/styleref-multilevel-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/styleref-multilevel-passive.pdf",
       "word_reference_pages": [],
@@ -3022,7 +3022,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference proves that a level-three list template containing its parent placeholders yields 1.1.1 for all three STYLEREF number switches (\\n, \\r, and \\w), both in ordinary body flow and from a following level-three list paragraph. WordCompatiblePassive now retains the complete authored context instead of reducing \\n to the final component. Current and Word have identical eight-line grouping; matching lines begin within 0.03 points horizontally and retain the established 0.95-point bundled Arial-compatible vertical residual. Current line endpoints are up to about 3.44 points shorter because of bundled font metrics. Both PDFs are one-page text-only output with zero drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The registered Word 16.0 reference proves that a level-three list template containing its parent placeholders yields 1.1.1 for all three STYLEREF number switches (\\n, \\r, and \\w), both in ordinary body flow and from a following level-three list paragraph. WordCompatiblePassive retains the complete authored context instead of reducing \\n to the final component. Current and Word have identical eight-line grouping; matching lines begin within 0.03 points horizontally and source-corrected baselines differ by at most 0.04 points. Current line endpoints are up to about 3.44 points shorter because of safe bundled font contours without changing flow. Both PDFs are one-page text-only output with zero drawings, images, links, annotations, widgets, or actions."
       ]
     },
     {
@@ -3154,7 +3154,7 @@
     {
       "id": "line-numbering-passive-margin-text",
       "input": "fixtures/line-numbering-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/line-numbering-passive.pdf",
       "word_reference_pages": [],
@@ -3181,13 +3181,13 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Focused multi-page Word 16.0 probes confirm exact restart semantics with non-default starts: continuous mode emits 5/6 then 7/8 across an explicit page break, per-page mode emits 5/6 on both pages, and per-section mode emits 5/6 then the second section's authored 7/8. Current output matches every number, page count, and 13.8-point cadence; number origins retain only the established bundled Arial-compatible residual of 0.312 points horizontally and 0.951 vertically. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "Focused multi-page Word 16.0 probes confirm exact restart semantics with non-default starts: continuous mode emits 5/6 then 7/8 across an explicit page break, per-page mode emits 5/6 on both pages, and per-section mode emits 5/6 then the second section's authored 7/8. Current output matches every number, page count, and 13.8-point cadence; number origins differ by at most 0.32 points horizontally and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
       "id": "page-border-art-passive-fallback",
       "input": "fixtures/page-border-art-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/page-border-art-passive.pdf",
       "word_reference_pages": [],
@@ -3214,7 +3214,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that border-art ID 42 is a scissors-and-dashed-strip tile rendered as 34 vector paths. WordCompatiblePassive emits a bounded 16-primitive passive template with measured joint quadrilaterals, Word's ring-over-joint paint order, outlined blades, complete-tile dash cadence, lead/final corners, and page clipping. Its clipped union is (35.88,-7.92)-(250.11,24.12) points versus Word's (35.88,-7.92)-(250.16,24.18); the ellipse-based rings replace Word's segmented cubic contours but are visually equivalent at eight-times inspection. Unknown border-art IDs retain the bounded authored-width line fallback. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; eight-times crops and full pages were visually inspected. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The focused Word 16.0 audit confirms that border-art ID 42 is a scissors-and-dashed-strip tile rendered as 34 vector paths. WordCompatiblePassive emits a bounded 16-primitive passive template with measured joint quadrilaterals, Word's ring-over-joint paint order, outlined blades, complete-tile dash cadence, lead/final corners, and page clipping. Its clipped union is (35.88,-7.92)-(250.11,24.12) points versus Word's (35.88,-7.92)-(250.16,24.18); the ellipse-based rings replace Word's segmented cubic contours but are visually equivalent at eight-times inspection. Unknown border-art IDs retain the bounded authored-width line fallback. Body text origins differ by 0.02 points horizontally and source-corrected baselines by at most 0.01 points. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; eight-times crops and full pages were visually inspected."
       ]
     },
     {
@@ -3258,7 +3258,7 @@
     {
       "id": "character-typography-passive-controls",
       "input": "fixtures/character-typography-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/character-typography-passive.pdf",
       "word_reference_pages": [],
@@ -3415,7 +3415,7 @@
     {
       "id": "section-grid-page-number-passive-layout",
       "input": "fixtures/section-grid-page-number-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/section-grid-page-number-passive.pdf",
       "word_reference_pages": [],
@@ -3450,7 +3450,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that pgnx360/pgny1440 leave the authored Page 1 header at its ordinary 36-point margin/header origin and emit a separate right-aligned legacy auto-page number whose right edge is 18 points beyond the body margin and whose glyph top is 72 points from the page top. WordCompatiblePassive now reproduces that two-number structure instead of moving the entire header; the header marker also receives Word's measured 2-point layout-only lead-in. The legacy number right edge differs by 0.17 points and its glyph top by 0.55 points from Word after bundled Arial-compatible metrics. The conflicting sectlinegrid360/sectdefaultcl/sectspecifycl/sectspecifyl sequence restores Word's 18-point body pitch in WordCompatiblePassive, while StrictSpec retains the explicit default-grid clearing behavior. Header/body x origins differ by at most 0.08 points and body vertical origins by the established 0.91-point font-metric residual. Both one-page PDFs contain identical visible structure with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
+        "The focused Word 16.0 audit confirms that pgnx360/pgny1440 leave the authored Page 1 header at its ordinary 36-point margin/header origin and emit a separate right-aligned legacy auto-page number whose right edge is 18 points beyond the body margin and whose glyph top is 72 points from the page top. WordCompatiblePassive reproduces that two-number structure instead of moving the entire header; the header marker also receives Word's measured 2-point layout-only lead-in. Current matching origins differ by at most 0.43 points horizontally and source-corrected baselines by at most 0.04 points. The conflicting sectlinegrid360/sectdefaultcl/sectspecifycl/sectspecifyl sequence restores Word's 18-point body pitch in WordCompatiblePassive, while StrictSpec retains the explicit default-grid clearing behavior. Both one-page PDFs contain identical visible structure with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected."
       ]
     },
     {
@@ -4308,7 +4308,7 @@
     {
       "id": "alignment-direction-passive-layout",
       "input": "fixtures/alignment-direction-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/alignment-direction-passive.pdf",
       "word_reference_pages": [],
@@ -4349,7 +4349,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Exact-family font assets outrank wildcard fallbacks, restoring Word's implicit Times-family line breaks. Later cross-run spacing recovery also closed the former 3.13-point distributed-final-line residual: its current final glyph endpoint differs from Word by 0.14 points, while the non-final justified endpoint differs by 0.38 points. Paragraph origins differ by at most 0.92 points vertically, right alignment by 0.17 points horizontally, and passive Hebrew/LTR visual ordering matches."
+        "Exact-family font assets outrank wildcard fallbacks, restoring Word's implicit Times-family line breaks. Cross-run spacing recovery closes the former 3.13-point distributed-final-line residual: its current final glyph endpoint differs from Word by 0.14 points, while the non-final justified endpoint differs by 0.38 points. A current nineteen-span audit finds matching origins within 0.60 points horizontally and source-corrected baselines within 0.01 points; passive Hebrew/LTR visual ordering matches."
       ]
     },
     {
@@ -5425,7 +5425,7 @@
     {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/text-effects-passive.pdf",
       "word_reference_pages": [],
@@ -5471,7 +5471,7 @@
     {
       "id": "text-decoration-passive-strokes",
       "input": "fixtures/text-decoration-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/text-decoration-passive.pdf",
       "word_reference_pages": [],
@@ -5518,7 +5518,7 @@
     {
       "id": "character-highlight-border-passive-drawing",
       "input": "fixtures/character-highlight-border-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/character-highlight-border-passive.pdf",
       "word_reference_pages": [],
@@ -5559,7 +5559,7 @@
         " re"
       ],
       "known_gaps": [
-        "Word-backed highlight, shading, and clamped solid-border geometry is implemented; remaining text-origin drift is under one point from the bundled Times-compatible Base14 metrics."
+        "Word-backed highlight, shading, and clamped solid-border geometry is implemented. A current four-span audit finds matching origins within 0.25 points horizontally and exact source-corrected baselines; four-times current/Word crops confirm equivalent visible fills, shading, and border geometry despite Word decomposing the same strokes into more PDF drawing paths."
       ]
     },
     {
@@ -5652,7 +5652,7 @@
     {
       "id": "note-placement-passive-layout",
       "input": "fixtures/note-placement-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/note-placement-passive.pdf",
       "word_reference_pages": [],
@@ -6314,7 +6314,7 @@
     {
       "id": "nested-table-flatten-passive-layout",
       "input": "fixtures/nested-table-flatten-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/nested-table-flatten-passive.pdf",
       "word_reference_pages": [],
@@ -6579,7 +6579,7 @@
     {
       "id": "associated-character-passive-controls",
       "input": "fixtures/associated-character-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "intentional_security_difference",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/associated-character-passive.pdf",
       "word_reference_pages": [],
@@ -8118,7 +8118,7 @@
     {
       "id": "word-grid-outline-metadata-passive-classification",
       "input": "fixtures/word-grid-outline-metadata-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/word-grid-outline-metadata-passive.pdf",
       "word_reference_pages": [],
@@ -8149,7 +8149,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's outline-level and character-grid metadata have no visible pagination, indentation, or spacing effect in this fixture. Both outputs are one-page, two-line, text-only PDFs with exact 13.8-point cadence; line starts differ by at most 0.03 points, endpoints by at most 3.04 points, and source-corrected baselines by at most 0.01 points."
+        "Word's outline-level and character-grid metadata have no visible pagination, indentation, or spacing effect in this fixture. Both outputs are one-page, two-line, text-only PDFs with exact 13.8-point cadence; a current two-span audit finds line origins within 0.03 points horizontally and source-corrected baselines within 0.01 points. Safe bundled font contours do not change flow."
       ]
     },
     {
@@ -8202,7 +8202,7 @@
     {
       "id": "word-layout-compatibility-passive-classification",
       "input": "fixtures/word-layout-compatibility-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/word-layout-compatibility-passive.pdf",
       "word_reference_pages": [],
