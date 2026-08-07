@@ -8198,8 +8198,7 @@ fn layout_framed_paragraph_group(
         if negative_width_frame {
             cursor_y
         } else {
-            shape_vertical_origin(paragraph.style.frame_vertical_anchor, cursor_y, geometry)
-                - twips_to_points(paragraph.style.frame_vertical_offset_twips)
+            paragraph_frame_top(&paragraph.style, frame_height, cursor_y, *geometry)
         }
     };
     if (negative_width_frame
@@ -8457,6 +8456,7 @@ fn passive_frame_content_paragraph(paragraph: &Paragraph) -> Paragraph {
     passive.style.frame_horizontal_alignment = None;
     passive.style.frame_horizontal_offset_twips = 0;
     passive.style.frame_vertical_anchor = StaticShapeVerticalAnchor::Paragraph;
+    passive.style.frame_vertical_alignment = None;
     passive.style.frame_vertical_offset_twips = 0;
     if is_drop_cap {
         passive.style.space_before_twips = 0;
@@ -8511,6 +8511,7 @@ fn same_absolute_paragraph_frame(first: &Paragraph, second: &Paragraph) -> bool 
         && first.style.frame_horizontal_alignment == second.style.frame_horizontal_alignment
         && first.style.frame_horizontal_offset_twips == second.style.frame_horizontal_offset_twips
         && first.style.frame_vertical_anchor == second.style.frame_vertical_anchor
+        && first.style.frame_vertical_alignment == second.style.frame_vertical_alignment
         && first.style.frame_vertical_offset_twips == second.style.frame_vertical_offset_twips
         && first.style.frame_text_direction == second.style.frame_text_direction
 }
@@ -8738,9 +8739,8 @@ fn resolve_absolute_frame_exclusion(
     let frame_height = prepared_frame.height;
     let framed_lines = prepared_frame.lines;
     let requested_frame_top =
-        (shape_vertical_origin(paragraph.style.frame_vertical_anchor, cursor_y, &geometry)
-            - twips_to_points(paragraph.style.frame_vertical_offset_twips))
-        .clamp(frame_height, geometry.height);
+        paragraph_frame_top(&paragraph.style, frame_height, cursor_y, geometry)
+            .clamp(frame_height, geometry.height);
     let frame_left = paragraph_frame_left(
         &paragraph.style,
         frame_width,
@@ -8813,6 +8813,36 @@ fn paragraph_frame_left(
         |alignment| table_row_left(anchor_left, anchor_width, frame_width, alignment, geometry),
     );
     requested.clamp(0.0, (geometry.width - frame_width).max(0.0))
+}
+
+fn paragraph_frame_top(
+    style: &ParagraphStyle,
+    frame_height: f32,
+    paragraph_top: f32,
+    geometry: PageGeometry,
+) -> f32 {
+    let Some(alignment) = style.frame_vertical_alignment else {
+        return shape_vertical_origin(style.frame_vertical_anchor, paragraph_top, &geometry)
+            - twips_to_points(style.frame_vertical_offset_twips);
+    };
+    if style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph {
+        return paragraph_top - twips_to_points(style.frame_vertical_offset_twips);
+    }
+    let (anchor_bottom, anchor_top) = match style.frame_vertical_anchor {
+        StaticShapeVerticalAnchor::Paragraph => unreachable!(),
+        StaticShapeVerticalAnchor::Margin => (
+            geometry.margin_bottom,
+            geometry.height - geometry.margin_top,
+        ),
+        StaticShapeVerticalAnchor::Page => (0.0, geometry.height),
+    };
+    match alignment {
+        TableCellVerticalAlign::Top => anchor_top,
+        TableCellVerticalAlign::Center => {
+            anchor_bottom + ((anchor_top - anchor_bottom + frame_height) / 2.0)
+        }
+        TableCellVerticalAlign::Bottom => anchor_bottom + frame_height,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -24339,6 +24369,42 @@ mod tests {
             assert!((exclusion.width - expected_widths[page_index]).abs() < 0.01);
             assert!((exclusion.height - expected_heights[page_index]).abs() < 0.01);
         }
+    }
+
+    #[test]
+    fn ordinary_frame_vertical_alignment_uses_page_and_margin_anchor_bounds() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/paragraph-frame-vertical-alignment-passive.rtf"
+        ))
+        .expect("paragraph-frame vertical-alignment fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 7);
+
+        let expected_exclusion_tops = [504.0, 288.0, 72.0, 468.0, 288.0, 108.0, 426.402];
+        for (page_index, expected_top) in expected_exclusion_tops.into_iter().enumerate() {
+            let exclusions = &layout.pages[page_index].flow_exclusions;
+            assert_eq!(exclusions.len(), 1);
+            let top = exclusions[0].y + exclusions[0].height;
+            assert!(
+                (top - expected_top).abs() < 0.02,
+                "page {} exclusion top {top} != {expected_top}",
+                page_index + 1
+            );
+        }
+
+        let frame_fragment = |page_index: usize| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(layout_item_text_fragment)
+                .find(|fragment| fragment.text.contains("frame."))
+                .unwrap_or_else(|| panic!("missing page {} frame text", page_index + 1))
+        };
+        assert!(frame_fragment(0).baseline_y > frame_fragment(1).baseline_y);
+        assert!(frame_fragment(1).baseline_y > frame_fragment(2).baseline_y);
+        assert!(frame_fragment(3).baseline_y > frame_fragment(4).baseline_y);
+        assert!(frame_fragment(4).baseline_y > frame_fragment(5).baseline_y);
     }
 
     #[test]

@@ -19,8 +19,8 @@ use open_rtf_converter::model::{
     StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageWrapSide,
     StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
     StaticShapeLineJoin, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection, TableRowAlignment, TextRelief,
-    UnderlineStyle, inline_image_marker_index,
+    TOTAL_PAGES_MARKER, TabAlignment, TableCellTextDirection, TableCellVerticalAlign,
+    TableRowAlignment, TextRelief, UnderlineStyle, inline_image_marker_index,
 };
 use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
@@ -75280,6 +75280,19 @@ fn framed_drop_cap_vertical_alignments_remain_passive_metadata() {
         );
         assert_eq!(paragraphs[index].style.frame_vertical_offset_twips, 0);
     }
+    assert_eq!(paragraphs[0].style.frame_vertical_alignment, None);
+    assert_eq!(
+        paragraphs[2].style.frame_vertical_alignment,
+        Some(TableCellVerticalAlign::Top)
+    );
+    assert_eq!(
+        paragraphs[4].style.frame_vertical_alignment,
+        Some(TableCellVerticalAlign::Center)
+    );
+    assert_eq!(
+        paragraphs[6].style.frame_vertical_alignment,
+        Some(TableCellVerticalAlign::Bottom)
+    );
 
     let dir = tempdir().unwrap();
     let input_path = dir.path().join("framed-drop-cap-vertical-alignment.rtf");
@@ -75308,6 +75321,82 @@ fn framed_drop_cap_vertical_alignments_remain_passive_metadata() {
     ] {
         assert!(
             !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
+fn ordinary_frame_vertical_alignments_remain_bounded_passive_geometry() {
+    let input = include_bytes!("../fixtures/paragraph-frame-vertical-alignment-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let frames = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) if paragraph.style.frame_width_twips.is_some() => Some((
+                paragraph.style.frame_vertical_anchor,
+                paragraph.style.frame_vertical_alignment,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 7);
+    assert_eq!(
+        frames.iter().map(|frame| frame.1).collect::<Vec<_>>(),
+        vec![
+            Some(TableCellVerticalAlign::Top),
+            Some(TableCellVerticalAlign::Center),
+            Some(TableCellVerticalAlign::Bottom),
+            Some(TableCellVerticalAlign::Top),
+            Some(TableCellVerticalAlign::Center),
+            Some(TableCellVerticalAlign::Bottom),
+            Some(TableCellVerticalAlign::Center),
+        ]
+    );
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert_eq!(layout.pages.len(), 7);
+    let frame_baseline = |page_index: usize| {
+        layout.pages[page_index]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.contains("frame.") => {
+                    Some(fragment.baseline_y)
+                }
+                _ => None,
+            })
+            .expect("frame text baseline")
+    };
+    assert!(frame_baseline(0) > frame_baseline(1));
+    assert!(frame_baseline(1) > frame_baseline(2));
+    assert!(frame_baseline(3) > frame_baseline(4));
+    assert!(frame_baseline(4) > frame_baseline(5));
+
+    let output = convert_rtf_to_pdf(input, &ConvertOptions::default()).unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    for forbidden in [
+        b"posyt".as_slice(),
+        b"posyc",
+        b"posyb",
+        b"pvpg",
+        b"pvmrg",
+        b"pvpara",
+        b"absw",
+        b"absh",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
                 .any(|window| window == forbidden)
         );
     }

@@ -1037,6 +1037,9 @@ pub struct ParagraphStyle {
     pub frame_horizontal_offset_twips: i32,
     /// Coordinate system used for bounded vertical paragraph-frame placement.
     pub frame_vertical_anchor: StaticShapeVerticalAnchor,
+    /// Optional top/center/bottom alignment inside a page or margin anchor.
+    /// Paragraph-relative frames retain Word's inert alignment behavior.
+    pub frame_vertical_alignment: Option<TableCellVerticalAlign>,
     /// Downward distance from the selected vertical anchor origin.
     pub frame_vertical_offset_twips: i32,
     /// Bounded passive text direction inside an ordinary paragraph frame.
@@ -1088,6 +1091,7 @@ impl Default for ParagraphStyle {
             frame_horizontal_alignment: None,
             frame_horizontal_offset_twips: 0,
             frame_vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
+            frame_vertical_alignment: None,
             frame_vertical_offset_twips: 0,
             frame_text_direction: TableCellTextDirection::LeftToRightTopToBottom,
             left_indent_twips: 0,

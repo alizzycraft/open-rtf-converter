@@ -5246,6 +5246,56 @@
       ]
     },
     {
+      "id": "paragraph-frame-vertical-alignment-passive-layout",
+      "input": "fixtures/paragraph-frame-vertical-alignment-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-frame-vertical-alignment-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 7,
+      "must_preserve_text": [
+        "Page top frame",
+        "Page center frame",
+        "Page bottom frame",
+        "Margin top frame",
+        "Margin center frame",
+        "Margin bottom frame",
+        "Paragraph center frame"
+      ],
+      "intentional_security_differences": [
+        "Paragraph-frame vertical alignment is normalized into bounded passive page or margin geometry; raw frame controls and editable positioning metadata never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame vertical alignment \\posyt interpreted as bounded passive placement",
+        "paragraph frame vertical alignment \\posyc interpreted as bounded passive placement",
+        "paragraph frame vertical alignment \\posyb interpreted as bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "posyt",
+        "posyc",
+        "posyb",
+        "pvpg",
+        "pvmrg",
+        "pvpara",
+        "absw",
+        "absh",
+        "phpg",
+        "phcol",
+        "posx",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused seven-page Word 16.0 probe proves that ordinary paragraph-frame posyt, posyc, and posyb align a complete frame to the top, center, or bottom of its pvpg physical-page bounds or pvmrg body-margin bounds. Paragraph-relative pvpara alignment remains inert and retains the current flow position. Current and Word preserve identical visible text, word order, line grouping, and all seven frame placements. Frame x origins differ by 0.02 points and y boxes retain a 0.39-1.04-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "paragraph-frame-text-direction-passive-layout",
       "input": "fixtures/paragraph-frame-text-direction-passive.rtf",
       "category": "must_match_closely",
