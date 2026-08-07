@@ -241,6 +241,7 @@ struct ParserState {
     office_math_limit_container_direct: OfficeMathLimitKind,
     office_math_limit_id: Option<usize>,
     office_math_nary_container_direct: bool,
+    office_math_nary_id: Option<usize>,
     office_math_nary_property_direct: bool,
     office_math_nary_limit_location_capture: bool,
     office_math_nary_limit_location_text: String,
@@ -410,6 +411,7 @@ impl Default for ParserState {
             office_math_limit_container_direct: OfficeMathLimitKind::None,
             office_math_limit_id: None,
             office_math_nary_container_direct: false,
+            office_math_nary_id: None,
             office_math_nary_property_direct: false,
             office_math_nary_limit_location_capture: false,
             office_math_nary_limit_location_text: String::new(),
@@ -3544,6 +3546,7 @@ impl Parser {
             }
             "mnary" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_container_direct = true;
+                self.state.office_math_nary_id = Some(offset);
                 self.state.office_math_nary_limit_location = OfficeMathNaryLimitLocation::SubSup;
                 self.state.office_math_nary_subscript_hidden = false;
                 self.state.office_math_nary_superscript_hidden = false;
@@ -3553,6 +3556,15 @@ impl Parser {
                     && self.office_math_direct_parent_is_nary() =>
             {
                 self.state.office_math_nary_property_direct = true;
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                    self.state.character.passive_math_nary_id =
+                        self.office_math_direct_parent_nary_id();
+                    if self.state.office_math_nary_subscript_hidden
+                        && self.state.office_math_nary_superscript_hidden
+                    {
+                        self.state.character.passive_math_nary_base_id = Some(offset);
+                    }
+                }
             }
             "mlimLoc"
                 if destination_allows_visible_content(&self.state)
@@ -3694,7 +3706,18 @@ impl Parser {
             "me" if destination_allows_visible_content(&self.state)
                 && self.office_math_direct_parent_is_nary() =>
             {
-                self.state.character.passive_math_nary_base_id = Some(offset);
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+                    self.state.character.passive_math_nary_id =
+                        self.office_math_direct_parent_nary_id();
+                    if self.state.office_math_nary_subscript_hidden
+                        && self.state.office_math_nary_superscript_hidden
+                    {
+                        self.state.character.passive_math_nary_base_id =
+                            self.office_math_direct_parent_nary_id();
+                    }
+                } else {
+                    self.state.character.passive_math_nary_base_id = Some(offset);
+                }
             }
             "me" if destination_allows_visible_content(&self.state)
                 && self.office_math_direct_parent_is_phantom() =>
@@ -3703,9 +3726,20 @@ impl Parser {
             }
             "msub" if destination_allows_visible_content(&self.state) => {
                 if self.office_math_direct_parent_allows_script_slot() {
+                    let word_compatible_nary = self.options.compatibility_mode
+                        == CompatibilityMode::WordCompatiblePassive
+                        && self.office_math_direct_parent_is_nary();
+                    if word_compatible_nary {
+                        self.state.character.passive_math_nary_id =
+                            self.office_math_direct_parent_nary_id();
+                        if !self.state.office_math_nary_subscript_hidden {
+                            self.state.character.passive_math_nary_base_id =
+                                self.office_math_direct_parent_nary_id();
+                        }
+                    }
                     if self.state.office_math_nary_subscript_hidden {
                         self.state.character.hidden = true;
-                    } else {
+                    } else if !word_compatible_nary {
                         self.state.character.baseline_shift_half_points =
                             self.office_math_direct_parent_nary_limit_shift(true);
                         self.state.character.font_size_scale_percent =
@@ -3715,9 +3749,22 @@ impl Parser {
             }
             "msup" if destination_allows_visible_content(&self.state) => {
                 if self.office_math_direct_parent_allows_script_slot() {
+                    let word_compatible_nary = self.options.compatibility_mode
+                        == CompatibilityMode::WordCompatiblePassive
+                        && self.office_math_direct_parent_is_nary();
+                    if word_compatible_nary {
+                        self.state.character.passive_math_nary_id =
+                            self.office_math_direct_parent_nary_id();
+                        if self.state.office_math_nary_subscript_hidden
+                            && !self.state.office_math_nary_superscript_hidden
+                        {
+                            self.state.character.passive_math_nary_base_id =
+                                self.office_math_direct_parent_nary_id();
+                        }
+                    }
                     if self.state.office_math_nary_superscript_hidden {
                         self.state.character.hidden = true;
-                    } else {
+                    } else if !word_compatible_nary {
                         self.state.character.baseline_shift_half_points =
                             self.office_math_direct_parent_nary_limit_shift(false);
                         self.state.character.font_size_scale_percent =
@@ -8452,6 +8499,13 @@ impl Parser {
         self.stack
             .last()
             .is_some_and(|state| state.office_math_nary_container_direct)
+    }
+
+    fn office_math_direct_parent_nary_id(&self) -> Option<usize> {
+        self.stack
+            .last()
+            .filter(|state| state.office_math_nary_container_direct)
+            .and_then(|state| state.office_math_nary_id)
     }
 
     fn office_math_direct_parent_is_phantom(&self) -> bool {

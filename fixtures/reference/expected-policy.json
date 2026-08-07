@@ -2218,6 +2218,49 @@
       ]
     },
     {
+      "id": "office-math-nary-visible-passive-layout",
+      "input": "fixtures/office-math-nary-visible-passive.rtf",
+      "category": "acceptable_approximation",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/office-math-nary-visible-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Before inline ",
+        "i=1na",
+        " between under-over ",
+        "k=1mb",
+        " after visible n-ary math."
+      ],
+      "intentional_security_differences": [
+        "Office n-ary math is recovered as bounded passive text and an invisible wrap-reservation marker, never as an active equation object."
+      ],
+      "expected_diagnostics": [
+        "Office math rendered as bounded passive math text"
+      ],
+      "forbidden_pdf_markers": [
+        "mmath",
+        "moMath",
+        "mnary",
+        "mnaryPr",
+        "mchr",
+        "mlimLoc",
+        "msubHide",
+        "msupHide",
+        "msub",
+        "msup",
+        "mtext",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word visibly linearizes both sub/sup and under/over n-ary limits at the ordinary 12-point math baseline. The converter now preserves each complete n-ary expression as one atomic wrapping unit and matches Word's two-line grouping, while retaining the bounded 5/18-em operator gap. Bundled Tinos substitutes for Cambria Math, leaving the summation group about 4.0 points and the product group about 5.5 points narrower than Word; Word also gives the first inline equation about 1.92 points of object lead-in."
+      ]
+    },
+    {
       "id": "field-hyperlink-passive-result",
       "input": "fixtures/field-hyperlink-passive.rtf",
       "category": "must_match_closely",

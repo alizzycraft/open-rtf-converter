@@ -1248,6 +1248,8 @@ pub struct CharacterStyle {
     pub passive_math_limit_part: PassiveMathLimitPart,
     pub passive_math_equation_array_id: Option<usize>,
     pub passive_math_equation_array_row: usize,
+    /// Word-compatible atomic inline grouping for one visible n-ary expression.
+    pub passive_math_nary_id: Option<usize>,
     pub passive_math_nary_base_id: Option<usize>,
     pub passive_math_phantom_id: Option<usize>,
     pub baseline_shift_half_points: i32,
@@ -1291,6 +1293,7 @@ impl Default for CharacterStyle {
             passive_math_limit_part: PassiveMathLimitPart::None,
             passive_math_equation_array_id: None,
             passive_math_equation_array_row: 0,
+            passive_math_nary_id: None,
             passive_math_nary_base_id: None,
             passive_math_phantom_id: None,
             baseline_shift_half_points: 0,

@@ -23364,12 +23364,41 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
     );
     let lower_limit_style =
         run_style_for_text(&parsed.document, "i=1").expect("lower n-ary limit run");
-    assert!(lower_limit_style.baseline_shift_half_points < 0);
-    assert!(lower_limit_style.font_size_scale_percent < 100);
-    let upper_limit_style =
-        run_style_for_text(&parsed.document, "n").expect("upper n-ary limit run");
-    assert!(upper_limit_style.baseline_shift_half_points > 0);
-    assert!(upper_limit_style.font_size_scale_percent < 100);
+    assert_eq!(lower_limit_style.baseline_shift_half_points, 0);
+    assert_eq!(lower_limit_style.font_size_scale_percent, 100);
+    assert!(lower_limit_style.passive_math_nary_id.is_some());
+    assert!(lower_limit_style.passive_math_nary_base_id.is_some());
+    let upper_limit_style = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .flat_map(|paragraph| &paragraph.runs)
+        .find(|run| run.style.passive_math_nary_id.is_some() && run.text.contains('n'))
+        .map(|run| &run.style)
+        .expect("upper n-ary limit run");
+    assert_eq!(upper_limit_style.baseline_shift_half_points, 0);
+    assert_eq!(upper_limit_style.font_size_scale_percent, 100);
+    assert!(upper_limit_style.passive_math_nary_id.is_some());
+    let strict = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_lower =
+        run_style_for_text(&strict.document, "i=1").expect("strict lower n-ary limit run");
+    let strict_upper =
+        run_style_for_text(&strict.document, "n").expect("strict upper n-ary limit run");
+    assert!(strict_lower.baseline_shift_half_points < 0);
+    assert!(strict_lower.font_size_scale_percent < 100);
+    assert!(strict_upper.baseline_shift_half_points > 0);
+    assert!(strict_upper.font_size_scale_percent < 100);
     for forbidden in [
         "mmath", "moMath", "mnary", "mnaryPr", "mchr", "msubHide", "msupHide", "mtext",
     ] {
@@ -23501,7 +23530,14 @@ fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
         "\\",
         "par}",
     ]);
-    let parsed = parse_rtf_bytes(&input).unwrap();
+    let parsed = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
     let text = collect_text(&parsed.document);
     assert!(
         text.contains("Before \u{2211}lowAupAbodyA and \u{2211}lowBupBbodyB After"),
@@ -23543,6 +23579,10 @@ fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
         &input,
         &ConvertOptions {
             diagnostics: true,
+            parse_options: RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
             ..ConvertOptions::default()
         },
     )
