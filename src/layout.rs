@@ -11,18 +11,19 @@ use crate::model::{
     EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
     NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER,
-    PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER,
-    PageNumberFormat, PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
-    ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart,
-    Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
-    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TableRowWrapMargins, UnderlineStyle, inline_image_marker_index,
+    PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_INLINE_LEAD_MARKER,
+    PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
+    Paragraph, ParagraphBorders, ParagraphFrameVerticalAlignment, ParagraphStyle,
+    PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
+    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
+    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
+    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
+    TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
+    inline_image_marker_index,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -33,6 +34,8 @@ const DEFAULT_PARAGRAPH_BORDER_SIDE_GAP_POINTS: f32 = 1.5;
 const MAX_LAYOUT_COLUMNS: usize = 16;
 const PASSIVE_NARROW_FONT_SCALE_PERCENT: i32 = 82;
 const OFFICE_MATH_EQUATION_ARRAY_HALF_ROW_PITCH_HALF_POINTS: i32 = 14;
+const WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS: f32 = 1.92;
+const WORD_NARY_OPERATOR_GAP_EM: f32 = 1.0 / 6.0;
 const PASSIVE_NOTE_LABEL_SHIFT_HALF_POINTS: i32 = 6;
 const PASSIVE_NOTE_LABEL_FONT_SCALE_PERCENT: i32 = 65;
 const LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER: &str = "888";
@@ -9708,6 +9711,7 @@ fn line_has_visible_text(line: &Line) -> bool {
     line.runs.iter().any(|run| {
         !run.style.hidden
             && !is_passive_advance_marker(&run.text)
+            && !is_passive_math_inline_lead_marker(&run.text)
             && !run.text.trim().is_empty()
             && parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_none()
             && parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_none()
@@ -9869,6 +9873,20 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 current_line_top_y -= finished_height;
                 current = empty_line();
                 is_first_line = false;
+                continue;
+            }
+            if is_passive_math_inline_lead_marker(&segment.text) {
+                if current.width > 0.01 {
+                    // Word leaves the invisible object lead-in on the preceding line
+                    // when the following atomic equation wraps.
+                    push_segment(
+                        &mut current,
+                        segment,
+                        &paragraph.style,
+                        document,
+                        font_provider,
+                    );
+                }
                 continue;
             }
 
@@ -10339,7 +10357,7 @@ fn apply_passive_math_nary_base_spacing(paragraph: &Paragraph) -> Option<Paragra
         if let Some(base_id) = base_id
             && active_base_id != Some(base_id)
         {
-            let operator_gap = run.style.font_size_points() * (5.0 / 18.0);
+            let operator_gap = run.style.font_size_points() * WORD_NARY_OPERATOR_GAP_EM;
             push_passive_math_advance(&mut output.runs, operator_gap, &run.style);
         }
         output.runs.push(run.clone());
@@ -10387,10 +10405,18 @@ fn group_word_compatible_passive_math_nary_runs(
             .position(|run| run.style.passive_math_nary_base_id.is_some())
             .or((nary_runs.len() > 1).then_some(1));
         if let Some(spacing_run_index) = spacing_run_index {
-            nary_width += nary_runs[spacing_run_index].style.font_size_points() * (5.0 / 18.0);
+            nary_width +=
+                nary_runs[spacing_run_index].style.font_size_points() * WORD_NARY_OPERATOR_GAP_EM;
         }
         let mut marker_style = nary_runs[0].style.clone();
         marker_style.passive_math_nary_id = None;
+        let mut lead_style = marker_style.clone();
+        lead_style.character_spacing_twips =
+            points_to_bounded_twips(WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS);
+        output.runs.push(Run {
+            text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
+            style: lead_style,
+        });
         marker_style.character_spacing_twips = points_to_bounded_twips(nary_width);
         output.runs.push(Run {
             text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
@@ -10675,6 +10701,7 @@ fn stack_passive_math_equation_arrays(
                 as i32;
             for mut run in row {
                 if !is_passive_advance_marker(&run.text)
+                    && !is_passive_math_inline_lead_marker(&run.text)
                     && !is_passive_math_stack_anchor_marker(&run.text)
                 {
                     run.style.baseline_shift_half_points = run
@@ -11077,6 +11104,7 @@ fn natural_line_height_for_runs(
             .filter(|run| {
                 inline_image_marker_index(&run.text).is_none()
                     && !is_passive_advance_marker(&run.text)
+                    && !is_passive_math_inline_lead_marker(&run.text)
             })
             .map(|run| {
                 if is_passive_math_fraction_rule_marker(&run.text) {
@@ -11300,6 +11328,7 @@ fn contains_inline_marker(text: &str) -> bool {
         || text.contains(ENDNOTE_REFERENCE_MARKER_END)
         || text.contains(PASSIVE_ADVANCE_MARKER)
         || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
+        || text.contains(PASSIVE_MATH_INLINE_LEAD_MARKER)
         || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
         || text.contains(NESTED_TABLE_ANCHOR_MARKER)
 }
@@ -11907,6 +11936,7 @@ fn remove_internal_stat_markers(text: &str) -> String {
         .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "")
         .replace(PASSIVE_ADVANCE_MARKER, "")
         .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "")
+        .replace(PASSIVE_MATH_INLINE_LEAD_MARKER, "")
         .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "");
     while let Some((start, end)) = next_bookmark_page_marker_range(&cleaned, 0) {
         cleaned.replace_range(start..end, "");
@@ -12735,11 +12765,13 @@ fn push_text_segments_preserving_tabs(
     for (idx, ch) in text.char_indices() {
         let is_passive_advance = ch.to_string() == PASSIVE_ADVANCE_MARKER;
         let is_math_fraction_rule = ch.to_string() == PASSIVE_MATH_FRACTION_RULE_MARKER;
+        let is_math_inline_lead = ch.to_string() == PASSIVE_MATH_INLINE_LEAD_MARKER;
         let is_math_stack_anchor = ch.to_string() == PASSIVE_MATH_STACK_ANCHOR_MARKER;
         let inline_image_index = inline_image_marker_index(&ch.to_string());
         if ch == '\t'
             || is_passive_advance
             || is_math_fraction_rule
+            || is_math_inline_lead
             || is_math_stack_anchor
             || inline_image_index.is_some()
         {
@@ -12752,6 +12784,20 @@ fn push_text_segments_preserving_tabs(
             if is_passive_advance {
                 output.push(FlowRun {
                     text: PASSIVE_ADVANCE_MARKER.to_string(),
+                    style: style.clone(),
+                    width: passive_advance_width_points(style),
+                    line_height_points: 0.0,
+                    tab_leader: TabLeader::None,
+                    tab_alignment: TabAlignment::Left,
+                    tab_stop_position: None,
+                    soft_hyphen_after: false,
+                });
+                start = idx + ch.len_utf8();
+                continue;
+            }
+            if is_math_inline_lead {
+                output.push(FlowRun {
+                    text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
                     style: style.clone(),
                     width: passive_advance_width_points(style),
                     line_height_points: 0.0,
@@ -13133,6 +13179,7 @@ fn apply_fit_text_scaling_to_segment(
     if target_twips <= 0
         || segment.text.is_empty()
         || is_passive_advance_marker(&segment.text)
+        || is_passive_math_inline_lead_marker(&segment.text)
         || is_passive_math_fraction_rule_marker(&segment.text)
         || is_passive_math_stack_anchor_marker(&segment.text)
         || parse_bookmark_page_marker_id(&segment.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
@@ -13259,6 +13306,9 @@ fn flow_run_line_height(
     if is_passive_advance_marker(&run.text) {
         return 0.0;
     }
+    if is_passive_math_inline_lead_marker(&run.text) {
+        return 0.0;
+    }
     if is_passive_math_fraction_rule_marker(&run.text) {
         return (run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER)
             + run.style.baseline_shift_points().abs();
@@ -13336,6 +13386,9 @@ fn measure_flow_run(
     if is_passive_advance_marker(&run.text) {
         return passive_advance_width_points(&run.style);
     }
+    if is_passive_math_inline_lead_marker(&run.text) {
+        return passive_advance_width_points(&run.style);
+    }
     if is_passive_math_fraction_rule_marker(&run.text) {
         return 0.0;
     }
@@ -13411,6 +13464,10 @@ fn inline_image_cluster_width(
 
 fn is_passive_advance_marker(text: &str) -> bool {
     text == PASSIVE_ADVANCE_MARKER
+}
+
+fn is_passive_math_inline_lead_marker(text: &str) -> bool {
+    text == PASSIVE_MATH_INLINE_LEAD_MARKER
 }
 
 fn is_passive_math_fraction_rule_marker(text: &str) -> bool {
@@ -13638,6 +13695,7 @@ fn push_line_with_rotation(
 
     let last_spaced_run_index = line.runs.iter().rposition(|run| {
         !is_passive_advance_marker(&run.text)
+            && !is_passive_math_inline_lead_marker(&run.text)
             && !is_passive_math_fraction_rule_marker(&run.text)
             && !is_passive_math_stack_anchor_marker(&run.text)
             && run.text != "\t"
@@ -13651,6 +13709,10 @@ fn push_line_with_rotation(
         if is_passive_advance_marker(&run.text) {
             cursor_advance += run.width;
             cursor_baseline_delta += passive_advance_baseline_delta_points(&run.style);
+            continue;
+        }
+        if is_passive_math_inline_lead_marker(&run.text) {
+            cursor_advance += run.width;
             continue;
         }
         if is_passive_math_fraction_rule_marker(&run.text) {
@@ -14300,7 +14362,11 @@ fn distributed_character_spacing(
     let character_count = line
         .runs
         .iter()
-        .filter(|run| !is_passive_advance_marker(&run.text) && run.text != "\t")
+        .filter(|run| {
+            !is_passive_advance_marker(&run.text)
+                && !is_passive_math_inline_lead_marker(&run.text)
+                && run.text != "\t"
+        })
         .map(|run| run.text.chars().filter(|ch| *ch != '\n').count())
         .sum::<usize>();
     let gap_count = character_count.saturating_sub(1);
@@ -15287,7 +15353,9 @@ fn measure_text_with_document_font(
         if is_zero_width_format_char(ch) {
             continue;
         }
-        if let Some(source_width) = source_dingbat_advance_points(source_font, ch, size) {
+        if let Some(source_width) =
+            source_word_compatible_advance_points(source_font, style, ch, size)
+        {
             width += source_width;
             continue;
         }
@@ -15301,6 +15369,21 @@ fn measure_text_with_document_font(
     let kerning_width =
         passive_kerning_width_with_document_font(text, style, family, source_font, font_provider);
     (width + kerning_width) * style.horizontal_scale() + character_spacing_width(text, style)
+}
+
+pub(crate) fn source_word_compatible_advance_points(
+    font: Option<&FontDef>,
+    style: &CharacterStyle,
+    ch: char,
+    size: f32,
+) -> Option<f32> {
+    source_dingbat_advance_points(font, ch, size).or_else(|| {
+        style
+            .passive_math_nary_id
+            .is_some()
+            .then(|| source_cambria_math_advance_points(font, ch, size))
+            .flatten()
+    })
 }
 
 pub(crate) fn source_dingbat_advance_points(
@@ -15351,6 +15434,71 @@ pub(crate) fn source_dingbat_advance_points(
         return None;
     };
     Some(size * em)
+}
+
+fn source_cambria_math_advance_points(font: Option<&FontDef>, ch: char, size: f32) -> Option<f32> {
+    let name = font?.name.to_ascii_lowercase();
+    if !name.contains("cambria math") {
+        return None;
+    }
+
+    // Bounded horizontal metrics recovered from Word 16.0's embedded Cambria Math
+    // subsets. Keeping only the characters independently present in the registered
+    // Office Math references avoids host font discovery and proprietary font bytes.
+    let units = match ch {
+        ' ' | '\u{00a0}' => 451,
+        '+' | '=' | '\u{2212}' => 1530,
+        '.' => 420,
+        '/' => 1004,
+        '1' | '2' => 1134,
+        ':' => 540,
+        '?' => 865,
+        '(' | ')' => 850,
+        'A' => 1276,
+        'B' => 1252,
+        'D' => 1355,
+        'E' => 1178,
+        'F' | 'L' => 1099,
+        'G' => 1251,
+        'H' => 1406,
+        'I' => 664,
+        'M' => 1670,
+        'N' => 1394,
+        'O' => 1338,
+        'P' => 1163,
+        'R' => 1272,
+        'S' => 1016,
+        'T' => 1214,
+        'U' => 1327,
+        'V' => 1236,
+        'X' => 1170,
+        'Y' => 1168,
+        'a' => 1000,
+        'b' => 1121,
+        'c' => 903,
+        'd' => 1136,
+        'e' => 999,
+        'h' => 1130,
+        'i' => 569,
+        'k' => 1074,
+        'l' => 556,
+        'm' => 1704,
+        'n' => 1143,
+        'o' => 1087,
+        'p' => 1139,
+        'q' => 1120,
+        'r' => 847,
+        's' => 880,
+        't' => 693,
+        'v' => 1032,
+        'x' => 990,
+        'z' => 931,
+        '\u{2211}' => 1451,
+        '\u{220f}' => 1663,
+        '\u{221a}' => 1345,
+        _ => return None,
+    };
+    Some(size * units as f32 / 2048.0)
 }
 
 fn supplied_font_glyph_metrics(
@@ -27472,6 +27620,44 @@ mod tests {
         assert_eq!(
             source_dingbat_advance_points(Some(&font("Segoe UI Symbol")), '\u{2717}', size),
             Some(9.96)
+        );
+    }
+
+    #[test]
+    fn measures_cambria_math_with_bounded_word_source_advances() {
+        let font = FontDef {
+            index: 1,
+            name: "Cambria Math".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Roman,
+            pitch: FontPitch::Default,
+        };
+        let size = 12.0;
+        let mut style = CharacterStyle::default();
+        style.passive_math_nary_id = Some(1);
+        let expected = [
+            ('\u{2211}', 1451.0 / 2048.0),
+            ('\u{220f}', 1663.0 / 2048.0),
+            ('=', 1530.0 / 2048.0),
+            ('1', 1134.0 / 2048.0),
+            ('m', 1704.0 / 2048.0),
+        ];
+
+        for (ch, expected_em) in expected {
+            let advance = source_word_compatible_advance_points(Some(&font), &style, ch, size)
+                .expect("registered Cambria Math character should have a bounded source metric");
+            assert!((advance - (size * expected_em)).abs() < 0.000_01);
+        }
+        assert_eq!(
+            source_word_compatible_advance_points(Some(&font), &style, '\u{1f642}', size),
+            None
+        );
+        style.passive_math_nary_id = None;
+        assert_eq!(
+            source_word_compatible_advance_points(Some(&font), &style, 'm', size),
+            None
         );
     }
 

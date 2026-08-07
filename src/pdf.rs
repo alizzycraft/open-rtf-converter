@@ -13,7 +13,8 @@ use crate::fonts::{FontAsset, FontProvider, font_asset_pair_kerning_points};
 use crate::layout::{
     LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
     TextFragment, TextRotation, passive_pair_kerning_points, passive_supplied_font_fallback_name,
-    source_dingbat_advance_points, style_uses_passive_kerning, twips_to_points,
+    source_dingbat_advance_points, source_word_compatible_advance_points,
+    style_uses_passive_kerning, twips_to_points,
 };
 use crate::model::{
     BorderStyle, CharacterEmphasisMark, CharacterStyle, ImageFormat, ImageToneAdjustment,
@@ -357,7 +358,7 @@ struct SuppliedGlyph {
 struct SuppliedTextEncoding {
     font_index: usize,
     encoded: Vec<u8>,
-    kerning_points: Vec<f32>,
+    positioning_points: Vec<f32>,
 }
 
 impl fmt::Display for PassivePdfError {
@@ -1253,9 +1254,9 @@ fn draw_text_layout_item(
         font_name_for_style(fragment.font_family, &fragment.style).0
     };
     let passive_kerning_family = supplied_encoding.is_none().then_some(fragment.font_family);
-    let supplied_kerning_points = supplied_encoding
+    let supplied_positioning_points = supplied_encoding
         .as_ref()
-        .map(|supplied| supplied.kerning_points.as_slice());
+        .map(|supplied| supplied.positioning_points.as_slice());
     let encoded = supplied_encoding
         .as_ref()
         .map(|supplied| supplied.encoded.as_slice())
@@ -1267,7 +1268,7 @@ fn draw_text_layout_item(
             text,
             font_resource,
             passive_kerning_family,
-            supplied_kerning_points,
+            supplied_positioning_points,
             &fragment.style,
             fragment.word_spacing,
             fragment.x + shadow_offset(&fragment.style),
@@ -1287,7 +1288,7 @@ fn draw_text_layout_item(
             text,
             font_resource,
             passive_kerning_family,
-            supplied_kerning_points,
+            supplied_positioning_points,
             &fragment.style,
             fragment.word_spacing,
             fragment.x + first_dx,
@@ -1302,7 +1303,7 @@ fn draw_text_layout_item(
             text,
             font_resource,
             passive_kerning_family,
-            supplied_kerning_points,
+            supplied_positioning_points,
             &fragment.style,
             fragment.word_spacing,
             fragment.x + second_dx,
@@ -1325,7 +1326,7 @@ fn draw_text_layout_item(
         text,
         font_resource,
         passive_kerning_family,
-        supplied_kerning_points,
+        supplied_positioning_points,
         &fragment.style,
         fragment.word_spacing,
         fragment.x + final_dx,
@@ -1725,16 +1726,39 @@ fn encode_supplied_text_fragment_with_text(
     supplied_fonts: &[SuppliedPdfFont],
 ) -> Option<SuppliedTextEncoding> {
     let font_provider = font_provider?;
-    let (asset_index, _glyphs, encoded) =
+    let (asset_index, glyphs, encoded) =
         supplied_text_encoding_parts_for_text(fragment, text, layout, font_provider)?;
     let font_index = supplied_fonts
         .iter()
         .position(|font| font.asset_index == asset_index)?;
     let asset = font_provider.assets.get(asset_index)?;
-    let mut kerning_points = Vec::with_capacity(encoded.len() / 2);
+    let source_font = layout
+        .fonts
+        .iter()
+        .find(|font| font.index == fragment.style.font_index);
+    let font_size = fragment.style.font_size_points();
+    let mut positioning_points = Vec::with_capacity(encoded.len() / 2);
     let mut previous = None;
-    for ch in text.chars().filter(|ch| !is_zero_width_pdf_char(*ch)) {
-        let adjustment = if style_uses_passive_kerning(&fragment.style) {
+    for (index, ch) in text
+        .chars()
+        .filter(|ch| !is_zero_width_pdf_char(*ch))
+        .enumerate()
+    {
+        let source_advance_adjustment = index
+            .checked_sub(1)
+            .and_then(|previous_index| {
+                let previous_char = previous?;
+                let source_advance = source_word_compatible_advance_points(
+                    source_font,
+                    &fragment.style,
+                    previous_char,
+                    font_size,
+                )?;
+                let supplied_advance = glyphs.get(previous_index)?.width * font_size / 1000.0;
+                Some(source_advance - supplied_advance)
+            })
+            .unwrap_or(0.0);
+        let kerning_adjustment = if style_uses_passive_kerning(&fragment.style) {
             previous
                 .and_then(|left| {
                     font_asset_pair_kerning_points(
@@ -1748,13 +1772,13 @@ fn encode_supplied_text_fragment_with_text(
         } else {
             0.0
         };
-        kerning_points.push(adjustment);
+        positioning_points.push(source_advance_adjustment + kerning_adjustment);
         previous = Some(ch);
     }
     Some(SuppliedTextEncoding {
         font_index,
         encoded,
-        kerning_points,
+        positioning_points,
     })
 }
 

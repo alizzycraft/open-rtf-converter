@@ -11,6 +11,7 @@ pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
 pub const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
 pub const PASSIVE_MATH_STACK_ANCHOR_MARKER: &str = "\u{f0012}";
+pub const PASSIVE_MATH_INLINE_LEAD_MARKER: &str = "\u{f0013}";
 pub const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
 pub const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
 pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";

@@ -23534,6 +23534,44 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn office_math_visible_nary_reference_uses_word_source_advances_and_wrap_lead_in() {
+    let input = include_bytes!("../fixtures/office-math-nary-visible-passive.rtf");
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.parse_options.compatibility_mode = CompatibilityMode::WordCompatiblePassive;
+    let output = convert_rtf_to_pdf(input, &options).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+    let between = pdf_first_text_position_for_text(&content, "between").unwrap_or_else(|| {
+        panic!(
+            "text after summation group: {:?}",
+            decoded_pdf_text(&content)
+        )
+    });
+    let product_base = pdf_first_text_position_for_text(&content, "k").expect("product base");
+    let after =
+        pdf_first_text_position_for_text(&content, "after").expect("text after product group");
+
+    assert!(
+        (between.0 - 159.98).abs() < 0.15,
+        "the first n-ary group should retain Word's lead-in and source advances: {between:?}"
+    );
+    assert!(
+        (product_base.0 - 47.75).abs() < 0.10,
+        "wrapped n-ary object must discard its line-leading object inset: {product_base:?}"
+    );
+    assert!(
+        (after.0 - 96.25).abs() < 0.10,
+        "Cambria Math source advances should bound the product group: {after:?}"
+    );
+    assert!(
+        (product_base.1 - after.1).abs() < 0.01,
+        "linearized n-ary groups should retain ordinary math baselines"
+    );
+}
+
+#[test]
 fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
     let input = rtf(&[
         "{",
