@@ -19530,7 +19530,8 @@ impl Parser {
             .filter(|name| !name.is_empty());
         if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
             && font.alternate_name.is_none()
-            && matches!(font.charset, Some(77 | 255))
+            && (matches!(font.charset, Some(77 | 255))
+                || matches!(font.code_page, Some(437 | 10_000)))
         {
             // Word 16.0 substitutes missing legacy Mac/OEM faces with Calibri. Keep
             // only that normalized passive family choice; an exact caller-supplied
@@ -46898,6 +46899,26 @@ mod tests {
         );
         assert!(!text.contains("cpg"));
         assert!(!text.contains("Terminal"));
+        for name in ["Terminal", "Mac Face"] {
+            assert_eq!(
+                output
+                    .document
+                    .fonts
+                    .iter()
+                    .find(|font| font.name == name)
+                    .and_then(|font| font.alternate_name.as_deref()),
+                Some("Calibri")
+            );
+        }
+        assert_eq!(
+            output
+                .document
+                .fonts
+                .iter()
+                .find(|font| font.name == "Unsupported")
+                .and_then(|font| font.alternate_name.as_deref()),
+            None
+        );
 
         let strict = parse_rtf_bytes_with_options(
             INPUT.as_bytes(),
@@ -46910,6 +46931,13 @@ mod tests {
         assert_eq!(
             document_text(&strict.document),
             "IBM \u{2502} Mac \u{201c}Hello\u{201d} Win \u{201c}Hello\u{201d}"
+        );
+        assert!(
+            strict
+                .document
+                .fonts
+                .iter()
+                .all(|font| font.alternate_name.is_none())
         );
     }
 

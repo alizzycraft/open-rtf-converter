@@ -1739,6 +1739,7 @@ fn encode_supplied_text_fragment_with_text(
     let font_size = fragment.style.font_size_points();
     let mut positioning_points = Vec::with_capacity(encoded.len() / 2);
     let mut previous = None;
+    let mut deferred_whitespace_adjustment = 0.0;
     for (index, ch) in text
         .chars()
         .filter(|ch| !is_zero_width_pdf_char(*ch))
@@ -1782,7 +1783,19 @@ fn encode_supplied_text_fragment_with_text(
         } else {
             0.0
         };
-        positioning_points.push(source_advance_adjustment + kerning_adjustment);
+        let adjustment =
+            source_advance_adjustment + kerning_adjustment + deferred_whitespace_adjustment;
+        if ch.is_whitespace() {
+            // A whitespace glyph has no painted contour, so carry its incoming source-
+            // metric correction to the next visible glyph. Besides preserving identical
+            // visible geometry, this keeps the whitespace in the same two-byte CID
+            // string as the preceding glyph for conservative PDF text extractors.
+            deferred_whitespace_adjustment = adjustment;
+            positioning_points.push(0.0);
+        } else {
+            deferred_whitespace_adjustment = 0.0;
+            positioning_points.push(adjustment);
+        }
         previous = Some(ch);
     }
     Some(SuppliedTextEncoding {
@@ -7240,11 +7253,19 @@ fn write_positioned_supplied_text(
     let mut positioned = content.show_positioned();
     let mut items = positioned.items();
     let font_size = style.font_size_points().max(1.0);
-    for (encoded_glyph, adjustment) in encoded.chunks_exact(2).zip(adjustments) {
+    let mut run_start = 0usize;
+    for (index, adjustment) in adjustments.iter().enumerate() {
         if *adjustment != 0.0 {
+            let boundary = index.saturating_mul(2);
+            if run_start < boundary {
+                items.show(Str(&encoded[run_start..boundary]));
+            }
             items.adjust((-adjustment * 1000.0 / font_size).clamp(-1000.0, 1000.0));
+            run_start = boundary;
         }
-        items.show(Str(encoded_glyph));
+    }
+    if run_start < encoded.len() {
+        items.show(Str(&encoded[run_start..]));
     }
 }
 

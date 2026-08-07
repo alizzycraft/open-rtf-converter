@@ -15428,7 +15428,10 @@ fn source_calibri_advance_points(
     }
     if !style.bold && !style.italic {
         let units = match ch {
+            '\u{00b3}' => 685,
+            '\u{00d2}' | '\u{00d3}' => 1356,
             '\u{00e9}' => 1019,
+            '\u{201a}' => 511,
             '\u{201c}' | '\u{201d}' => 857,
             '\u{2502}' => 1024,
             _ => 0,
@@ -27560,19 +27563,30 @@ mod tests {
             ..Default::default()
         };
         let browser_provider = FontProvider::browser_safe_defaults();
-        assert!(
-            (source_word_compatible_advance_points(
-                Some(&font),
-                &style,
-                '\u{201c}',
-                12.0,
-                Some(&browser_provider),
-            )
-            .expect("missing legacy face should use bounded Calibri fallback metrics")
-                - (12.0 * 857.0 / 2_048.0))
-                .abs()
-                < 0.001
-        );
+        for (ch, units) in [
+            ('\u{00b3}', 685.0),
+            ('\u{00d2}', 1356.0),
+            ('\u{00d3}', 1356.0),
+            ('\u{00e9}', 1019.0),
+            ('\u{201a}', 511.0),
+            ('\u{201c}', 857.0),
+            ('\u{201d}', 857.0),
+            ('\u{2502}', 1024.0),
+        ] {
+            assert!(
+                (source_word_compatible_advance_points(
+                    Some(&font),
+                    &style,
+                    ch,
+                    12.0,
+                    Some(&browser_provider),
+                )
+                .expect("missing legacy face should use bounded Calibri fallback metrics")
+                    - (12.0 * units / 2_048.0))
+                    .abs()
+                    < 0.001
+            );
+        }
 
         let exact_provider = FontProvider {
             assets: vec![FontAsset {
