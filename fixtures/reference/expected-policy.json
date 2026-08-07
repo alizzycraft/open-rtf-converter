@@ -5200,6 +5200,52 @@
       ]
     },
     {
+      "id": "paragraph-frame-text-distance-passive-layout",
+      "input": "fixtures/paragraph-frame-text-distance-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-frame-text-distance-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 6,
+      "must_preserve_text": [
+        "No distance frame alpha beta gamma delta",
+        "All distance frame alpha beta gamma delta",
+        "Horizontal distance frame alpha beta gamma delta",
+        "Vertical distance frame alpha beta gamma delta",
+        "Combined distance frame alpha beta gamma delta",
+        "Negative distance frame alpha beta gamma delta"
+      ],
+      "intentional_security_differences": [
+        "Paragraph-frame text distances are normalized into page-bounded passive flow exclusions; raw frame controls and editable wrap metadata never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph wrap distance interpreted through bounded passive flow layout"
+      ],
+      "forbidden_pdf_markers": [
+        "dxfrtext",
+        "dfrmtxtx",
+        "dfrmtxty",
+        "absw",
+        "absh",
+        "phpg",
+        "pvpg",
+        "posx",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused six-page Word 16.0 probe proves that dxfrtext180 expands an ordinary frame exclusion by 9 points on every side, dfrmtxtx240 expands only the horizontal exclusion by 12 points, and dfrmtxty360 expands only the vertical exclusion by 18 points; negative axis distances are inert. Drop-cap vertical distance retains its separately proven inert behavior. Current and Word preserve identical visible text, word order, line grouping, and all six frame placements. Corresponding flow x origins differ by at most 0.05 points, endpoints by at most 3.50 points under bundled Arial-compatible metrics, and y boxes retain the established 0.73-0.95-point residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "paragraph-frame-text-direction-passive-layout",
       "input": "fixtures/paragraph-frame-text-direction-passive.rtf",
       "category": "must_match_closely",

@@ -8253,6 +8253,14 @@ fn layout_framed_paragraph_group(
     let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
     let exclusion_width =
         (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0));
+    let frame_vertical_text_distance =
+        paragraph_frame_vertical_text_distance(&paragraph.style, geometry.height);
+    let (mut exclusion_y, mut exclusion_height) = paragraph_frame_exclusion_vertical_geometry(
+        frame_top_y,
+        frame_height,
+        frame_vertical_text_distance,
+        geometry.height,
+    );
     if paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph {
         let stack_advance = framed_lines
             .first()
@@ -8260,24 +8268,32 @@ fn layout_framed_paragraph_group(
             .map(|line| line.height)
             .unwrap_or(14.0)
             .max(1.0);
-        frame_top_y = if let Some(preview) = absolute_frame_preview {
+        let requested_exclusion_top = exclusion_y + exclusion_height;
+        let stacked_exclusion_top = if let Some(preview) = absolute_frame_preview {
             preview.y + preview.height
         } else {
             stacked_absolute_frame_top(
                 pages.last(),
                 frame_left,
                 exclusion_width,
-                frame_height,
-                frame_top_y,
+                exclusion_height,
+                requested_exclusion_top,
                 stack_advance,
             )
         };
+        frame_top_y += stacked_exclusion_top - requested_exclusion_top;
+        (exclusion_y, exclusion_height) = paragraph_frame_exclusion_vertical_geometry(
+            frame_top_y,
+            frame_height,
+            frame_vertical_text_distance,
+            geometry.height,
+        );
     }
     let frame_exclusion = FlowExclusion {
         x: frame_left,
-        y: frame_top_y - frame_height,
+        y: exclusion_y,
         width: exclusion_width,
-        height: frame_height,
+        height: exclusion_height,
         wrap_side: paragraph_frame_wrap_side(paragraph),
         wrap_bottom_inset: if paragraph.style.frame_vertical_anchor
             == StaticShapeVerticalAnchor::Paragraph
@@ -8436,6 +8452,7 @@ fn passive_frame_content_paragraph(paragraph: &Paragraph) -> Paragraph {
     passive.style.frame_width_twips = None;
     passive.style.frame_height_twips = None;
     passive.style.frame_text_distance_twips = 0;
+    passive.style.frame_vertical_text_distance_twips = 0;
     passive.style.frame_horizontal_anchor = StaticShapeHorizontalAnchor::Column;
     passive.style.frame_horizontal_alignment = None;
     passive.style.frame_horizontal_offset_twips = 0;
@@ -8488,6 +8505,8 @@ fn same_absolute_paragraph_frame(first: &Paragraph, second: &Paragraph) -> bool 
         && first.style.frame_width_twips == second.style.frame_width_twips
         && first.style.frame_height_twips == second.style.frame_height_twips
         && first.style.frame_text_distance_twips == second.style.frame_text_distance_twips
+        && first.style.frame_vertical_text_distance_twips
+            == second.style.frame_vertical_text_distance_twips
         && first.style.frame_horizontal_anchor == second.style.frame_horizontal_anchor
         && first.style.frame_horizontal_alignment == second.style.frame_horizontal_alignment
         && first.style.frame_horizontal_offset_twips == second.style.frame_horizontal_offset_twips
@@ -8560,7 +8579,7 @@ fn stacked_absolute_frame_top(
     page: Option<&LayoutPage>,
     frame_left: f32,
     exclusion_width: f32,
-    frame_height: f32,
+    exclusion_height: f32,
     requested_top: f32,
     stack_advance: f32,
 ) -> f32 {
@@ -8573,15 +8592,34 @@ fn stacked_absolute_frame_top(
             exclusion.kind == FlowExclusionKind::ParagraphFrame
                 && (exclusion.x - frame_left).abs() < 0.01
                 && (exclusion.width - exclusion_width).abs() < 0.01
-                && (exclusion.height - frame_height).abs() < 0.01
+                && (exclusion.height - exclusion_height).abs() < 0.01
                 && ((exclusion.y + exclusion.height) - top).abs() < 0.01
         });
         if !collides_at_same_origin {
             break;
         }
-        top = (top - stack_advance).max(frame_height);
+        top = (top - stack_advance).max(exclusion_height);
     }
     top
+}
+
+fn paragraph_frame_vertical_text_distance(style: &ParagraphStyle, page_height: f32) -> f32 {
+    if style.drop_cap_lines > 1 {
+        0.0
+    } else {
+        twips_to_points(style.frame_vertical_text_distance_twips.max(0)).min(page_height.max(0.0))
+    }
+}
+
+fn paragraph_frame_exclusion_vertical_geometry(
+    frame_top: f32,
+    frame_height: f32,
+    distance: f32,
+    page_height: f32,
+) -> (f32, f32) {
+    let bottom = (frame_top - frame_height - distance).max(0.0);
+    let top = (frame_top + distance).min(page_height.max(1.0));
+    (bottom, (top - bottom).max(1.0))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8713,12 +8751,22 @@ fn resolve_absolute_frame_exclusion(
     let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
     let exclusion_width =
         (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0));
-    let frame_top_y = stacked_absolute_frame_top(
+    let frame_vertical_text_distance =
+        paragraph_frame_vertical_text_distance(&paragraph.style, geometry.height);
+    let (requested_exclusion_y, requested_exclusion_height) =
+        paragraph_frame_exclusion_vertical_geometry(
+            requested_frame_top,
+            frame_height,
+            frame_vertical_text_distance,
+            geometry.height,
+        );
+    let requested_exclusion_top = requested_exclusion_y + requested_exclusion_height;
+    let stacked_exclusion_top = stacked_absolute_frame_top(
         pages.last(),
         frame_left,
         exclusion_width,
-        frame_height,
-        requested_frame_top,
+        requested_exclusion_height,
+        requested_exclusion_top,
         framed_lines
             .first()
             .and_then(|lines| lines.first())
@@ -8726,11 +8774,18 @@ fn resolve_absolute_frame_exclusion(
             .unwrap_or(14.0)
             .max(1.0),
     );
+    let frame_top_y = requested_frame_top + stacked_exclusion_top - requested_exclusion_top;
+    let (exclusion_y, exclusion_height) = paragraph_frame_exclusion_vertical_geometry(
+        frame_top_y,
+        frame_height,
+        frame_vertical_text_distance,
+        geometry.height,
+    );
     Some(FlowExclusion {
         x: frame_left,
-        y: frame_top_y - frame_height,
+        y: exclusion_y,
         width: exclusion_width,
-        height: frame_height,
+        height: exclusion_height,
         wrap_side: paragraph_frame_wrap_side(paragraph),
         wrap_bottom_inset: 1.0,
         kind: FlowExclusionKind::ParagraphFrame,
@@ -24250,6 +24305,40 @@ mod tests {
                 .iter()
                 .all(|page| page.flow_exclusions.len() == 1)
         );
+    }
+
+    #[test]
+    fn ordinary_frame_text_distance_expands_independent_exclusion_axes() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/paragraph-frame-text-distance-passive.rtf"
+        ))
+        .expect("paragraph-frame text-distance fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 6);
+
+        let before_x = |page_index: usize| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(layout_item_text_fragment)
+                .find(|fragment| fragment.text.starts_with("Before"))
+                .expect("before-frame text fragment")
+                .x
+        };
+        let expected_before_x = [36.0, 117.0, 36.0, 108.0, 120.0, 36.0];
+        for (page_index, expected) in expected_before_x.into_iter().enumerate() {
+            assert!((before_x(page_index) - expected).abs() < 0.01);
+        }
+
+        let expected_widths = [72.0, 81.0, 84.0, 72.0, 84.0, 72.0];
+        let expected_heights = [72.0, 90.0, 72.0, 108.0, 108.0, 72.0];
+        for (page_index, page) in layout.pages.iter().enumerate() {
+            assert_eq!(page.flow_exclusions.len(), 1);
+            let exclusion = page.flow_exclusions[0];
+            assert!((exclusion.width - expected_widths[page_index]).abs() < 0.01);
+            assert!((exclusion.height - expected_heights[page_index]).abs() < 0.01);
+        }
     }
 
     #[test]

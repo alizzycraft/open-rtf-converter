@@ -75103,6 +75103,86 @@ fn framed_drop_cap_text_distance_remains_bounded_passive_geometry() {
 }
 
 #[test]
+fn ordinary_frame_text_distance_remains_bounded_passive_geometry() {
+    let input = include_bytes!("../fixtures/paragraph-frame-text-distance-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let frames = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) if paragraph.style.frame_width_twips.is_some() => Some((
+                paragraph.style.frame_text_distance_twips,
+                paragraph.style.frame_vertical_text_distance_twips,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        frames,
+        vec![(0, 0), (180, 180), (240, 0), (0, 360), (240, 360), (0, 0)]
+    );
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    assert_eq!(layout.pages.len(), 6);
+    let expected_before_x = [36.0, 117.0, 36.0, 108.0, 120.0, 36.0];
+    for (page_index, expected_x) in expected_before_x.into_iter().enumerate() {
+        let fragment = layout.pages[page_index]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text.starts_with("Before") => Some(fragment),
+                _ => None,
+            })
+            .expect("before-frame fragment");
+        assert!((fragment.x - expected_x).abs() < 0.01);
+    }
+
+    let output = convert_rtf_to_pdf(input, &ConvertOptions::default()).unwrap();
+    audit_passive_pdf_bytes(&output.pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    for visible in [
+        "No distance frame",
+        "All distance frame",
+        "Horizontal distance frame",
+        "Vertical distance frame",
+        "Combined distance frame",
+        "Negative distance frame",
+    ] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in [
+        b"dxfrtext".as_slice(),
+        b"dfrmtxtx",
+        b"dfrmtxty",
+        b"absw",
+        b"absh",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn framed_drop_cap_positioning_remains_bounded_passive_geometry() {
     let input = include_bytes!("../fixtures/framed-drop-cap-positioning-passive.rtf");
     let parsed = parse_rtf_bytes(input).unwrap();

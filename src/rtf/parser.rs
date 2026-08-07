@@ -6413,8 +6413,14 @@ impl Parser {
                 &control.name,
                 offset,
             ),
-            "dxfrtext" | "dfrmtxtx" => {
-                self.set_paragraph_frame_text_distance(control.parameter, offset)
+            "dxfrtext" => {
+                self.set_paragraph_frame_text_distance(control.parameter, true, true, offset)
+            }
+            "dfrmtxtx" => {
+                self.set_paragraph_frame_text_distance(control.parameter, true, false, offset)
+            }
+            "dfrmtxty" => {
+                self.set_paragraph_frame_text_distance(control.parameter, false, true, offset)
             }
             "li" | "lin" => {
                 if !self.suppress_word_legacy_list_paragraph {
@@ -8001,7 +8007,13 @@ impl Parser {
         ));
     }
 
-    fn set_paragraph_frame_text_distance(&mut self, value: Option<i32>, offset: usize) {
+    fn set_paragraph_frame_text_distance(
+        &mut self,
+        value: Option<i32>,
+        horizontal: bool,
+        vertical: bool,
+        offset: usize,
+    ) {
         let value = value.unwrap_or(0);
         let clamped = value.clamp(0, self.limits().max_shape_dimension_twips.max(0));
         if clamped != value {
@@ -8010,7 +8022,12 @@ impl Parser {
                 Some(offset),
             ));
         }
-        self.state.paragraph.frame_text_distance_twips = clamped;
+        if horizontal {
+            self.state.paragraph.frame_text_distance_twips = clamped;
+        }
+        if vertical {
+            self.state.paragraph.frame_vertical_text_distance_twips = clamped;
+        }
         self.diagnostics.push(Diagnostic::warning(
             "paragraph wrap distance interpreted through bounded passive flow layout",
             Some(offset),
@@ -27177,6 +27194,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.frame_text_distance_twips == default.frame_text_distance_twips {
         output.frame_text_distance_twips = base.frame_text_distance_twips;
+    }
+    if output.frame_vertical_text_distance_twips == default.frame_vertical_text_distance_twips {
+        output.frame_vertical_text_distance_twips = base.frame_vertical_text_distance_twips;
     }
     if output.frame_horizontal_anchor == default.frame_horizontal_anchor {
         output.frame_horizontal_anchor = base.frame_horizontal_anchor;
@@ -58281,6 +58301,10 @@ After\par}"#;
         assert_eq!(paragraphs[2].style.frame_text_distance_twips, 180);
         assert_eq!(paragraphs[4].style.frame_text_distance_twips, 240);
         assert_eq!(paragraphs[6].style.frame_text_distance_twips, 0);
+        assert_eq!(paragraphs[0].style.frame_vertical_text_distance_twips, 0);
+        assert_eq!(paragraphs[2].style.frame_vertical_text_distance_twips, 180);
+        assert_eq!(paragraphs[4].style.frame_vertical_text_distance_twips, 0);
+        assert_eq!(paragraphs[6].style.frame_vertical_text_distance_twips, 360);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -58314,6 +58338,8 @@ After\par}"#;
 
         assert_eq!(paragraphs[0].style.frame_text_distance_twips, 0);
         assert_eq!(paragraphs[1].style.frame_text_distance_twips, 480);
+        assert_eq!(paragraphs[0].style.frame_vertical_text_distance_twips, 0);
+        assert_eq!(paragraphs[1].style.frame_vertical_text_distance_twips, 480);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -58324,6 +58350,39 @@ After\par}"#;
                 .message
                 .contains("paragraph frame text distance clamped from 9999 to 480 twips")
         }));
+    }
+
+    #[test]
+    fn ordinary_frame_text_distance_controls_retain_independent_bounded_axes() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/paragraph-frame-text-distance-passive.rtf"
+        ))
+        .unwrap();
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) if paragraph.style.frame_width_twips.is_some() => {
+                    Some((
+                        paragraph.style.frame_text_distance_twips,
+                        paragraph.style.frame_vertical_text_distance_twips,
+                    ))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            frames,
+            vec![(0, 0), (180, 180), (240, 0), (0, 360), (240, 360), (0, 0)]
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]
