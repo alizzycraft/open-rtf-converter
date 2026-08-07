@@ -75317,6 +75317,48 @@ fn absolute_drop_cap_frame_reflow_remains_bounded_passive_geometry() {
 }
 
 #[test]
+fn naturally_paginated_absolute_frame_remains_page_scoped_and_passive() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-natural-pagination-passive.rtf");
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-natural-pagination.rtf");
+    let output_path = dir.path().join("framed-drop-cap-natural-pagination.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 2);
+    let page_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>();
+    assert!(page_text[0].contains("Before A01"));
+    assert!(page_text[0].contains("A73 A74 A75"));
+    assert!(!page_text[0].contains("A76"));
+    assert!(page_text[1].contains("A76 A77 A78 A79 A80."));
+    assert!(page_text[1].contains("After natural pagination."));
+    for forbidden in ["dropcapli", "dropcapt", "phpg", "pvpg", "posx", "posy"] {
+        assert!(!page_text.iter().any(|text| text.contains(forbidden)));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

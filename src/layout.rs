@@ -41,6 +41,7 @@ const WORD_INLINE_IMAGE_BODY_EDGE_TOLERANCE_POINTS: f32 = 1.0;
 const PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS: f32 = 0.84;
 const PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS: f32 = 3.42;
 const PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER: f32 = 1.47;
+const MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -74,6 +75,12 @@ struct FlowExclusion {
 #[derive(Debug, Copy, Clone)]
 struct PendingAbsoluteFramePreview {
     page_index: usize,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct PlannedAbsoluteFrameExclusion {
+    block_index: usize,
+    exclusion: FlowExclusion,
 }
 
 #[derive(Debug, Clone)]
@@ -831,6 +838,37 @@ impl LayoutEngine {
         document: &Document,
         font_provider: Option<&FontProvider>,
     ) -> LayoutDocument {
+        let empty_targets = HashMap::new();
+        let mut observed_targets = HashMap::new();
+        let first_pass = Self::layout_pass(
+            document,
+            font_provider,
+            &empty_targets,
+            &mut observed_targets,
+        );
+        if observed_targets.is_empty() {
+            return first_pass;
+        }
+
+        let mut targets = observed_targets;
+        let mut output = first_pass;
+        for _ in 0..MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS {
+            let mut next_targets = HashMap::new();
+            output = Self::layout_pass(document, font_provider, &targets, &mut next_targets);
+            if next_targets == targets {
+                return output;
+            }
+            targets = next_targets;
+        }
+        output
+    }
+
+    fn layout_pass(
+        document: &Document,
+        font_provider: Option<&FontProvider>,
+        absolute_frame_target_pages: &HashMap<usize, usize>,
+        observed_absolute_frame_pages: &mut HashMap<usize, usize>,
+    ) -> LayoutDocument {
         let document_stats = document_stats(document);
         let mut header_footer_sets = vec![HeaderFooterSet::from_document(document)];
         let mut geometry = PageGeometry::from_settings(
@@ -851,6 +889,10 @@ impl LayoutEngine {
         let mut body_clipped_past_page_end = false;
         let mut pending_floating_table_preview = false;
         let mut pending_absolute_frame_previews = HashMap::new();
+        let mut planned_absolute_frame_exclusions: HashMap<
+            usize,
+            Vec<PlannedAbsoluteFrameExclusion>,
+        > = HashMap::new();
         let mut absolute_frame_segment_scanned = false;
 
         for (block_idx, block) in document.blocks.iter().enumerate() {
@@ -1161,11 +1203,34 @@ impl LayoutEngine {
                     );
                 }
                 Block::Paragraph(paragraph) => {
-                    let reuse_absolute_frame_preview = take_pending_absolute_frame_preview(
+                    if is_complete_absolute_drop_cap_frame(paragraph) {
+                        observed_absolute_frame_pages.insert(block_idx, pages.len() - 1);
+                    }
+                    let pending_absolute_frame_preview = take_pending_absolute_frame_preview(
                         &pages,
                         &mut pending_absolute_frame_previews,
                         block_idx,
                     );
+                    let planned_absolute_frame_preview = pages
+                        .len()
+                        .checked_sub(1)
+                        .and_then(|page_index| {
+                            planned_absolute_frame_exclusions
+                                .get(&page_index)
+                                .and_then(|planned| {
+                                    planned
+                                        .iter()
+                                        .find(|planned| planned.block_index == block_idx)
+                                })
+                                .zip(pages.last())
+                        })
+                        .is_some_and(|(planned, page)| {
+                            page.flow_exclusions
+                                .iter()
+                                .any(|exclusion| same_flow_exclusion(*exclusion, planned.exclusion))
+                        });
+                    let reuse_absolute_frame_preview =
+                        pending_absolute_frame_preview || planned_absolute_frame_preview;
                     if layout_framed_drop_cap_paragraph(
                         &mut pages,
                         &mut cursor_y,
@@ -1185,6 +1250,8 @@ impl LayoutEngine {
                         preview_future_absolute_frame_exclusions(
                             &mut pages,
                             &mut pending_absolute_frame_previews,
+                            &mut planned_absolute_frame_exclusions,
+                            absolute_frame_target_pages,
                             &document.blocks,
                             block_idx,
                             cursor_y,
@@ -1246,6 +1313,21 @@ impl LayoutEngine {
                             pages.len(),
                         );
                     }
+                    let mut planned_page_advance_hook =
+                        |pages: &mut Vec<LayoutPage>, _: &mut f32, _: &PageGeometry| {
+                            let Some(page_index) = pages.len().checked_sub(1) else {
+                                return;
+                            };
+                            let Some(exclusions) =
+                                planned_absolute_frame_exclusions.get(&page_index)
+                            else {
+                                return;
+                            };
+                            if let Some(page) = pages.last_mut() {
+                                page.flow_exclusions
+                                    .extend(exclusions.iter().map(|planned| planned.exclusion));
+                            }
+                        };
                     layout_paragraph_with_auto_footnotes(
                         &mut pages,
                         &mut cursor_y,
@@ -1268,7 +1350,8 @@ impl LayoutEngine {
                             rendered_footnote_index_on_page: None,
                             reserved_footnote_margin_bottom_on_page: None,
                         }),
-                        None,
+                        Some(&mut planned_page_advance_hook),
+                        Some(&planned_absolute_frame_exclusions),
                     );
                     last_paragraph_anchor = Some((pages.len(), current_column, cursor_y));
                     let reaches_note_boundary = document
@@ -1758,6 +1841,7 @@ fn layout_footnote_paragraph(
         font_provider,
         None,
         Some(&mut continuation_hook),
+        None,
     );
 }
 
@@ -2224,6 +2308,7 @@ fn layout_endnote_paragraph(
         font_provider,
         None,
         Some(&mut continuation_hook),
+        None,
     );
 }
 
@@ -7874,6 +7959,7 @@ fn layout_paragraph(
         font_provider,
         None,
         None,
+        None,
     );
 }
 
@@ -8008,6 +8094,13 @@ fn layout_framed_drop_cap_paragraph(
     true
 }
 
+fn is_complete_absolute_drop_cap_frame(paragraph: &Paragraph) -> bool {
+    paragraph.style.drop_cap_lines > 1
+        && (paragraph.style.frame_width_twips.is_some()
+            || paragraph.style.frame_height_twips.is_some())
+        && paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph
+}
+
 fn take_pending_absolute_frame_preview(
     pages: &[LayoutPage],
     pending: &mut HashMap<usize, PendingAbsoluteFramePreview>,
@@ -8019,10 +8112,21 @@ fn take_pending_absolute_frame_preview(
     preview.page_index + 1 == pages.len()
 }
 
+fn same_flow_exclusion(first: FlowExclusion, second: FlowExclusion) -> bool {
+    (first.x - second.x).abs() < 0.01
+        && (first.y - second.y).abs() < 0.01
+        && (first.width - second.width).abs() < 0.01
+        && (first.height - second.height).abs() < 0.01
+        && first.wrap_side == second.wrap_side
+        && first.wrap_bottom_at_line_center == second.wrap_bottom_at_line_center
+}
+
 #[allow(clippy::too_many_arguments)]
 fn preview_future_absolute_frame_exclusions(
     pages: &mut [LayoutPage],
     pending: &mut HashMap<usize, PendingAbsoluteFramePreview>,
+    planned: &mut HashMap<usize, Vec<PlannedAbsoluteFrameExclusion>>,
+    target_pages: &HashMap<usize, usize>,
     blocks: &[Block],
     block_index: usize,
     cursor_y: f32,
@@ -8051,6 +8155,9 @@ fn preview_future_absolute_frame_exclusions(
         let Block::Paragraph(paragraph) = block else {
             continue;
         };
+        let Some(&target_page_index) = target_pages.get(&future_index) else {
+            continue;
+        };
         if pending.contains_key(&future_index) {
             continue;
         }
@@ -8067,6 +8174,16 @@ fn preview_future_absolute_frame_exclusions(
         ) else {
             continue;
         };
+        planned
+            .entry(target_page_index)
+            .or_default()
+            .push(PlannedAbsoluteFrameExclusion {
+                block_index: future_index,
+                exclusion,
+            });
+        if target_page_index != page_index {
+            continue;
+        }
         let Some(page) = pages.last_mut() else {
             return;
         };
@@ -8211,6 +8328,7 @@ fn layout_paragraph_with_auto_footnotes(
     font_provider: Option<&FontProvider>,
     mut auto_footnotes: Option<AutoFootnoteFlush<'_>>,
     mut page_advance_hook: Option<&mut dyn FnMut(&mut Vec<LayoutPage>, &mut f32, &PageGeometry)>,
+    planned_flow_exclusions: Option<&HashMap<usize, Vec<PlannedAbsoluteFrameExclusion>>>,
 ) {
     let two_in_one_paragraph = word_two_in_one_layout_paragraph(paragraph);
     let paragraph = two_in_one_paragraph.as_ref().unwrap_or(paragraph);
@@ -8307,6 +8425,13 @@ fn layout_paragraph_with_auto_footnotes(
         twips_to_points(effective_space_before_twips(&paragraph.style))
     };
     *cursor_y -= paragraph_top;
+    let wrapping_start_page_index = pages.len().saturating_sub(1);
+    let mut wrapping_page_index = wrapping_start_page_index;
+    let mut wrapping_column = *current_column;
+    let mut wrapping_line_top = *cursor_y;
+    let mut previous_source_line_top = *cursor_y;
+    let mut wrapping_line_height = 0.0_f32;
+    let wrapping_body_top = geometry.height - geometry.margin_top;
     let mut lines = wrap_paragraph_with_font_provider_dynamic_width(
         paragraph,
         content_width,
@@ -8314,18 +8439,52 @@ fn layout_paragraph_with_auto_footnotes(
         document,
         font_provider,
         *cursor_y,
-        |line_top_y, line_height| {
-            wrapped_image_text_intervals_for_line(
-                pages,
-                margin_left,
-                content_width,
-                line_top_y,
-                line_height,
-            )
-            .unwrap_or_else(|| vec![(margin_left, content_width)])
-            .into_iter()
-            .map(|(left, width)| ((left - margin_left).max(0.0), width))
-            .collect()
+        |source_line_top, line_height| {
+            if (source_line_top - previous_source_line_top).abs() > 0.01 {
+                wrapping_line_top -= previous_source_line_top - source_line_top;
+                previous_source_line_top = source_line_top;
+                wrapping_line_height = 0.0;
+            }
+            if line_height > wrapping_line_height && wrapping_line_top - line_height < margin_bottom
+            {
+                if wrapping_column + 1 < geometry.column_count {
+                    wrapping_column += 1;
+                } else {
+                    wrapping_page_index = wrapping_page_index.saturating_add(1);
+                    wrapping_column = 0;
+                }
+                wrapping_line_top = wrapping_body_top;
+            }
+            wrapping_line_height = wrapping_line_height.max(line_height);
+            let wrapping_margin_left = geometry.body_left(wrapping_column);
+            let mut intervals = if wrapping_page_index == wrapping_start_page_index {
+                wrapped_image_text_intervals_for_line(
+                    pages,
+                    wrapping_margin_left,
+                    content_width,
+                    wrapping_line_top,
+                    line_height,
+                )
+                .unwrap_or_else(|| vec![(wrapping_margin_left, content_width)])
+            } else {
+                vec![(wrapping_margin_left, content_width)]
+            };
+            if let Some(exclusions) =
+                planned_flow_exclusions.and_then(|planned| planned.get(&wrapping_page_index))
+            {
+                intervals = apply_flow_exclusions_to_text_intervals(
+                    intervals,
+                    exclusions,
+                    wrapping_margin_left,
+                    content_width,
+                    wrapping_line_top,
+                    line_height,
+                );
+            }
+            intervals
+                .into_iter()
+                .map(|(left, width)| ((left - wrapping_margin_left).max(0.0), width))
+                .collect()
         },
     );
     for line in &mut lines {
@@ -8827,6 +8986,56 @@ fn wrapped_image_text_intervals_for_line(
     )
 }
 
+fn apply_flow_exclusions_to_text_intervals(
+    intervals: Vec<(f32, f32)>,
+    exclusions: &[PlannedAbsoluteFrameExclusion],
+    margin_left: f32,
+    content_width: f32,
+    line_top_y: f32,
+    line_height: f32,
+) -> Vec<(f32, f32)> {
+    let content_right = margin_left + content_width;
+    let line_bottom_y = line_top_y - line_height.max(0.0);
+    let mut free_intervals = intervals
+        .into_iter()
+        .map(|(left, width)| (left, (left + width).min(content_right)))
+        .collect::<Vec<_>>();
+    for planned in exclusions {
+        let exclusion = &planned.exclusion;
+        let excluded_left = exclusion.x.max(margin_left);
+        let excluded_right = (exclusion.x + exclusion.width).min(content_right);
+        let excluded_bottom = exclusion.y
+            + if exclusion.wrap_bottom_at_line_center {
+                line_height.max(0.0) / 2.0
+            } else {
+                0.0
+            };
+        let excluded_top = exclusion.y + exclusion.height;
+        free_intervals = subtract_flow_exclusion_from_intervals(
+            free_intervals,
+            margin_left,
+            content_right,
+            line_top_y,
+            line_bottom_y,
+            excluded_left,
+            excluded_right,
+            excluded_bottom,
+            excluded_top,
+            exclusion.wrap_side,
+        );
+    }
+    free_intervals
+        .into_iter()
+        .map(|(left, mut right)| {
+            if left > margin_left + f32::EPSILON && (right - content_right).abs() < f32::EPSILON {
+                right += 3.0;
+            }
+            (left, (right - left).max(0.0))
+        })
+        .filter(|(_, width)| *width >= 12.0)
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn subtract_flow_exclusion_from_intervals(
     free_intervals: Vec<(f32, f32)>,
@@ -9155,7 +9364,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 && paragraph.style.first_line_indent_twips == 0
                 && paragraph.style.tab_stops_twips.is_empty()
                 && intervals.len() > 1;
-            let (line_width, interval_ends_before_body_edge) = if supports_segmented_flow {
+            let (line_width, ignore_trailing_space_for_fit) = if supports_segmented_flow {
                 let current_interval = intervals
                     .iter()
                     .position(|(left, interval_width)| {
@@ -9200,7 +9409,8 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 };
                 (
                     paragraph_line_width(active_content_width, &paragraph.style, is_first_line),
-                    requested_left + requested_content_width + 0.01 < content_width,
+                    requested_left.abs() < 0.01
+                        && (requested_content_width - content_width).abs() < 0.01,
                 )
             };
             let dynamic_word = segment
@@ -9292,7 +9502,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                     font_provider,
                 );
             }
-            let boundary_fit_width = if interval_ends_before_body_edge
+            let boundary_fit_width = if ignore_trailing_space_for_fit
                 && segment.text.ends_with(char::is_whitespace)
                 && !contains_inline_marker(&segment.text)
             {
@@ -23417,6 +23627,46 @@ mod tests {
             assert_eq!(page.flow_exclusions.len(), 1);
             assert!(page.flow_exclusions[0].wrap_bottom_at_line_center);
         }
+    }
+
+    #[test]
+    fn absolute_drop_cap_frame_preview_tracks_natural_page_association() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-natural-pagination-passive.rtf"
+        ))
+        .expect("natural-pagination frame fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 2);
+        let page_text = |page_index: usize| layout_text(&layout.pages[page_index]);
+        assert!(page_text(0).contains("A75 "));
+        assert!(!page_text(0).contains("A76 "));
+        assert!(!page_text(0).contains('X'));
+        assert!(page_text(1).contains("A76 A77 A78 A79 A80."));
+        assert!(page_text(1).contains("After natural pagination."));
+
+        let second_page_fragments = layout.pages[1]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let exact = |text: &str| {
+            second_page_fragments
+                .iter()
+                .copied()
+                .find(|fragment| fragment.text == text)
+                .unwrap_or_else(|| panic!("missing second-page fragment {text:?}"))
+        };
+        let cap = exact("X");
+        let tail = exact("A76 ");
+        assert!((cap.x - 36.0).abs() < 0.01);
+        assert!((tail.x - 72.0).abs() < 0.01);
+        assert!((cap.baseline_y - tail.baseline_y).abs() < 0.01);
+        assert!(layout.pages[0].flow_exclusions.is_empty());
+        assert_eq!(layout.pages[1].flow_exclusions.len(), 1);
     }
 
     #[test]

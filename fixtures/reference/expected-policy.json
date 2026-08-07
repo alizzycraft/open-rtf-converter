@@ -4817,7 +4817,53 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word previews a later-declared margin/page-anchored drop-cap frame while laying out every earlier paragraph it overlaps on the same explicit page. Layout now scans only normalized blocks up to the next explicit page/section boundary, installs page-bounded exclusions keyed by block index, and reuses each preview when its passive frame is painted on that page. Current and Word retain identical word order and line grouping on both pages; corresponding x origins/endpoints differ by at most 0.12/0.14 points and y boxes by 0.94-0.97 points. The probe also establishes that interval-fit decisions exclude nonpainted trailing spaces and that absolute-frame bottom wrapping changes at the body-line center. Both outputs are passive text only with no drawings, images, links, annotations, widgets, or actions. Natural pagination before the absolute frame remains to be audited separately."
+        "Word previews a later-declared margin/page-anchored drop-cap frame while laying out every earlier paragraph it overlaps on the same explicit page. Layout scans only normalized blocks up to the next explicit page/section boundary, installs page-bounded exclusions keyed by block index, and reuses each preview when its passive frame is painted on that page. Current and Word retain identical word order and line grouping on both pages; corresponding x origins/endpoints differ by at most 0.12/0.14 points and y boxes by 0.94-0.97 points. The probe also establishes that interval-fit decisions exclude nonpainted trailing spaces and that absolute-frame bottom wrapping changes at the body-line center. Both outputs are passive text only with no drawings, images, links, annotations, widgets, or actions. The separately registered natural-pagination reference closes physical-page association when preceding content spills."
+      ]
+    },
+    {
+      "id": "framed-drop-cap-natural-pagination-passive-layout",
+      "input": "fixtures/framed-drop-cap-natural-pagination-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-natural-pagination-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "Before A01 A02 A03",
+        "A73 A74 A75",
+        "A76 A77 A78 A79 A80.",
+        "After natural pagination."
+      ],
+      "intentional_security_differences": [
+        "Absolute-frame physical-page association is resolved through bounded normalized layout refinement; raw positioning controls, active objects, and editable frame metadata never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame horizontal position interpreted as bounded passive placement",
+        "paragraph frame horizontal anchor \\phpg interpreted as bounded passive origin",
+        "paragraph frame vertical anchor \\pvpg interpreted as bounded passive origin",
+        "paragraph frame vertical position interpreted as bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "phpg",
+        "pvpg",
+        "posx",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "Word associates the later page-anchored frame with physical page 2 after the preceding paragraph naturally spills: page 1 remains full-width through A75, while only A76-A80 and following text begin at x=72 beside the x=36 frame. Layout now performs one association pass and at most four bounded refinements, applies planned exclusions to virtual later pages while wrapping a spanning paragraph, and converges to Word's two-page flow. Current and Word have identical 85-word order and line grouping; page-1 x origins/endpoints differ by at most 0.25/0.21 points, page-2 by at most 0.13/0.14 points, and y boxes retain a 0.95-1.04-point bundled Arial-compatible residual. Both outputs are passive text only without drawings, images, links, annotations, widgets, or actions."
       ]
     },
     {
