@@ -70,11 +70,19 @@ struct FlowExclusion {
     height: f32,
     wrap_side: StaticImageWrapSide,
     wrap_bottom_inset: f32,
+    kind: FlowExclusionKind,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FlowExclusionKind {
+    Generic,
+    ParagraphFrame,
 }
 
 #[derive(Debug, Copy, Clone)]
 struct PendingAbsoluteFramePreview {
     page_index: usize,
+    exclusion: FlowExclusion,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1225,13 +1233,14 @@ impl LayoutEngine {
                                 })
                                 .zip(pages.last())
                         })
-                        .is_some_and(|(planned, page)| {
+                        .and_then(|(planned, page)| {
                             page.flow_exclusions
                                 .iter()
                                 .any(|exclusion| same_flow_exclusion(*exclusion, planned.exclusion))
+                                .then_some(planned.exclusion)
                         });
-                    let reuse_absolute_frame_preview =
-                        pending_absolute_frame_preview || planned_absolute_frame_preview;
+                    let absolute_frame_preview =
+                        pending_absolute_frame_preview.or(planned_absolute_frame_preview);
                     if layout_framed_drop_cap_paragraph(
                         &mut pages,
                         &mut cursor_y,
@@ -1242,7 +1251,7 @@ impl LayoutEngine {
                         document,
                         document_stats,
                         font_provider,
-                        reuse_absolute_frame_preview,
+                        absolute_frame_preview,
                     ) {
                         last_paragraph_anchor = Some((pages.len(), current_column, cursor_y));
                         continue;
@@ -3153,6 +3162,7 @@ fn layout_shape(
                 height: (height + top_gap + bottom_gap).max(1.0),
                 wrap_side: shape.wrap_side,
                 wrap_bottom_inset: 0.0,
+                kind: FlowExclusionKind::Generic,
             });
         }
         wrap_static_shape_items(
@@ -5697,6 +5707,7 @@ fn push_table_row_flow_exclusion(
         height,
         wrap_side: StaticImageWrapSide::Both,
         wrap_bottom_inset: 0.0,
+        kind: FlowExclusionKind::Generic,
     });
 }
 
@@ -7975,7 +7986,7 @@ fn layout_framed_drop_cap_paragraph(
     document: &Document,
     document_stats: DocumentStats,
     font_provider: Option<&FontProvider>,
-    reuse_absolute_frame_preview: bool,
+    absolute_frame_preview: Option<FlowExclusion>,
 ) -> bool {
     if paragraph.style.drop_cap_lines <= 1 {
         return false;
@@ -8056,7 +8067,8 @@ fn layout_framed_drop_cap_paragraph(
     {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
     }
-    let frame_top_y = requested_frame_top(*cursor_y, geometry).clamp(frame_height, geometry.height);
+    let mut frame_top_y =
+        requested_frame_top(*cursor_y, geometry).clamp(frame_height, geometry.height);
     let frame_left = paragraph_frame_left(
         &paragraph.style,
         frame_width,
@@ -8096,10 +8108,31 @@ fn layout_framed_drop_cap_paragraph(
         return true;
     }
     let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
+    let exclusion_width =
+        (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0));
+    if paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph {
+        let stack_advance = framed_lines
+            .first()
+            .map(|line| line.height)
+            .unwrap_or(14.0)
+            .max(1.0);
+        frame_top_y = if let Some(preview) = absolute_frame_preview {
+            preview.y + preview.height
+        } else {
+            stacked_absolute_frame_top(
+                pages.last(),
+                frame_left,
+                exclusion_width,
+                frame_height,
+                frame_top_y,
+                stack_advance,
+            )
+        };
+    }
     let frame_exclusion = FlowExclusion {
         x: frame_left,
         y: frame_top_y - frame_height,
-        width: (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0)),
+        width: exclusion_width,
         height: frame_height,
         wrap_side: StaticImageWrapSide::Both,
         wrap_bottom_inset: if paragraph.style.frame_vertical_anchor
@@ -8109,12 +8142,13 @@ fn layout_framed_drop_cap_paragraph(
         } else {
             1.0
         },
+        kind: FlowExclusionKind::ParagraphFrame,
     };
-    let removed_preview_exclusion = if reuse_absolute_frame_preview {
+    let removed_preview_exclusion = if let Some(preview) = absolute_frame_preview {
         pages.last_mut().and_then(|page| {
             page.flow_exclusions
                 .iter()
-                .position(|exclusion| same_flow_exclusion(*exclusion, frame_exclusion))
+                .position(|exclusion| same_flow_exclusion(*exclusion, preview))
                 .map(|index| (index, page.flow_exclusions.remove(index)))
         })
     } else {
@@ -8149,7 +8183,7 @@ fn layout_framed_drop_cap_paragraph(
         if let Some((index, exclusion)) = removed_preview_exclusion {
             page.flow_exclusions
                 .insert(index.min(page.flow_exclusions.len()), exclusion);
-        } else if !reuse_absolute_frame_preview {
+        } else if absolute_frame_preview.is_none() {
             page.flow_exclusions.push(frame_exclusion);
         }
     }
@@ -8171,11 +8205,11 @@ fn take_pending_absolute_frame_preview(
     pages: &[LayoutPage],
     pending: &mut HashMap<usize, PendingAbsoluteFramePreview>,
     block_index: usize,
-) -> bool {
+) -> Option<FlowExclusion> {
     let Some(preview) = pending.remove(&block_index) else {
-        return false;
+        return None;
     };
-    preview.page_index + 1 == pages.len()
+    (preview.page_index + 1 == pages.len()).then_some(preview.exclusion)
 }
 
 fn same_flow_exclusion(first: FlowExclusion, second: FlowExclusion) -> bool {
@@ -8185,6 +8219,35 @@ fn same_flow_exclusion(first: FlowExclusion, second: FlowExclusion) -> bool {
         && (first.height - second.height).abs() < 0.01
         && first.wrap_side == second.wrap_side
         && (first.wrap_bottom_inset - second.wrap_bottom_inset).abs() < 0.01
+        && first.kind == second.kind
+}
+
+fn stacked_absolute_frame_top(
+    page: Option<&LayoutPage>,
+    frame_left: f32,
+    exclusion_width: f32,
+    frame_height: f32,
+    requested_top: f32,
+    stack_advance: f32,
+) -> f32 {
+    let Some(page) = page else {
+        return requested_top;
+    };
+    let mut top = requested_top;
+    for _ in 0..page.flow_exclusions.len().min(128) {
+        let collides_at_same_origin = page.flow_exclusions.iter().any(|exclusion| {
+            exclusion.kind == FlowExclusionKind::ParagraphFrame
+                && (exclusion.x - frame_left).abs() < 0.01
+                && (exclusion.width - exclusion_width).abs() < 0.01
+                && (exclusion.height - frame_height).abs() < 0.01
+                && ((exclusion.y + exclusion.height) - top).abs() < 0.01
+        });
+        if !collides_at_same_origin {
+            break;
+        }
+        top = (top - stack_advance).max(frame_height);
+    }
+    top
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8254,7 +8317,13 @@ fn preview_future_absolute_frame_exclusions(
             return;
         };
         page.flow_exclusions.push(exclusion);
-        pending.insert(future_index, PendingAbsoluteFramePreview { page_index });
+        pending.insert(
+            future_index,
+            PendingAbsoluteFramePreview {
+                page_index,
+                exclusion,
+            },
+        );
     }
 }
 
@@ -8334,7 +8403,7 @@ fn resolve_absolute_frame_exclusion(
             1.0,
             (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
         );
-    let frame_top_y =
+    let requested_frame_top =
         (shape_vertical_origin(paragraph.style.frame_vertical_anchor, cursor_y, &geometry)
             - twips_to_points(paragraph.style.frame_vertical_offset_twips))
         .clamp(frame_height, geometry.height);
@@ -8346,13 +8415,28 @@ fn resolve_absolute_frame_exclusion(
         current_column,
     );
     let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
+    let exclusion_width =
+        (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0));
+    let frame_top_y = stacked_absolute_frame_top(
+        pages.last(),
+        frame_left,
+        exclusion_width,
+        frame_height,
+        requested_frame_top,
+        framed_lines
+            .first()
+            .map(|line| line.height)
+            .unwrap_or(14.0)
+            .max(1.0),
+    );
     Some(FlowExclusion {
         x: frame_left,
         y: frame_top_y - frame_height,
-        width: (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0)),
+        width: exclusion_width,
         height: frame_height,
         wrap_side: StaticImageWrapSide::Both,
         wrap_bottom_inset: 1.0,
+        kind: FlowExclusionKind::ParagraphFrame,
     })
 }
 
@@ -23581,6 +23665,49 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1, 0, 1, 0, 0, 0, 1, 0]
         );
+    }
+
+    #[test]
+    fn colliding_absolute_frames_stack_by_natural_line_advance() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-collision-controls-passive.rtf"
+        ))
+        .expect("frame collision-control fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 3);
+        for (page_index, expected_caps) in
+            [["A", "B"], ["C", "D"], ["E", "F"]].into_iter().enumerate()
+        {
+            let caps = layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(fragment)
+                        if expected_caps.contains(&fragment.text.as_str()) =>
+                    {
+                        Some(fragment)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(caps.len(), 2);
+            assert_eq!(caps[0].text, expected_caps[0]);
+            assert_eq!(caps[1].text, expected_caps[1]);
+            assert!((caps[0].x - 36.0).abs() < 0.01);
+            assert!((caps[1].x - 36.0).abs() < 0.01);
+            assert!(((caps[0].baseline_y - caps[1].baseline_y) - 13.7988).abs() < 0.01);
+            let exclusions = &layout.pages[page_index].flow_exclusions;
+            assert_eq!(exclusions.len(), 2);
+            let first_top = exclusions[0].y + exclusions[0].height;
+            let second_top = exclusions[1].y + exclusions[1].height;
+            assert!(((first_top - second_top) - 13.7988).abs() < 0.01);
+            assert!(
+                exclusions
+                    .iter()
+                    .all(|exclusion| exclusion.kind == FlowExclusionKind::ParagraphFrame)
+            );
+        }
     }
 
     #[test]

@@ -6391,6 +6391,13 @@ impl Parser {
             name @ ("absw" | "absh") => {
                 self.set_paragraph_frame_dimension(name, control.parameter, offset)
             }
+            "absnoovrlp" | "abslock" => self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "paragraph frame control \\{} retained through bounded passive placement",
+                    control.name
+                ),
+                Some(offset),
+            )),
             "dxfrtext" | "dfrmtxtx" => {
                 self.set_paragraph_frame_text_distance(control.parameter, offset)
             }
@@ -58027,6 +58034,36 @@ After\par}"#;
                 .message
                 .contains("paragraph frame dimension clamped from 9999 to 480 twips")
         }));
+    }
+
+    #[test]
+    fn paragraph_frame_collision_controls_remain_passive_metadata() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-collision-controls-passive.rtf"
+        ))
+        .unwrap();
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter(|block| {
+                matches!(block, Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1)
+            })
+            .count();
+        assert_eq!(frames, 6);
+        for control in ["absnoovrlp", "abslock"] {
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "paragraph frame control \\{control} retained through bounded passive placement"
+                ))
+            }));
+        }
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
     }
 
     #[test]

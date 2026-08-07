@@ -5011,6 +5011,51 @@
       ]
     },
     {
+      "id": "framed-drop-cap-collision-controls-passive-layout",
+      "input": "fixtures/framed-drop-cap-collision-controls-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-collision-controls-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 3,
+      "must_preserve_text": [
+        "Default overlap alpha beta gamma",
+        "No overlap alpha beta gamma",
+        "Locked overlap alpha beta gamma"
+      ],
+      "intentional_security_differences": [
+        "Frame collision and anchor-lock controls are reduced to bounded source-order passive geometry; raw editable positioning metadata never crosses into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame control \\absnoovrlp retained through bounded passive placement",
+        "paragraph frame control \\abslock retained through bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "absnoovrlp",
+        "abslock",
+        "phpg",
+        "pvpg",
+        "posx",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves that two identical page-anchored frame paragraphs do not overprint their glyphs: Word paints the second frame one natural 13.8-point line below the first. absnoovrlp and abslock are inert for this printed geometry; default, no-overlap, and locked cases all use the same source-order stacking. Flow exclusions now carry an internal paragraph-frame identity, preview entries retain their block-specific exclusion, and collision resolution shifts only equal-origin paragraph frames without perturbing tables, images, or shapes. Current and Word retain identical visible text, word order, and line grouping on all three pages; x origins/endpoints differ by at most 0.12/0.14 points and y boxes retain the established 0.93-0.96-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

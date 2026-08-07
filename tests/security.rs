@@ -75573,6 +75573,62 @@ fn signed_frame_dimensions_remain_bounded_passive_geometry() {
 }
 
 #[test]
+fn paragraph_frame_collision_controls_remain_passive_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-collision-controls-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    for control in ["absnoovrlp", "abslock"] {
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(&format!(
+                "paragraph frame control \\{control} retained through bounded passive placement"
+            ))
+        }));
+    }
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-collision-controls.rtf");
+    let output_path = dir.path().join("framed-drop-cap-collision-controls.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 3);
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+    for visible in ["Default overlap", "No overlap", "Locked overlap"] {
+        assert!(rendered_text.contains(visible));
+    }
+    for forbidden in [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "absnoovrlp",
+        "abslock",
+    ] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",
