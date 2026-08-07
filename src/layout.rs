@@ -50,6 +50,7 @@ const WORD_TIMES_BASELINE_INSET_EM: f32 = 5.0 / 72.0;
 const WORD_CAMBRIA_MATH_NARY_BASELINE_RISE_EM: f32 = 0.04;
 const MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS: usize = 4;
 const WORD_PARAGRAPH_FRAME_PAGE_EDGE_INSET_POINTS: f32 = 18.0;
+const WORD_PARAGRAPH_FRAME_DEVICE_PIXEL_POINTS: f32 = 72.0 / 600.0;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDocument {
@@ -8342,6 +8343,8 @@ fn layout_framed_paragraph_group(
     let frame_text_direction = paragraph.style.frame_text_direction;
     let vertical_frame_text =
         frame_text_direction != TableCellTextDirection::LeftToRightTopToBottom;
+    let frame_paint_top_y = frame_top_y
+        + word_paragraph_relative_drop_cap_alignment_paint_rise_points(&paragraph.style);
     if vertical_frame_text {
         let rotation = table_cell_text_rotation(frame_text_direction);
         let mut cross_offset = 0.0;
@@ -8372,7 +8375,7 @@ fn layout_framed_paragraph_group(
                 let (rotated_x, rotated_y) = rotated_paragraph_frame_line_origin(
                     frame_left,
                     frame_width,
-                    frame_top_y,
+                    frame_paint_top_y,
                     frame_height,
                     line,
                     frame_text_direction,
@@ -8393,7 +8396,7 @@ fn layout_framed_paragraph_group(
             cross_offset += twips_to_points(passive_frame_paragraph.style.space_after_twips);
         }
     } else {
-        let mut frame_cursor_y = frame_top_y;
+        let mut frame_cursor_y = frame_paint_top_y;
         let mut frame_geometry = *geometry;
         let mut frame_column = *current_column;
         for passive_frame_paragraph in &passive_frame_paragraphs {
@@ -8433,7 +8436,7 @@ fn layout_framed_paragraph_group(
             {
                 *item = LayoutItem::ClipRect {
                     x: frame_left,
-                    y: frame_top_y - frame_height,
+                    y: frame_paint_top_y - frame_height,
                     width: frame_width,
                     height: frame_height,
                     item: Box::new(item.clone()),
@@ -8451,6 +8454,23 @@ fn layout_framed_paragraph_group(
         }
     }
     true
+}
+
+fn word_paragraph_relative_drop_cap_alignment_paint_rise_points(style: &ParagraphStyle) -> f32 {
+    if style.drop_cap_lines <= 1
+        || style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph
+        || style.frame_vertical_offset_twips != 0
+    {
+        return 0.0;
+    }
+
+    let device_pixels = match style.frame_vertical_alignment {
+        Some(ParagraphFrameVerticalAlignment::Top) => 2.0,
+        Some(ParagraphFrameVerticalAlignment::Center) => 3.0,
+        Some(ParagraphFrameVerticalAlignment::Bottom) => 5.0,
+        _ => 0.0,
+    };
+    device_pixels * WORD_PARAGRAPH_FRAME_DEVICE_PIXEL_POINTS
 }
 
 fn passive_frame_content_paragraph(paragraph: &Paragraph) -> Paragraph {
@@ -25139,11 +25159,15 @@ mod tests {
             .filter(|fragment| fragment.text == "X")
             .collect::<Vec<_>>();
         assert_eq!(caps.len(), 4);
-        for (cap, body) in caps.into_iter().zip(["Zero ", "Tops ", "Cent ", "Bott "]) {
+        for ((cap, body), expected_rise) in caps
+            .into_iter()
+            .zip(["Zero ", "Tops ", "Cent ", "Bott "])
+            .zip([0.0, 0.24, 0.36, 0.60])
+        {
             let body = containing(body);
             assert!((cap.x - 36.0).abs() < 0.01);
             assert!((body.x - 72.0).abs() < 0.01);
-            assert!((cap.baseline_y - body.baseline_y).abs() < 0.01);
+            assert!((cap.baseline_y - body.baseline_y - expected_rise).abs() < 0.01);
         }
         assert_eq!(layout.pages[0].flow_exclusions.len(), 4);
     }
