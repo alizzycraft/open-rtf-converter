@@ -75234,6 +75234,89 @@ fn framed_drop_cap_vertical_alignments_remain_passive_metadata() {
 }
 
 #[test]
+fn absolute_drop_cap_frame_reflow_remains_bounded_passive_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-absolute-overlap-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(paragraphs.len(), 7);
+    assert_eq!(
+        paragraphs[1].style.frame_horizontal_anchor,
+        StaticShapeHorizontalAnchor::Margin
+    );
+    assert_eq!(
+        paragraphs[1].style.frame_vertical_anchor,
+        StaticShapeVerticalAnchor::Margin
+    );
+    assert_eq!(
+        paragraphs[5].style.frame_horizontal_anchor,
+        StaticShapeHorizontalAnchor::Page
+    );
+    assert_eq!(
+        paragraphs[5].style.frame_vertical_anchor,
+        StaticShapeVerticalAnchor::Page
+    );
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-absolute-overlap.rtf");
+    let output_path = dir.path().join("framed-drop-cap-absolute-overlap.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 2);
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+    for visible in [
+        "Margin prior",
+        "Margin after",
+        "Page first prior",
+        "Page prior",
+        "Page after",
+    ] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in [
+        "dropcapli",
+        "dropcapt",
+        "phmrg",
+        "phpg",
+        "pvmrg",
+        "pvpg",
+        "posx",
+        "posy",
+    ] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

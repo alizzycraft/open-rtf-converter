@@ -58126,6 +58126,45 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_mode_retains_absolute_drop_cap_frame_anchors() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-absolute-overlap-passive.rtf"
+        ))
+        .unwrap();
+        let paragraphs = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs.len(), 7);
+        assert_eq!(
+            paragraphs[1].style.frame_horizontal_anchor,
+            StaticShapeHorizontalAnchor::Margin
+        );
+        assert_eq!(
+            paragraphs[1].style.frame_vertical_anchor,
+            StaticShapeVerticalAnchor::Margin
+        );
+        assert_eq!(paragraphs[1].style.frame_horizontal_offset_twips, 720);
+        assert_eq!(paragraphs[1].style.frame_vertical_offset_twips, 720);
+        assert_eq!(
+            paragraphs[5].style.frame_horizontal_anchor,
+            StaticShapeHorizontalAnchor::Page
+        );
+        assert_eq!(
+            paragraphs[5].style.frame_vertical_anchor,
+            StaticShapeVerticalAnchor::Page
+        );
+        assert_eq!(paragraphs[5].style.frame_horizontal_offset_twips, 720);
+        assert_eq!(paragraphs[5].style.frame_vertical_offset_twips, 720);
+    }
+
+    #[test]
     fn paragraph_frame_position_offsets_clamp_malformed_values() {
         let options = RtfParseOptions {
             limits: RtfLimits {
