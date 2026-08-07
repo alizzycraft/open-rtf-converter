@@ -89,6 +89,7 @@ fn word_reference_policy_manifest_covers_existing_visual_fixtures() {
         "fixtures/character-spacing-units-passive.rtf",
         "fixtures/character-scaling-spacing-passive.rtf",
         "fixtures/scaled-justification-passive.rtf",
+        "fixtures/distributed-run-boundary-passive.rtf",
         "fixtures/section-grid-page-number-passive.rtf",
         "fixtures/page-number-format-restart-passive.rtf",
         "fixtures/table-spacing-autofit-passive.rtf",
@@ -3421,6 +3422,30 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             must_emit_diagnostics: &[
                 "right-to-left character direction rendered by bounded passive visual text order",
             ],
+        },
+        ReferenceFixture {
+            input: "fixtures/distributed-run-boundary-passive.rtf",
+            expected_pages: 1,
+            must_preserve_text: &[
+                "Plain distributed final line.",
+                "Mixed bold plain italic final line.",
+                "Scale50 bold plain italic final line.",
+                "Scale150 bold plain",
+                "italic final.",
+            ],
+            must_not_leak: &[
+                b"\\qd",
+                b"charscalex50",
+                b"charscalex150",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[],
         },
         ReferenceFixture {
             input: "fixtures/paragraph-indent-aliases-passive.rtf",

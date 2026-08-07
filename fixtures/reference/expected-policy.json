@@ -4327,7 +4327,42 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Exact-family font assets now outrank wildcard fallbacks, restoring Word's implicit Times-family line breaks. Distributed final-line character spacing ends 3.13 points before Word from Tinos metrics; paragraph origins differ by at most 0.92 points vertically, right alignment by 0.17 points horizontally, and passive Hebrew/LTR visual ordering matches."
+        "Exact-family font assets outrank wildcard fallbacks, restoring Word's implicit Times-family line breaks. Later cross-run spacing recovery also closed the former 3.13-point distributed-final-line residual: its current final glyph endpoint differs from Word by 0.14 points, while the non-final justified endpoint differs by 0.38 points. Paragraph origins differ by at most 0.92 points vertically, right alignment by 0.17 points horizontally, and passive Hebrew/LTR visual ordering matches."
+      ]
+    },
+    {
+      "id": "distributed-run-boundary-passive-layout",
+      "input": "fixtures/distributed-run-boundary-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/distributed-run-boundary-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Plain distributed final line.",
+        "Mixed bold plain italic final line.",
+        "Scale50 bold plain italic final line.",
+        "Scale150 bold plain",
+        "italic final."
+      ],
+      "intentional_security_differences": [
+        "Distributed alignment, style boundaries, and horizontal scaling become bounded passive text geometry; raw controls and editable document metadata are not retained."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "\\qd",
+        "charscalex50",
+        "charscalex150",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe confirms that distributed final-line character spacing crosses plain, bold, and italic run boundaries and remains in absolute page geometry at 50% and 150% horizontal scaling. Current and Word have identical five-line flow, including the 150% wrap; corresponding final visible glyph endpoints differ by at most 0.40 points, and every line begins at the exact 18-point body origin. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
       ]
     },
     {
