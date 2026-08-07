@@ -698,7 +698,7 @@
         " S"
       ],
       "known_gaps": [
-        "A focused four-point 200x100 logical-window probe establishes that Word applies the same bounded legacy device transform used by stock-pen path playback. WordCompatiblePassive now uses that transform for this independently covered frame: the registered point origin is within about 0.20 points horizontally and 0.10 vertically, while its red 1.87784-point stroke width and 0.8577-point segment length match exactly. Larger logical windows remain on the generic bounded mapping because their quantized device grids differ; StrictSpec retains authored logical coordinates.",
+        "A focused four-point 200x100 logical-window probe establishes Word's independently quantized horizontal SETPIXEL device grid. WordCompatiblePassive now uses its bounded affine fit and Word's projecting-square cap: the registered red stroke origin differs by 0.05 points horizontally and 0.09 vertically, while its 1.87784-point width and 0.8577-point centerline length match exactly. Twelve-times current/Word renders are visually equivalent. Larger logical windows remain on the generic bounded mapping because their quantized device grids differ; StrictSpec retains authored logical coordinates and flat caps.",
         "The converter intentionally supports only bounded passive pixel strokes; malformed SETPIXEL records remain placeholdered or stripped."
       ]
     },

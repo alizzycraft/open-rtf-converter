@@ -43323,7 +43323,7 @@ fn wmf_setpixel_renders_word_sized_passive_stroke_without_payload_leakage() {
     assert!(image.vector_commands.iter().any(|command| {
         matches!(
             command,
-            StaticImageVectorCommand::Line {
+            StaticImageVectorCommand::SquareCappedLine {
                 x1,
                 y1,
                 x2,
@@ -43331,9 +43331,9 @@ fn wmf_setpixel_renders_word_sized_passive_stroke_without_payload_leakage() {
                 stroke_color: Some(color),
                 stroke_width,
                 ..
-            } if (*x1 - 71.5633).abs() < 0.01
+            } if (*x1 - 71.2882).abs() < 0.01
                 && (*y1 - 41.581).abs() < 0.01
-                && (*x2 - 73.1516).abs() < 0.01
+                && (*x2 - 72.8765).abs() < 0.01
                 && (*y2 - 41.581).abs() < 0.01
                 && (*stroke_width - 4.172978).abs() < 0.0001
                 && color.red == 255
@@ -43391,6 +43391,12 @@ fn wmf_setpixel_renders_word_sized_passive_stroke_without_payload_leakage() {
             .iter()
             .any(|operation| operation.operator == "S"),
         "WMF SETPIXEL should render as a passive PDF stroke"
+    );
+    assert!(
+        content.operations.iter().any(|operation| {
+            operation.operator == "J" && operation.operands.as_slice() == [PdfObject::Integer(2)]
+        }),
+        "Word-compatible WMF SETPIXEL should use a projecting-square PDF line cap"
     );
     for forbidden in [
         b"/Subtype /Image".as_slice(),

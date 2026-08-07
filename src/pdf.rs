@@ -2300,6 +2300,28 @@ fn draw_passive_wmf_vector_image(
                     stroke_style,
                 );
             }
+            StaticImageVectorCommand::SquareCappedLine {
+                x1,
+                y1,
+                x2,
+                y2,
+                stroke_color,
+                stroke_width,
+                stroke_style,
+            } => {
+                let stroke_width =
+                    vector_command_stroke_width(draw, source_width, source_height, *stroke_width);
+                let stroke_style = vector_command_line_style(*stroke_style);
+                draw_passive_vector_capped_line(
+                    content,
+                    vector_command_point(draw, source_width, source_height, *x1, *y1),
+                    vector_command_point(draw, source_width, source_height, *x2, *y2),
+                    *stroke_color,
+                    stroke_width,
+                    stroke_style,
+                    LineCap::Square,
+                );
+            }
             StaticImageVectorCommand::Polyline {
                 points,
                 stroke_color,
@@ -2720,6 +2742,34 @@ fn draw_passive_vector_line(
         pdf_color_from_model(color),
         stroke_style,
         LineCap::Flat,
+    );
+}
+
+fn draw_passive_vector_capped_line(
+    content: &mut Content,
+    from: crate::layout::LayoutPoint,
+    to: crate::layout::LayoutPoint,
+    stroke_color: Option<crate::model::Color>,
+    stroke_width: f32,
+    stroke_style: LineStyle,
+    cap: LineCap,
+) {
+    let Some(color) = stroke_color else {
+        return;
+    };
+    if stroke_width <= 0.0 {
+        return;
+    }
+    draw_passive_line(
+        content,
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        stroke_width,
+        pdf_color_from_model(color),
+        stroke_style,
+        cap,
     );
 }
 

@@ -43231,15 +43231,28 @@ fn parse_wmf_vector_image_data(
                     word_coordinate_recovery && !viewport_extent_explicit,
                 ) && x2 > x1
                 {
-                    commands.push(StaticImageVectorCommand::Line {
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        stroke_color: Some(color),
-                        stroke_width: WMF_WORD_STOCK_PEN_LOGICAL_WIDTH,
-                        stroke_style: BorderStyle::Single,
-                    });
+                    let line = if word_coordinate_recovery && !viewport_extent_explicit {
+                        StaticImageVectorCommand::SquareCappedLine {
+                            x1,
+                            y1,
+                            x2,
+                            y2,
+                            stroke_color: Some(color),
+                            stroke_width: WMF_WORD_STOCK_PEN_LOGICAL_WIDTH,
+                            stroke_style: BorderStyle::Single,
+                        }
+                    } else {
+                        StaticImageVectorCommand::Line {
+                            x1,
+                            y1,
+                            x2,
+                            y2,
+                            stroke_color: Some(color),
+                            stroke_width: WMF_WORD_STOCK_PEN_LOGICAL_WIDTH,
+                            stroke_style: BorderStyle::Single,
+                        }
+                    };
+                    commands.push(line);
                 } else {
                     skipped_record_count = skipped_record_count.checked_add(1)?;
                 }
@@ -43679,6 +43692,22 @@ fn word_compatible_wmf_path_point((x, y): (f32, f32), coordinates: WmfCoordinate
     (
         x * WMF_WORD_PATH_X_SCALE
             + coordinates.image_width.max(1) as f32 * WMF_WORD_PATH_X_OFFSET_RATIO,
+        y * WMF_WORD_PATH_Y_SCALE
+            + coordinates.image_height.max(1) as f32 * WMF_WORD_PATH_Y_OFFSET_RATIO,
+    )
+}
+
+fn word_compatible_wmf_setpixel_point(
+    (x, y): (f32, f32),
+    coordinates: WmfCoordinateMap,
+) -> (f32, f32) {
+    // Four independently positioned points in Word's 200x100 SETPIXEL probe
+    // expose a slightly different horizontal device grid from ordinary stock
+    // paths. Preserve the already closer stock-path vertical recovery.
+    const X_SCALE: f32 = 0.983_647_94;
+    const X_OFFSET_RATIO: f32 = 0.041_673_873;
+    (
+        x * X_SCALE + coordinates.image_width.max(1) as f32 * X_OFFSET_RATIO,
         y * WMF_WORD_PATH_Y_SCALE
             + coordinates.image_height.max(1) as f32 * WMF_WORD_PATH_Y_OFFSET_RATIO,
     )
@@ -45235,14 +45264,14 @@ fn parse_wmf_setpixel_line(
     let y = i32::from(read_le_i16(data, 4)?);
     let x = i32::from(read_le_i16(data, 6)?);
     let mut point = coordinates.normalized_point(x, y);
-    // Four independent points in Word's common 200x100 SETPIXEL frame follow
-    // the same legacy device transform as stock-pen path playback (maximum
-    // measured residual 0.28x/0.10y points after display scaling). Larger
+    // Four independent points in Word's common 200x100 SETPIXEL frame define
+    // a bounded legacy device transform (maximum horizontal fit residual 0.15
+    // points after display scaling). Larger
     // windows use a different quantized device grid, so keep their generic
     // bounded mapping until that grid has independent reference coverage.
     if word_compatible_passive && coordinates.image_width == 200 && coordinates.image_height == 100
     {
-        point = word_compatible_wmf_path_point(point, coordinates);
+        point = word_compatible_wmf_setpixel_point(point, coordinates);
     }
     let (x, y) = point;
     let max_x = coordinates.image_width.max(1) as f32;
