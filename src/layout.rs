@@ -10583,6 +10583,13 @@ fn stack_passive_math_fractions(
         marker_style.passive_math_fraction_part = PassiveMathFractionPart::None;
         marker_style.baseline_shift_half_points = 0;
         marker_style.font_size_scale_percent = 100;
+        let mut lead_style = marker_style.clone();
+        lead_style.character_spacing_twips =
+            points_to_bounded_twips(WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS);
+        output.runs.push(Run {
+            text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
+            style: lead_style,
+        });
         marker_style.character_spacing_twips = points_to_bounded_twips(fraction_width);
         output.runs.push(Run {
             text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
@@ -28136,6 +28143,44 @@ mod tests {
         assert_eq!(
             source_word_compatible_advance_points(Some(&font), &style, 'm', size, None),
             None
+        );
+    }
+
+    #[test]
+    fn stacked_office_math_fraction_uses_word_inline_object_lead_in() {
+        let parsed = parse_rtf(include_str!("../fixtures/office-math-passive.rtf")).unwrap();
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        let page = &layout.pages[0];
+        let visible_text = page
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let fragment_containing = |text: &str| {
+            page.items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.contains(text) => Some(fragment),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing text fragment {text:?}: {visible_text:?}"))
+        };
+
+        let numerator = fragment_containing("x");
+        let following = fragment_containing("after ");
+        assert!(
+            (numerator.x - 174.44).abs() < 0.02,
+            "numerator x={}",
+            numerator.x
+        );
+        assert!(
+            (following.x - 193.51).abs() < 0.02,
+            "following x={}",
+            following.x
         );
     }
 

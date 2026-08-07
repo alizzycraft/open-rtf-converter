@@ -23572,6 +23572,49 @@ fn office_math_visible_nary_reference_uses_word_source_advances_and_wrap_lead_in
 }
 
 #[test]
+fn office_math_fraction_reference_uses_word_inline_object_lead_in() {
+    let input = include_bytes!("../fixtures/office-math-passive.rtf");
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.parse_options.compatibility_mode = CompatibilityMode::WordCompatiblePassive;
+    let output = convert_rtf_to_pdf(input, &options).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+
+    let numerator = pdf_first_text_position_for_text(&content, "x").expect("fraction numerator");
+    let following =
+        pdf_first_text_position_for_text(&content, "after").expect("text after fraction");
+    assert!(
+        (numerator.0 - 174.44).abs() < 0.15,
+        "stacked fraction should retain Word's inline object lead-in: {numerator:?}"
+    );
+    assert!(
+        (following.0 - 193.51).abs() < 0.15,
+        "text after stacked fraction should resume at the Word-compatible edge: {following:?}"
+    );
+    for forbidden in [
+        b"mmath".as_slice(),
+        b"moMath",
+        b"mnum",
+        b"mden",
+        b"objdata",
+        b"414243",
+        b"/JavaScript",
+        b"/EmbeddedFile",
+        b"/Launch",
+    ] {
+        assert!(
+            !output
+                .pdf
+                .windows(forbidden.len())
+                .any(|window| window == forbidden),
+            "Office Math or object payload leaked to PDF: {:?}",
+            String::from_utf8_lossy(forbidden)
+        );
+    }
+}
+
+#[test]
 fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
     let input = rtf(&[
         "{",
