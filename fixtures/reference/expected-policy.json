@@ -6383,7 +6383,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact body spacing around stripped mail-merge and object metadata."
+        "Word 16.0 refuses to export this hostile metadata fixture through the isolated early-bound automation path, reporting that there is not enough memory or disk space even though ordinary fixtures export successfully. No Word PDF is fabricated or registered. Exact Word body spacing around the stripped mail-merge and object metadata therefore remains unavailable; the converter's deterministic one-page passive output, safe surrounding text, diagnostics, and payload/action suppression remain executable-policy requirements."
       ]
     },
     {
@@ -6602,7 +6602,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Registered Word reference still needs a focused audit of exact font fallback/substitution and body spacing around stripped font/template metadata."
+        "Word 16.0 refuses to export this hostile font/template metadata fixture through the isolated early-bound automation path, reporting that there is not enough memory or disk space even though ordinary fixtures export successfully. No Word PDF is fabricated or registered. Exact Word font substitution and body spacing around stripped embedded-font/template metadata therefore remain unavailable; the converter's deterministic one-page passive output, safe font names/body text, diagnostics, and payload/action suppression remain executable-policy requirements."
       ]
     },
     {
