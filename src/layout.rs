@@ -6804,7 +6804,7 @@ fn inside_outside_physical_alignment(
     alignment: TableRowAlignment,
     geometry: PageGeometry,
 ) -> TableRowAlignment {
-    if !geometry.mirror_margins {
+    if !geometry.facing_pages {
         return match alignment {
             TableRowAlignment::Inside => TableRowAlignment::Left,
             TableRowAlignment::Outside => TableRowAlignment::Right,
@@ -20847,6 +20847,7 @@ mod tests {
         }
 
         let mut document = Document::default();
+        document.page.facing_pages = true;
         document.page.mirror_margins = true;
         document.blocks = vec![
             Block::Table(Table {
@@ -20870,6 +20871,9 @@ mod tests {
             }),
         ];
 
+        let mut non_facing_document = document.clone();
+        non_facing_document.page.facing_pages = false;
+        let non_facing_layout = LayoutEngine::layout(&non_facing_document);
         let layout = LayoutEngine::layout(&document);
         let page_text_x = |page_idx: usize, text: &str| {
             layout.pages[page_idx]
@@ -20886,6 +20890,18 @@ mod tests {
         assert!((page_text_x(0, "OddOut") - 471.0).abs() < 0.01);
         assert!((page_text_x(1, "EvenIn") - 471.0).abs() < 0.01);
         assert!((page_text_x(1, "EvenOut") - 75.0).abs() < 0.01);
+        let non_facing_page_text_x = |page_idx: usize, text: &str| {
+            non_facing_layout.pages[page_idx]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.trim() == text => Some(fragment.x),
+                    _ => None,
+                })
+                .expect("non-facing aligned table text")
+        };
+        assert!((non_facing_page_text_x(1, "EvenIn") - 75.0).abs() < 0.01);
+        assert!((non_facing_page_text_x(1, "EvenOut") - 471.0).abs() < 0.01);
     }
 
     #[test]
@@ -23667,6 +23683,37 @@ mod tests {
         assert!((cap.baseline_y - tail.baseline_y).abs() < 0.01);
         assert!(layout.pages[0].flow_exclusions.is_empty());
         assert_eq!(layout.pages[1].flow_exclusions.len(), 1);
+    }
+
+    #[test]
+    fn facing_drop_cap_frames_resolve_inside_outside_by_physical_page() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-facing-alignment-passive.rtf"
+        ))
+        .expect("facing frame fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 2);
+        let caps = |page_index: usize| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text == "I" || fragment.text == "O" => {
+                        Some(fragment)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let odd_caps = caps(0);
+        let even_caps = caps(1);
+        assert_eq!(odd_caps.len(), 2);
+        assert_eq!(even_caps.len(), 2);
+        assert!((odd_caps[0].x - 36.0).abs() < 0.01);
+        assert!((odd_caps[1].x - 216.0).abs() < 0.01);
+        assert!((even_caps[0].x - 216.0).abs() < 0.01);
+        assert!((even_caps[1].x - 36.0).abs() < 0.01);
     }
 
     #[test]

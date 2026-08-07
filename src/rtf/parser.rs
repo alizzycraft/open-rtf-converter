@@ -58165,6 +58165,44 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_mode_retains_facing_drop_cap_frame_alignment() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-facing-alignment-passive.rtf"
+        ))
+        .unwrap();
+        assert!(output.document.page.facing_pages);
+        assert!(!output.document.page.mirror_margins);
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1 => {
+                    Some(paragraph)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(frames.len(), 4);
+        assert_eq!(
+            frames[0].style.frame_horizontal_alignment,
+            Some(TableRowAlignment::Inside)
+        );
+        assert_eq!(
+            frames[1].style.frame_horizontal_alignment,
+            Some(TableRowAlignment::Outside)
+        );
+        assert_eq!(
+            frames[2].style.frame_horizontal_alignment,
+            Some(TableRowAlignment::Inside)
+        );
+        assert_eq!(
+            frames[3].style.frame_horizontal_alignment,
+            Some(TableRowAlignment::Outside)
+        );
+    }
+
+    #[test]
     fn paragraph_frame_position_offsets_clamp_malformed_values() {
         let options = RtfParseOptions {
             limits: RtfLimits {

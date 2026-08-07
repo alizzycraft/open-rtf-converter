@@ -75359,6 +75359,77 @@ fn naturally_paginated_absolute_frame_remains_page_scoped_and_passive() {
 }
 
 #[test]
+fn facing_absolute_frame_alignment_remains_passive_page_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-facing-alignment-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    assert!(parsed.document.page.facing_pages);
+    assert!(!parsed.document.page.mirror_margins);
+    let frames = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1 => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 4);
+    assert_eq!(
+        frames[0].style.frame_horizontal_alignment,
+        Some(TableRowAlignment::Inside)
+    );
+    assert_eq!(
+        frames[1].style.frame_horizontal_alignment,
+        Some(TableRowAlignment::Outside)
+    );
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-facing-alignment.rtf");
+    let output_path = dir.path().join("framed-drop-cap-facing-alignment.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 2);
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+    for visible in ["Odd inside", "Odd outside", "Even inside", "Even outside"] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in [
+        "dropcapli",
+        "dropcapt",
+        "facingp",
+        "phmrg",
+        "pvpg",
+        "posxi",
+        "posxo",
+        "posy",
+    ] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

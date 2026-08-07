@@ -4867,6 +4867,55 @@
       ]
     },
     {
+      "id": "framed-drop-cap-facing-alignment-passive-layout",
+      "input": "fixtures/framed-drop-cap-facing-alignment-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-facing-alignment-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 2,
+      "must_preserve_text": [
+        "Odd inside alpha beta gamma",
+        "Odd outside alpha beta gamma",
+        "Even inside alpha beta gamma",
+        "Even outside alpha beta gamma"
+      ],
+      "intentional_security_differences": [
+        "Facing-page inside/outside alignment becomes bounded physical-page geometry; raw facing-page and frame controls never cross into passive PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame horizontal anchor \\phmrg interpreted as bounded passive origin",
+        "paragraph frame horizontal alignment \\posxi interpreted as bounded passive placement",
+        "paragraph frame horizontal alignment \\posxo interpreted as bounded passive placement",
+        "paragraph frame vertical anchor \\pvpg interpreted as bounded passive origin",
+        "paragraph frame vertical position interpreted as bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "facingp",
+        "phmrg",
+        "pvpg",
+        "posxi",
+        "posxo",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 reference proves that facingp alone activates physical-page inside/outside alignment even when margmirror is absent: on odd page 1, posxi/posxo place 36-point frames at x=36/216; on even page 2 they reverse to x=216/36. Margmirror independently controls margin-width swapping rather than parity activation. The shared paragraph-frame/floating-table resolver now keys inside/outside parity to facing pages and leaves non-facing mirrored metadata at physical left/right. Current and Word retain identical 44-word order and line grouping; x origins/endpoints differ by at most 0.13/0.11 points and y boxes by 0.75-0.96 points. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",
