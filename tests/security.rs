@@ -26895,10 +26895,41 @@ fn custom_xml_markup_preserves_visible_text_without_metadata_leakage() {
     ]);
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
+    assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 1);
+    let marker_spacing = parsed.document.blocks.iter().find_map(|block| match block {
+        Block::Paragraph(paragraph) => paragraph
+            .runs
+            .iter()
+            .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
+            .map(|run| run.style.character_spacing_twips),
+        _ => None,
+    });
+    assert_eq!(marker_spacing, Some(82));
+    let calibri = parse_rtf_bytes(
+        br"{\rtf1{\fonttbl{\f0 Calibri;}}\f0 Before {\xmlopen tagged \xmlclose} After}",
+    )
+    .unwrap();
+    let calibri_marker_spacing = calibri
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Paragraph(paragraph) => paragraph
+                .runs
+                .iter()
+                .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
+                .map(|run| run.style.character_spacing_twips),
+            _ => None,
+        });
+    assert_eq!(calibri_marker_spacing, Some(118));
+    let visible_text = text.replace(PASSIVE_ADVANCE_MARKER, "");
     assert!(
-        text.contains("Before tagged  After") || text.contains("Before tagged After"),
-        "custom XML visible text was not preserved: {text:?}"
+        visible_text.contains("Before tagged  After")
+            || visible_text.contains("Before tagged After"),
+        "custom XML visible text was not preserved: {visible_text:?}"
     );
+    let strict_text = collect_text(&parse_rtf_bytes_strict(&input).document);
+    assert!(!strict_text.contains(PASSIVE_ADVANCE_MARKER));
     for forbidden in [
         "xmlopen",
         "xmlclose",

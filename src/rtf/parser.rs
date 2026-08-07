@@ -6951,6 +6951,20 @@ impl Parser {
                     Some(offset),
                 ));
             }
+            "xmlclose" => {
+                self.reject_active_content_only("custom XML markup", offset)?;
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+                    && destination_allows_visible_content(&self.state)
+                    && let Some(width_twips) = self.word_xml_close_advance_twips()
+                {
+                    self.push_passive_advance_marker(
+                        self.state.destination,
+                        width_twips,
+                        0,
+                        offset,
+                    )?;
+                }
+            }
             name if let Some(feature) = custom_xml_markup_feature(name) => {
                 self.reject_active_content_only(feature, offset)?;
             }
@@ -11385,6 +11399,33 @@ impl Parser {
         self.state.character.character_spacing_twips = previous_spacing;
         self.state.character.baseline_shift_half_points = previous_baseline_shift;
         result
+    }
+
+    fn word_xml_close_advance_twips(&self) -> Option<i32> {
+        let font_index = self
+            .state
+            .low_ansi_font_index
+            .or(self.state.high_ansi_font_index)
+            .unwrap_or(self.state.character.font_index);
+        let font = self
+            .document
+            .fonts
+            .iter()
+            .find(|font| font.index == font_index);
+        let twips_at_12_points = match font.map(|font| font.name.trim().to_ascii_lowercase()) {
+            Some(name) if name == "calibri" || name == "carlito" => 118_i64,
+            Some(name) if name == "times new roman" || name == "tinos" => 82_i64,
+            None => 82_i64,
+            _ => return None,
+        };
+        let half_points = i64::from(self.state.character.font_size_half_points.max(1));
+        let scaled = twips_at_12_points
+            .checked_mul(half_points)?
+            .checked_add(12)?
+            / 24;
+        i32::try_from(scaled)
+            .ok()
+            .map(|width| width.min(self.limits().max_character_spacing_twips.max(1)))
     }
 
     fn passive_field_result_for_instruction(
