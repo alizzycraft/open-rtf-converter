@@ -19528,6 +19528,15 @@ impl Parser {
             .take()
             .map(|name| name.trim().trim_end_matches(';').to_string())
             .filter(|name| !name.is_empty());
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            && font.alternate_name.is_none()
+            && matches!(font.charset, Some(77 | 255))
+        {
+            // Word 16.0 substitutes missing legacy Mac/OEM faces with Calibri. Keep
+            // only that normalized passive family choice; an exact caller-supplied
+            // source face still outranks this alternate in the font provider.
+            font.alternate_name = Some("Calibri".to_string());
+        }
         if font.name.is_empty() {
             font.name = format!("Font{}", font.index);
         }
@@ -46944,6 +46953,29 @@ mod tests {
         assert_eq!(text, "Mac \u{201c}Hello\u{201d} OEM \u{00e9} line \u{2502}");
         assert!(!text.contains("fcharset"));
         assert!(!text.contains("Mac Face"));
+        assert!(
+            output
+                .document
+                .fonts
+                .iter()
+                .all(|font| { font.alternate_name.as_deref() == Some("Calibri") })
+        );
+
+        let strict = parse_rtf_bytes_with_options(
+            br"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\fcharset77 Mac Face;}{\f1\fcharset255 Oem Face;}}\f0 Mac \'d2Hello\'d3 \f1 OEM \'82 line \'b3\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            strict
+                .document
+                .fonts
+                .iter()
+                .all(|font| font.alternate_name.is_none())
+        );
     }
 
     #[test]

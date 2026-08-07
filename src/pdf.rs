@@ -1753,6 +1753,7 @@ fn encode_supplied_text_fragment_with_text(
                     &fragment.style,
                     previous_char,
                     font_size,
+                    Some(font_provider),
                 )?;
                 let supplied_advance = glyphs.get(previous_index)?.width * font_size / 1000.0;
                 Some(source_advance - supplied_advance)
@@ -1766,6 +1767,7 @@ fn encode_supplied_text_fragment_with_text(
                         &fragment.style,
                         left,
                         ch,
+                        Some(font_provider),
                     )
                     .or_else(|| {
                         font_asset_pair_kerning_points(

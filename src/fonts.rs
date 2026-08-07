@@ -141,6 +141,15 @@ impl FontProvider {
             .any(|asset| asset.matches_family(&family_name))
     }
 
+    pub(crate) fn has_exact_asset_for_family(&self, family_name: &str) -> bool {
+        let family_name = normalized_family_name(family_name);
+        !family_name.is_empty()
+            && self
+                .assets
+                .iter()
+                .any(|asset| asset.family_match_priority(&family_name) == Some(0))
+    }
+
     pub fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
         let family_name = normalized_family_name(family_name);
         if family_name.is_empty() {

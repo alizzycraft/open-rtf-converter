@@ -13330,6 +13330,7 @@ fn flow_run_line_height(
     if let Some(line_height) = source_word_compatible_line_height_points(
         font_for_style(document, &run.style),
         run.line_height_points,
+        font_provider,
     ) {
         return line_height.clamp(
             run.line_height_points.max(1.0),
@@ -13361,9 +13362,12 @@ fn flow_run_line_height(
     bounded_line_height + run.style.baseline_shift_points().abs() + border_extra
 }
 
-fn source_word_compatible_line_height_points(font: Option<&FontDef>, size: f32) -> Option<f32> {
-    let name = font?.name.trim().to_ascii_lowercase();
-    if name != "calibri" && name != "carlito" {
+fn source_word_compatible_line_height_points(
+    font: Option<&FontDef>,
+    size: f32,
+    font_provider: Option<&FontProvider>,
+) -> Option<f32> {
+    if !font_uses_calibri_source_metrics(font?, font_provider) {
         return None;
     }
 
@@ -15377,7 +15381,7 @@ fn measure_text_with_document_font(
             continue;
         }
         if let Some(source_width) =
-            source_word_compatible_advance_points(source_font, style, ch, size)
+            source_word_compatible_advance_points(source_font, style, ch, size, font_provider)
         {
             width += source_width;
             continue;
@@ -15399,8 +15403,9 @@ pub(crate) fn source_word_compatible_advance_points(
     style: &CharacterStyle,
     ch: char,
     size: f32,
+    font_provider: Option<&FontProvider>,
 ) -> Option<f32> {
-    source_calibri_advance_points(font, style, ch, size)
+    source_calibri_advance_points(font, style, ch, size, font_provider)
         .or_else(|| source_dingbat_advance_points(font, ch, size))
         .or_else(|| {
             style
@@ -15416,10 +15421,21 @@ fn source_calibri_advance_points(
     style: &CharacterStyle,
     ch: char,
     size: f32,
+    font_provider: Option<&FontProvider>,
 ) -> Option<f32> {
-    let name = font?.name.trim().to_ascii_lowercase();
-    if name != "calibri" && name != "carlito" {
+    if !font_uses_calibri_source_metrics(font?, font_provider) {
         return None;
+    }
+    if !style.bold && !style.italic {
+        let units = match ch {
+            '\u{00e9}' => 1019,
+            '\u{201c}' | '\u{201d}' => 857,
+            '\u{2502}' => 1024,
+            _ => 0,
+        };
+        if units != 0 {
+            return Some(size * units as f32 / 2_048.0);
+        }
     }
     let index = usize::try_from(u32::from(ch).checked_sub(32)?).ok()?;
     const REGULAR: [u16; 95] = [
@@ -15461,6 +15477,16 @@ fn source_calibri_advance_points(
         (true, true) => *BOLD_ITALIC.get(index)?,
     };
     Some(size * f32::from(units) / 2_048.0)
+}
+
+fn font_uses_calibri_source_metrics(font: &FontDef, provider: Option<&FontProvider>) -> bool {
+    let is_calibri = |name: &str| {
+        let name = name.trim().to_ascii_lowercase();
+        name == "calibri" || name == "carlito"
+    };
+    is_calibri(&font.name)
+        || (font.alternate_name.as_deref().is_some_and(is_calibri)
+            && !provider.is_some_and(|provider| provider.has_exact_asset_for_family(&font.name)))
 }
 
 pub(crate) fn source_dingbat_advance_points(
@@ -15926,11 +15952,17 @@ fn passive_kerning_width_with_document_font(
     let mut previous = None;
     for ch in text.chars().filter(|ch| !is_zero_width_format_char(*ch)) {
         if let Some(left) = previous {
-            total += source_word_compatible_pair_kerning_points(source_font, style, left, ch)
-                .or_else(|| {
-                    supplied_font_pair_kerning_points(font_provider, source_font, style, left, ch)
-                })
-                .unwrap_or_else(|| passive_pair_kerning_points(left, ch, family, style));
+            total += source_word_compatible_pair_kerning_points(
+                source_font,
+                style,
+                left,
+                ch,
+                font_provider,
+            )
+            .or_else(|| {
+                supplied_font_pair_kerning_points(font_provider, source_font, style, left, ch)
+            })
+            .unwrap_or_else(|| passive_pair_kerning_points(left, ch, family, style));
         }
         previous = Some(ch);
     }
@@ -15942,9 +15974,9 @@ pub(crate) fn source_word_compatible_pair_kerning_points(
     style: &CharacterStyle,
     left: char,
     right: char,
+    font_provider: Option<&FontProvider>,
 ) -> Option<f32> {
-    let name = font?.name.trim().to_ascii_lowercase();
-    if (name != "calibri" && name != "carlito") || style.bold || style.italic {
+    if !font_uses_calibri_source_metrics(font?, font_provider) || style.bold || style.italic {
         return None;
     }
     // Bounded regular-face pairs independently present in the registered
@@ -27466,8 +27498,9 @@ mod tests {
                 italic,
                 ..Default::default()
             };
-            let advance = source_word_compatible_advance_points(Some(font), &style, 'A', 12.0)
-                .expect("Calibri ASCII source advance");
+            let advance =
+                source_word_compatible_advance_points(Some(font), &style, 'A', 12.0, None)
+                    .expect("Calibri ASCII source advance");
             assert!((advance - (12.0 * units as f32 / 2_048.0)).abs() < 0.001);
         }
         assert!(
@@ -27476,6 +27509,7 @@ mod tests {
                 &CharacterStyle::default(),
                 '\u{03a9}',
                 12.0,
+                None,
             )
             .is_none()
         );
@@ -27486,12 +27520,13 @@ mod tests {
         };
         for (left, right, units) in [('W', 'o', -86.0), ('r', '.', -206.0)] {
             let kerning =
-                source_word_compatible_pair_kerning_points(Some(font), &regular, left, right)
+                source_word_compatible_pair_kerning_points(Some(font), &regular, left, right, None)
                     .expect("registered Calibri pair");
             assert!((kerning - (12.0 * units / 2_048.0)).abs() < 0.001);
         }
         assert!(
-            source_word_compatible_pair_kerning_points(Some(font), &regular, 'H', 'e').is_none()
+            source_word_compatible_pair_kerning_points(Some(font), &regular, 'H', 'e', None,)
+                .is_none()
         );
         assert!(
             source_word_compatible_pair_kerning_points(
@@ -27502,6 +27537,58 @@ mod tests {
                 },
                 'W',
                 'o',
+                None,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn legacy_charset_calibri_fallback_yields_to_an_exact_supplied_face() {
+        let font = FontDef {
+            index: 0,
+            name: "Mac Face".to_string(),
+            alternate_name: Some("Calibri".to_string()),
+            charset: Some(77),
+            code_page: None,
+            family: FontFamilyHint::Nil,
+            pitch: FontPitch::Default,
+        };
+        let style = CharacterStyle {
+            font_index: 0,
+            font_size_half_points: 24,
+            ..Default::default()
+        };
+        let browser_provider = FontProvider::browser_safe_defaults();
+        assert!(
+            (source_word_compatible_advance_points(
+                Some(&font),
+                &style,
+                '\u{201c}',
+                12.0,
+                Some(&browser_provider),
+            )
+            .expect("missing legacy face should use bounded Calibri fallback metrics")
+                - (12.0 * 857.0 / 2_048.0))
+                .abs()
+                < 0.001
+        );
+
+        let exact_provider = FontProvider {
+            assets: vec![FontAsset {
+                family_names: vec!["Mac Face".to_string()],
+                style: FontAssetStyle::default(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            }],
+            limits: FontProviderLimits::default(),
+        };
+        assert!(
+            source_word_compatible_advance_points(
+                Some(&font),
+                &style,
+                '\u{201c}',
+                12.0,
+                Some(&exact_provider),
             )
             .is_none()
         );
@@ -27856,17 +27943,19 @@ mod tests {
         ];
 
         for (ch, expected_em) in expected {
-            let advance = source_word_compatible_advance_points(Some(&font), &style, ch, size)
-                .expect("registered Cambria Math character should have a bounded source metric");
+            let advance =
+                source_word_compatible_advance_points(Some(&font), &style, ch, size, None).expect(
+                    "registered Cambria Math character should have a bounded source metric",
+                );
             assert!((advance - (size * expected_em)).abs() < 0.000_01);
         }
         assert_eq!(
-            source_word_compatible_advance_points(Some(&font), &style, '\u{1f642}', size),
+            source_word_compatible_advance_points(Some(&font), &style, '\u{1f642}', size, None,),
             None
         );
         style.passive_math_nary_id = None;
         assert_eq!(
-            source_word_compatible_advance_points(Some(&font), &style, 'm', size),
+            source_word_compatible_advance_points(Some(&font), &style, 'm', size, None),
             None
         );
     }

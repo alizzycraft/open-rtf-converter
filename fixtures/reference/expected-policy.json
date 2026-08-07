@@ -6895,7 +6895,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic MacRoman and OEM decoding and PDF extraction for “Hello”, café, and │ when the code page is selected through fcharset77/fcharset255. Both outputs have identical four-line text and zero drawings; current/Word line starts differ by 0.02 points, decoded endpoints by at most 8.37 points, and cumulative baselines by at most 2.63 points because Word substitutes Calibri while the passive bundled path uses Liberation Sans with a fixed 13.8-point cadence."
+        "The focused Word 16.0 audit confirms exact semantic MacRoman and OEM decoding and PDF extraction for “Hello”, café, and │ when the code page is selected through fcharset77/fcharset255. WordCompatiblePassive now normalizes Word's missing-face Calibri substitution without overriding an exact caller-supplied Mac/OEM face, uses bounded Calibri/Carlito source line and covered character-advance metrics, and continues embedding only safe Liberation Sans contours. Current/Word final non-space glyph origins differ by at most 0.08 points horizontally; Calibri-line baselines differ by 0.43-0.44 points instead of accumulating to 2.63 points, and the following Arial baseline differs by 0.94 points. Smart-quote and box-drawing contour edges retain at most 1.49 points of safe bundled-font residual. Both outputs have identical four-line text and zero drawings."
       ]
     },
     {
