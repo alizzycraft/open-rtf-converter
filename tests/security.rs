@@ -75811,6 +75811,112 @@ fn ordinary_frame_exact_height_and_in_flow_recovery_remain_passive() {
 }
 
 #[test]
+fn paragraph_frame_text_direction_remains_passive_rotated_text() {
+    let input = include_bytes!("../fixtures/paragraph-frame-text-direction-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    for control in [
+        "frmtxlrtb",
+        "frmtxtbrl",
+        "frmtxbtlr",
+        "frmtxlrtbv",
+        "frmtxtbrlv",
+    ] {
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(&format!(
+                "paragraph frame text direction \\{control} interpreted through bounded passive rotation"
+            ))
+        }));
+    }
+
+    let layout = LayoutEngine::layout(&parsed.document);
+    let rotations = layout
+        .pages
+        .iter()
+        .map(|page| {
+            page.items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(fragment) => Some(fragment.rotation),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        rotations[2]
+            .iter()
+            .any(|rotation| *rotation == open_rtf_converter::layout::TextRotation::Clockwise90)
+    );
+    assert!(
+        rotations[3]
+            .iter()
+            .any(|rotation| *rotation
+                == open_rtf_converter::layout::TextRotation::CounterClockwise90)
+    );
+    assert!(
+        rotations[5]
+            .iter()
+            .any(|rotation| *rotation == open_rtf_converter::layout::TextRotation::Clockwise90)
+    );
+
+    let dir = tempdir().unwrap();
+    let input_path = dir
+        .path()
+        .join("paragraph-frame-text-direction-passive.rtf");
+    let output_path = dir
+        .path()
+        .join("paragraph-frame-text-direction-passive.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    audit_passive_pdf_bytes(&pdf).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 6);
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+    for visible in [
+        "Default Alpha Beta",
+        "Horizontal Alpha Beta",
+        "Top Bottom Alpha Beta",
+        "Bottom Top Alpha Beta",
+        "Vertical LR Alpha Beta",
+        "Vertical RL Alpha Beta",
+    ] {
+        assert!(rendered_text.contains(visible));
+    }
+    for forbidden in [
+        "frmtxlrtb",
+        "frmtxtbrl",
+        "frmtxbtlr",
+        "frmtxlrtbv",
+        "frmtxtbrlv",
+        "absw",
+        "absh",
+    ] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

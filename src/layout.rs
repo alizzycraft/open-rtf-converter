@@ -5822,6 +5822,37 @@ fn rotated_table_cell_line_origin(
     }
 }
 
+fn rotated_paragraph_frame_line_origin(
+    frame_left: f32,
+    frame_width: f32,
+    frame_top: f32,
+    frame_height: f32,
+    line: &Line,
+    direction: TableCellTextDirection,
+    cross_offset: f32,
+) -> (f32, f32) {
+    match direction {
+        TableCellTextDirection::LeftToRightTopToBottom => (frame_left, frame_top),
+        TableCellTextDirection::TopToBottomRightToLeft => (
+            frame_left + frame_width - (line.height * 0.825) - cross_offset,
+            frame_top + (line.height * 0.75),
+        ),
+        TableCellTextDirection::BottomToTopLeftToRight => (
+            frame_left + (line.height * 0.825) + cross_offset,
+            frame_top - frame_height + (line.height * 0.75),
+        ),
+    }
+}
+
+fn paragraph_frame_vertical_column_advance(line: &Line) -> f32 {
+    let word_pitch = line
+        .runs
+        .iter()
+        .map(|run| run.style.font_size_points() * 1.18)
+        .fold(0.0_f32, f32::max);
+    line.height.max(word_pitch).max(1.0)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn table_vertical_span_heights(
     table: &Table,
@@ -8015,6 +8046,105 @@ fn layout_paragraph(
     );
 }
 
+struct PreparedParagraphFrameGeometry {
+    width: f32,
+    height: f32,
+    lines: Vec<Vec<Line>>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_paragraph_frame_geometry(
+    paragraphs: &[Paragraph],
+    style: &ParagraphStyle,
+    content_width: f32,
+    max_height: f32,
+    markers: &MarkerContext,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> PreparedParagraphFrameGeometry {
+    let natural_width = paragraphs
+        .iter()
+        .flat_map(|paragraph| {
+            wrap_paragraph_with_font_provider(
+                paragraph,
+                content_width,
+                markers,
+                document,
+                font_provider,
+            )
+        })
+        .map(|line| line.width)
+        .fold(0.0_f32, f32::max)
+        .max(1.0);
+    let vertical = style.frame_text_direction != TableCellTextDirection::LeftToRightTopToBottom;
+    let authored_width = style
+        .frame_width_twips
+        .map(|twips| twips_to_points(twips.saturating_abs()));
+    let authored_height = style
+        .frame_height_twips
+        .map(|twips| twips_to_points(twips.saturating_abs()));
+
+    if vertical {
+        let height = authored_height
+            .unwrap_or(natural_width)
+            .clamp(1.0, max_height.max(1.0));
+        let lines = paragraphs
+            .iter()
+            .map(|paragraph| {
+                wrap_paragraph_with_font_provider(
+                    paragraph,
+                    height,
+                    markers,
+                    document,
+                    font_provider,
+                )
+            })
+            .collect::<Vec<_>>();
+        let natural_cross_extent = lines
+            .iter()
+            .flatten()
+            .map(|line| line.height)
+            .sum::<f32>()
+            .max(1.0);
+        PreparedParagraphFrameGeometry {
+            width: authored_width
+                .unwrap_or(natural_cross_extent)
+                .clamp(1.0, content_width.max(1.0)),
+            height,
+            lines,
+        }
+    } else {
+        let width = authored_width
+            .unwrap_or(natural_width)
+            .clamp(1.0, content_width.max(1.0));
+        let lines = paragraphs
+            .iter()
+            .map(|paragraph| {
+                wrap_paragraph_with_font_provider(
+                    paragraph,
+                    width,
+                    markers,
+                    document,
+                    font_provider,
+                )
+            })
+            .collect::<Vec<_>>();
+        let natural_height = lines
+            .iter()
+            .flatten()
+            .map(|line| line.height)
+            .sum::<f32>()
+            .max(1.0);
+        PreparedParagraphFrameGeometry {
+            width,
+            height: authored_height
+                .unwrap_or(natural_height)
+                .clamp(1.0, max_height.max(1.0)),
+            lines,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn layout_framed_paragraph_group(
     pages: &mut Vec<LayoutPage>,
@@ -8049,53 +8179,18 @@ fn layout_framed_paragraph_group(
         })
         .collect::<Vec<_>>();
     let markers = current_marker_context(pages, document_stats);
-    let natural_width = passive_frame_paragraphs
-        .iter()
-        .flat_map(|paragraph| {
-            wrap_paragraph_with_font_provider(
-                paragraph,
-                content_width,
-                &markers,
-                document,
-                font_provider,
-            )
-        })
-        .map(|line| line.width)
-        .fold(0.0_f32, f32::max)
-        .max(1.0);
-    let frame_width = paragraph
-        .style
-        .frame_width_twips
-        .map(|twips| twips_to_points(twips.saturating_abs()))
-        .unwrap_or(natural_width)
-        .clamp(1.0, content_width.max(1.0));
-    let framed_lines = passive_frame_paragraphs
-        .iter()
-        .map(|paragraph| {
-            wrap_paragraph_with_font_provider(
-                paragraph,
-                frame_width,
-                &markers,
-                document,
-                font_provider,
-            )
-        })
-        .collect::<Vec<_>>();
-    let natural_height = framed_lines
-        .iter()
-        .flatten()
-        .map(|line| line.height)
-        .sum::<f32>()
-        .max(1.0);
-    let frame_height = paragraph
-        .style
-        .frame_height_twips
-        .map(|twips| twips_to_points(twips.saturating_abs()))
-        .unwrap_or(natural_height)
-        .clamp(
-            1.0,
-            (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
-        );
+    let prepared_frame = prepare_paragraph_frame_geometry(
+        &passive_frame_paragraphs,
+        &paragraph.style,
+        content_width,
+        geometry.height - geometry.margin_top - geometry.margin_bottom,
+        &markers,
+        document,
+        font_provider,
+    );
+    let frame_width = prepared_frame.width;
+    let frame_height = prepared_frame.height;
+    let framed_lines = prepared_frame.lines;
     if negative_width_frame && paragraph.style.frame_height_twips.is_none() {
         return true;
     }
@@ -8220,32 +8315,93 @@ fn layout_framed_paragraph_group(
         }
     }
     let frame_item_start = pages.last().map(|page| page.items.len()).unwrap_or(0);
-    let mut frame_cursor_y = frame_top_y;
-    let mut frame_geometry = *geometry;
-    let mut frame_column = *current_column;
-    for passive_frame_paragraph in &passive_frame_paragraphs {
-        layout_paragraph(
-            pages,
-            &mut frame_cursor_y,
-            passive_frame_paragraph,
-            false,
-            false,
-            false,
-            frame_width,
-            geometry.margin_bottom,
-            &mut frame_geometry,
-            &mut frame_column,
-            document,
-            document_stats,
-            None,
-            &markers,
-            font_provider,
-        );
+    let frame_text_direction = paragraph.style.frame_text_direction;
+    let vertical_frame_text =
+        frame_text_direction != TableCellTextDirection::LeftToRightTopToBottom;
+    if vertical_frame_text {
+        let rotation = table_cell_text_rotation(frame_text_direction);
+        let mut cross_offset = 0.0;
+        for (passive_frame_paragraph, lines) in passive_frame_paragraphs.iter().zip(&framed_lines) {
+            cross_offset += twips_to_points(passive_frame_paragraph.style.space_before_twips);
+            for (line_index, line) in lines.iter().enumerate() {
+                let is_first_line = line_index == 0;
+                let is_last_line = line_index + 1 == lines.len();
+                let line_width = paragraph_line_width(
+                    frame_height,
+                    &passive_frame_paragraph.style,
+                    is_first_line,
+                );
+                let word_spacing = justified_word_spacing(
+                    line,
+                    &passive_frame_paragraph.style,
+                    line_width,
+                    is_last_line,
+                    document,
+                    font_provider,
+                );
+                let character_spacing = distributed_character_spacing(
+                    line,
+                    &passive_frame_paragraph.style,
+                    line_width,
+                    is_last_line,
+                );
+                let (rotated_x, rotated_y) = rotated_paragraph_frame_line_origin(
+                    frame_left,
+                    frame_width,
+                    frame_top_y,
+                    frame_height,
+                    line,
+                    frame_text_direction,
+                    cross_offset,
+                );
+                push_line_with_rotation(
+                    pages,
+                    line,
+                    rotated_x,
+                    rotated_y,
+                    document,
+                    word_spacing,
+                    character_spacing,
+                    rotation,
+                );
+                cross_offset += paragraph_frame_vertical_column_advance(line);
+            }
+            cross_offset += twips_to_points(passive_frame_paragraph.style.space_after_twips);
+        }
+    } else {
+        let mut frame_cursor_y = frame_top_y;
+        let mut frame_geometry = *geometry;
+        let mut frame_column = *current_column;
+        for passive_frame_paragraph in &passive_frame_paragraphs {
+            layout_paragraph(
+                pages,
+                &mut frame_cursor_y,
+                passive_frame_paragraph,
+                false,
+                false,
+                false,
+                frame_width,
+                geometry.margin_bottom,
+                &mut frame_geometry,
+                &mut frame_column,
+                document,
+                document_stats,
+                None,
+                &markers,
+                font_provider,
+            );
+        }
     }
     if let Some(page) = pages.last_mut() {
-        let frame_x_shift = frame_left - geometry.body_left(*current_column);
+        let frame_x_shift = if vertical_frame_text {
+            0.0
+        } else {
+            frame_left - geometry.body_left(*current_column)
+        };
         for item in page.items.iter_mut().skip(frame_item_start) {
-            shift_layout_item_x(item, frame_x_shift);
+            if frame_x_shift != 0.0 {
+                shift_layout_item_x(item, frame_x_shift);
+            }
             if paragraph
                 .style
                 .frame_height_twips
@@ -8337,6 +8493,7 @@ fn same_absolute_paragraph_frame(first: &Paragraph, second: &Paragraph) -> bool 
         && first.style.frame_horizontal_offset_twips == second.style.frame_horizontal_offset_twips
         && first.style.frame_vertical_anchor == second.style.frame_vertical_anchor
         && first.style.frame_vertical_offset_twips == second.style.frame_vertical_offset_twips
+        && first.style.frame_text_direction == second.style.frame_text_direction
 }
 
 fn absolute_paragraph_frame_group<'a>(
@@ -8530,53 +8687,18 @@ fn resolve_absolute_frame_exclusion(
         .map(|paragraph| passive_frame_content_paragraph(paragraph))
         .collect::<Vec<_>>();
     let markers = current_marker_context(pages, document_stats);
-    let natural_width = passive_frame_paragraphs
-        .iter()
-        .flat_map(|paragraph| {
-            wrap_paragraph_with_font_provider(
-                paragraph,
-                content_width,
-                &markers,
-                document,
-                font_provider,
-            )
-        })
-        .map(|line| line.width)
-        .fold(0.0_f32, f32::max)
-        .max(1.0);
-    let frame_width = paragraph
-        .style
-        .frame_width_twips
-        .map(|twips| twips_to_points(twips.saturating_abs()))
-        .unwrap_or(natural_width)
-        .clamp(1.0, content_width.max(1.0));
-    let framed_lines = passive_frame_paragraphs
-        .iter()
-        .map(|paragraph| {
-            wrap_paragraph_with_font_provider(
-                paragraph,
-                frame_width,
-                &markers,
-                document,
-                font_provider,
-            )
-        })
-        .collect::<Vec<_>>();
-    let natural_height = framed_lines
-        .iter()
-        .flatten()
-        .map(|line| line.height)
-        .sum::<f32>()
-        .max(1.0);
-    let frame_height = paragraph
-        .style
-        .frame_height_twips
-        .map(|twips| twips_to_points(twips.saturating_abs()))
-        .unwrap_or(natural_height)
-        .clamp(
-            1.0,
-            (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
-        );
+    let prepared_frame = prepare_paragraph_frame_geometry(
+        &passive_frame_paragraphs,
+        &paragraph.style,
+        content_width,
+        geometry.height - geometry.margin_top - geometry.margin_bottom,
+        &markers,
+        document,
+        font_provider,
+    );
+    let frame_width = prepared_frame.width;
+    let frame_height = prepared_frame.height;
+    let framed_lines = prepared_frame.lines;
     let requested_frame_top =
         (shape_vertical_origin(paragraph.style.frame_vertical_anchor, cursor_y, &geometry)
             - twips_to_points(paragraph.style.frame_vertical_offset_twips))
@@ -24060,6 +24182,73 @@ mod tests {
         assert!(
             ((containing(5, "N").baseline_y - containing(5, "After ").baseline_y) - 36.0).abs()
                 < 0.01
+        );
+    }
+
+    #[test]
+    fn ordinary_frame_text_direction_rotates_and_wraps_by_vertical_extent() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/paragraph-frame-text-direction-passive.rtf"
+        ))
+        .expect("paragraph-frame text-direction fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 6);
+
+        let rotated = |page_index: usize| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(layout_item_text_fragment)
+                .filter(|fragment| fragment.rotation != TextRotation::None)
+                .collect::<Vec<_>>()
+        };
+        assert!(rotated(0).is_empty());
+        assert!(rotated(1).is_empty());
+        assert!(rotated(4).is_empty());
+
+        let column_origins = |fragments: &[&TextFragment]| {
+            let mut origins = fragments
+                .iter()
+                .map(|fragment| fragment.x)
+                .collect::<Vec<_>>();
+            origins.sort_by(f32::total_cmp);
+            origins.dedup_by(|left, right| (*left - *right).abs() < 0.01);
+            origins
+        };
+
+        let clockwise = rotated(2);
+        assert!(
+            clockwise
+                .iter()
+                .all(|fragment| fragment.rotation == TextRotation::Clockwise90)
+        );
+        let clockwise_columns = column_origins(&clockwise);
+        assert_eq!(clockwise_columns.len(), 2);
+        assert!(((clockwise_columns[1] - clockwise_columns[0]) - 14.16).abs() < 0.01);
+
+        let counterclockwise = rotated(3);
+        assert!(
+            counterclockwise
+                .iter()
+                .all(|fragment| fragment.rotation == TextRotation::CounterClockwise90)
+        );
+        let counterclockwise_columns = column_origins(&counterclockwise);
+        assert_eq!(counterclockwise_columns.len(), 2);
+        assert!(((counterclockwise_columns[1] - counterclockwise_columns[0]) - 14.16).abs() < 0.01);
+
+        let vertical_alias = rotated(5);
+        assert!(
+            vertical_alias
+                .iter()
+                .all(|fragment| fragment.rotation == TextRotation::Clockwise90)
+        );
+        assert_eq!(column_origins(&vertical_alias).len(), 2);
+        assert!(
+            layout
+                .pages
+                .iter()
+                .all(|page| page.flow_exclusions.len() == 1)
         );
     }
 

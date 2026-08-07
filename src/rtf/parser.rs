@@ -6398,6 +6398,21 @@ impl Parser {
                 ),
                 Some(offset),
             )),
+            "frmtxlrtb" | "frmtxlrtbv" => self.set_paragraph_frame_text_direction(
+                TableCellTextDirection::LeftToRightTopToBottom,
+                &control.name,
+                offset,
+            ),
+            "frmtxtbrl" | "frmtxtbrlv" => self.set_paragraph_frame_text_direction(
+                TableCellTextDirection::TopToBottomRightToLeft,
+                &control.name,
+                offset,
+            ),
+            "frmtxbtlr" => self.set_paragraph_frame_text_direction(
+                TableCellTextDirection::BottomToTopLeftToRight,
+                &control.name,
+                offset,
+            ),
             "dxfrtext" | "dfrmtxtx" => {
                 self.set_paragraph_frame_text_distance(control.parameter, offset)
             }
@@ -7998,6 +8013,21 @@ impl Parser {
         self.state.paragraph.frame_text_distance_twips = clamped;
         self.diagnostics.push(Diagnostic::warning(
             "paragraph wrap distance interpreted through bounded passive flow layout",
+            Some(offset),
+        ));
+    }
+
+    fn set_paragraph_frame_text_direction(
+        &mut self,
+        direction: TableCellTextDirection,
+        control_name: &str,
+        offset: usize,
+    ) {
+        self.state.paragraph.frame_text_direction = direction;
+        self.diagnostics.push(Diagnostic::warning(
+            format!(
+                "paragraph frame text direction \\{control_name} interpreted through bounded passive rotation"
+            ),
             Some(offset),
         ));
     }
@@ -27162,6 +27192,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.frame_vertical_offset_twips == default.frame_vertical_offset_twips {
         output.frame_vertical_offset_twips = base.frame_vertical_offset_twips;
+    }
+    if output.frame_text_direction == default.frame_text_direction {
+        output.frame_text_direction = base.frame_text_direction;
     }
     if output.left_indent_twips == default.left_indent_twips {
         output.left_indent_twips = base.left_indent_twips;
@@ -58171,6 +58204,55 @@ After\par}"#;
                 .iter()
                 .all(|paragraph| paragraph.style.drop_cap_lines == 0)
         );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
+    fn paragraph_frame_text_direction_controls_remain_passive_metadata() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/paragraph-frame-text-direction-passive.rtf"
+        ))
+        .expect("paragraph-frame text-direction fixture should parse");
+        let directions = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) if paragraph.style.frame_width_twips.is_some() => {
+                    Some(paragraph.style.frame_text_direction)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            directions,
+            vec![
+                TableCellTextDirection::LeftToRightTopToBottom,
+                TableCellTextDirection::LeftToRightTopToBottom,
+                TableCellTextDirection::TopToBottomRightToLeft,
+                TableCellTextDirection::BottomToTopLeftToRight,
+                TableCellTextDirection::LeftToRightTopToBottom,
+                TableCellTextDirection::TopToBottomRightToLeft,
+            ]
+        );
+        for control in [
+            "frmtxlrtb",
+            "frmtxtbrl",
+            "frmtxbtlr",
+            "frmtxlrtbv",
+            "frmtxtbrlv",
+        ] {
+            assert!(output.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains(&format!(
+                    "paragraph frame text direction \\{control} interpreted through bounded passive rotation"
+                ))
+            }));
+        }
         assert!(
             output
                 .diagnostics

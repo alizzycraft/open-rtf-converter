@@ -1036,6 +1036,8 @@ pub struct ParagraphStyle {
     pub frame_vertical_anchor: StaticShapeVerticalAnchor,
     /// Downward distance from the selected vertical anchor origin.
     pub frame_vertical_offset_twips: i32,
+    /// Bounded passive text direction inside an ordinary paragraph frame.
+    pub frame_text_direction: TableCellTextDirection,
     pub left_indent_twips: i32,
     pub right_indent_twips: i32,
     pub first_line_indent_twips: i32,
@@ -1083,6 +1085,7 @@ impl Default for ParagraphStyle {
             frame_horizontal_offset_twips: 0,
             frame_vertical_anchor: StaticShapeVerticalAnchor::Paragraph,
             frame_vertical_offset_twips: 0,
+            frame_text_direction: TableCellTextDirection::LeftToRightTopToBottom,
             left_indent_twips: 0,
             right_indent_twips: 0,
             first_line_indent_twips: 0,

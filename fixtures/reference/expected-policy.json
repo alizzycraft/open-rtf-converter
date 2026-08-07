@@ -5200,6 +5200,57 @@
       ]
     },
     {
+      "id": "paragraph-frame-text-direction-passive-layout",
+      "input": "fixtures/paragraph-frame-text-direction-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-frame-text-direction-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 6,
+      "must_preserve_text": [
+        "Default Alpha Beta",
+        "Horizontal Alpha Beta",
+        "Top Bottom Alpha Beta",
+        "Bottom Top Alpha Beta",
+        "Vertical LR Alpha Beta",
+        "Vertical RL Alpha Beta"
+      ],
+      "intentional_security_differences": [
+        "Paragraph-frame text direction is normalized into bounded passive text matrices; raw frame controls and editable rotation metadata never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame text direction \\frmtxlrtb interpreted through bounded passive rotation",
+        "paragraph frame text direction \\frmtxtbrl interpreted through bounded passive rotation",
+        "paragraph frame text direction \\frmtxbtlr interpreted through bounded passive rotation",
+        "paragraph frame text direction \\frmtxlrtbv interpreted through bounded passive rotation",
+        "paragraph frame text direction \\frmtxtbrlv interpreted through bounded passive rotation"
+      ],
+      "forbidden_pdf_markers": [
+        "frmtxlrtb",
+        "frmtxtbrl",
+        "frmtxbtlr",
+        "frmtxlrtbv",
+        "frmtxtbrlv",
+        "absw",
+        "absh",
+        "phpg",
+        "pvpg",
+        "posx",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused six-page Word 16.0 probe proves that frmtxlrtb and frmtxlrtbv remain horizontal, frmtxtbrl and frmtxtbrlv rotate top-to-bottom with columns progressing right-to-left, and frmtxbtlr rotates bottom-to-top with columns progressing left-to-right. Vertical text wraps against the frame height and uses a 14.16-point cross-column pitch at 12 points. Current/Word rotated column origins differ by at most 0.07 points, long-column endpoints by at most 0.02 points, and short-column endpoints by the established 3.42-point bundled Arial-compatible width residual. Horizontal frame/body origins retain at most 0.05-point x and 0.95-point y residuals. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",
