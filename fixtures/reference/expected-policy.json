@@ -4969,6 +4969,48 @@
       ]
     },
     {
+      "id": "framed-drop-cap-signed-dimensions-passive-layout",
+      "input": "fixtures/framed-drop-cap-signed-dimensions-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-signed-dimensions-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 8,
+      "must_preserve_text": [
+        "Positive width positive height",
+        "Negative width positive height",
+        "Positive width negative height",
+        "Negative width negative height",
+        "Negative width only",
+        "Negative width tall height",
+        "Last positive width",
+        "Last negative width"
+      ],
+      "intentional_security_differences": [
+        "Signed frame dimensions become bounded passive floating or in-flow geometry; raw frame controls and editable positioning never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves that negative absw selects an in-flow frame rather than the ordinary floating exclusion: with absh720/absh-720 the framed glyph remains at x=36 and following body begins full-width exactly 36 points later; absh1440 advances it by 72 points. A negative width without authored height suppresses the one-character frame and consumes no extra vertical space. Negative absh retains the authored magnitude on the positive-width floating path, and repeated absw controls use the final signed value. The safe model now preserves bounded signs, excludes negative-width frames from absolute preview planning, and never exports raw frame metadata. Current and Word retain identical visible text, word order, and line grouping on all eight pages; x origins/endpoints differ by at most 0.19/0.16 points and y boxes retain a 0.73-0.96-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

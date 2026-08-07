@@ -7950,15 +7950,21 @@ impl Parser {
     }
 
     fn set_paragraph_frame_dimension(&mut self, control: &str, value: Option<i32>, offset: usize) {
-        let value = value.unwrap_or(0).unsigned_abs().min(i32::MAX as u32) as i32;
-        let clamped = value.min(self.limits().max_shape_dimension_twips.max(1));
-        if clamped != value {
+        let requested = i64::from(value.unwrap_or(0));
+        let magnitude = requested.unsigned_abs().min(i32::MAX as u64) as i32;
+        let clamped_magnitude = magnitude.min(self.limits().max_shape_dimension_twips.max(1));
+        let clamped = if requested < 0 {
+            -clamped_magnitude
+        } else {
+            clamped_magnitude
+        };
+        if i64::from(clamped) != requested {
             self.diagnostics.push(Diagnostic::warning(
-                format!("paragraph frame dimension clamped from {value} to {clamped} twips"),
+                format!("paragraph frame dimension clamped from {requested} to {clamped} twips"),
                 Some(offset),
             ));
         }
-        let dimension = (clamped > 0).then_some(clamped);
+        let dimension = (clamped != 0).then_some(clamped);
         if control == "absw" {
             self.state.paragraph.frame_width_twips = dimension;
         } else {
@@ -57956,6 +57962,71 @@ After\par}"#;
         assert_eq!(height_only.style.drop_cap_lines, 3);
         assert_eq!(height_only.style.frame_width_twips, None);
         assert_eq!(height_only.style.frame_height_twips, Some(720));
+    }
+
+    #[test]
+    fn word_compatible_mode_retains_signed_drop_cap_frame_dimensions() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-signed-dimensions-passive.rtf"
+        ))
+        .unwrap();
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1 => {
+                    Some(paragraph)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(frames.len(), 8);
+        assert_eq!(frames[0].style.frame_width_twips, Some(720));
+        assert_eq!(frames[0].style.frame_height_twips, Some(720));
+        assert_eq!(frames[1].style.frame_width_twips, Some(-720));
+        assert_eq!(frames[1].style.frame_height_twips, Some(720));
+        assert_eq!(frames[2].style.frame_width_twips, Some(720));
+        assert_eq!(frames[2].style.frame_height_twips, Some(-720));
+        assert_eq!(frames[3].style.frame_width_twips, Some(-720));
+        assert_eq!(frames[3].style.frame_height_twips, Some(-720));
+        assert_eq!(frames[4].style.frame_width_twips, Some(-720));
+        assert_eq!(frames[4].style.frame_height_twips, None);
+        assert_eq!(frames[5].style.frame_height_twips, Some(1_440));
+        assert_eq!(frames[6].style.frame_width_twips, Some(720));
+        assert_eq!(frames[7].style.frame_width_twips, Some(-720));
+    }
+
+    #[test]
+    fn paragraph_frame_dimensions_clamp_signed_magnitudes() {
+        let options = RtfParseOptions {
+            limits: RtfLimits {
+                max_shape_dimension_twips: 480,
+                ..RtfLimits::default()
+            },
+            ..RtfParseOptions::default()
+        };
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\absw-9999\absh9999\dropcapli3\dropcapt1 X\par}",
+            &options,
+        )
+        .unwrap();
+        let Block::Paragraph(paragraph) = &output.document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(paragraph.style.frame_width_twips, Some(-480));
+        assert_eq!(paragraph.style.frame_height_twips, Some(480));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("paragraph frame dimension clamped from -9999 to -480 twips")
+        }));
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("paragraph frame dimension clamped from 9999 to 480 twips")
+        }));
     }
 
     #[test]

@@ -8011,7 +8011,7 @@ fn layout_framed_drop_cap_paragraph(
     let frame_width = paragraph
         .style
         .frame_width_twips
-        .map(twips_to_points)
+        .map(|twips| twips_to_points(twips.saturating_abs()))
         .unwrap_or(natural_width)
         .clamp(1.0, content_width.max(1.0));
     let framed_lines = wrap_paragraph_with_font_provider(
@@ -8029,17 +8029,29 @@ fn layout_framed_drop_cap_paragraph(
     let frame_height = paragraph
         .style
         .frame_height_twips
-        .map(twips_to_points)
+        .map(|twips| twips_to_points(twips.saturating_abs()))
         .unwrap_or(natural_height)
         .clamp(
             1.0,
             (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
         );
+    let negative_width_frame = paragraph
+        .style
+        .frame_width_twips
+        .is_some_and(|width| width < 0);
+    if negative_width_frame && paragraph.style.frame_height_twips.is_none() {
+        return true;
+    }
     let requested_frame_top = |cursor_y: f32, geometry: &PageGeometry| {
-        shape_vertical_origin(paragraph.style.frame_vertical_anchor, cursor_y, geometry)
-            - twips_to_points(paragraph.style.frame_vertical_offset_twips)
+        if negative_width_frame {
+            cursor_y
+        } else {
+            shape_vertical_origin(paragraph.style.frame_vertical_anchor, cursor_y, geometry)
+                - twips_to_points(paragraph.style.frame_vertical_offset_twips)
+        }
     };
-    if paragraph.style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph
+    if (negative_width_frame
+        || paragraph.style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph)
         && requested_frame_top(*cursor_y, geometry) - frame_height < geometry.margin_bottom
     {
         advance_column_or_page(pages, cursor_y, geometry, current_column);
@@ -8052,6 +8064,37 @@ fn layout_framed_drop_cap_paragraph(
         *geometry,
         *current_column,
     );
+    if negative_width_frame {
+        let frame_item_start = pages.last().map(|page| page.items.len()).unwrap_or(0);
+        let mut frame_cursor_y = frame_top_y;
+        let mut frame_geometry = *geometry;
+        let mut frame_column = *current_column;
+        layout_paragraph(
+            pages,
+            &mut frame_cursor_y,
+            &passive_frame_paragraph,
+            false,
+            false,
+            false,
+            frame_width,
+            geometry.margin_bottom,
+            &mut frame_geometry,
+            &mut frame_column,
+            document,
+            document_stats,
+            None,
+            &markers,
+            font_provider,
+        );
+        if let Some(page) = pages.last_mut() {
+            let frame_x_shift = frame_left - geometry.body_left(*current_column);
+            for item in page.items.iter_mut().skip(frame_item_start) {
+                shift_layout_item_x(item, frame_x_shift);
+            }
+        }
+        *cursor_y = frame_top_y - frame_height;
+        return true;
+    }
     let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
     let frame_exclusion = FlowExclusion {
         x: frame_left,
@@ -8117,6 +8160,10 @@ fn is_complete_absolute_drop_cap_frame(paragraph: &Paragraph) -> bool {
     paragraph.style.drop_cap_lines > 1
         && (paragraph.style.frame_width_twips.is_some()
             || paragraph.style.frame_height_twips.is_some())
+        && !paragraph
+            .style
+            .frame_width_twips
+            .is_some_and(|width| width < 0)
         && paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph
 }
 
@@ -8227,6 +8274,10 @@ fn resolve_absolute_frame_exclusion(
         || (paragraph.style.frame_width_twips.is_none()
             && paragraph.style.frame_height_twips.is_none())
         || paragraph.style.frame_vertical_anchor == StaticShapeVerticalAnchor::Paragraph
+        || paragraph
+            .style
+            .frame_width_twips
+            .is_some_and(|width| width < 0)
     {
         return None;
     }
@@ -8259,7 +8310,7 @@ fn resolve_absolute_frame_exclusion(
     let frame_width = paragraph
         .style
         .frame_width_twips
-        .map(twips_to_points)
+        .map(|twips| twips_to_points(twips.saturating_abs()))
         .unwrap_or(natural_width)
         .clamp(1.0, content_width.max(1.0));
     let framed_lines = wrap_paragraph_with_font_provider(
@@ -8277,7 +8328,7 @@ fn resolve_absolute_frame_exclusion(
     let frame_height = paragraph
         .style
         .frame_height_twips
-        .map(twips_to_points)
+        .map(|twips| twips_to_points(twips.saturating_abs()))
         .unwrap_or(natural_height)
         .clamp(
             1.0,
@@ -23470,6 +23521,66 @@ mod tests {
         assert!((height_fourth_line.x - 36.0).abs() < 0.01);
         assert!((height_cap.baseline_y - height_first_line.baseline_y).abs() < 0.01);
         assert_eq!(layout.pages[0].flow_exclusions.len(), 2);
+    }
+
+    #[test]
+    fn signed_frame_width_controls_float_or_in_flow_recovery() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-signed-dimensions-passive.rtf"
+        ))
+        .expect("signed frame-dimension fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 8);
+        let fragments = |page_index: usize| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(fragment) => Some(fragment),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let exact = |page_index: usize, text: &str| {
+            fragments(page_index)
+                .into_iter()
+                .find(|fragment| fragment.text == text)
+                .unwrap_or_else(|| panic!("missing page {} fragment {text:?}", page_index + 1))
+        };
+
+        for (page_index, cap, body) in [
+            (0, "P", "Positive "),
+            (2, "H", "Positive "),
+            (6, "L", "Last "),
+        ] {
+            let cap = exact(page_index, cap);
+            let body = exact(page_index, body);
+            assert!((cap.x - 36.0).abs() < 0.01);
+            assert!((body.x - 72.0).abs() < 0.01);
+            assert!((cap.baseline_y - body.baseline_y).abs() < 0.01);
+        }
+        for (page_index, cap, body, expected_advance) in [
+            (1, "W", "Negative ", 36.0),
+            (3, "B", "Negative ", 36.0),
+            (5, "T", "Negative ", 72.0),
+            (7, "N", "Last ", 36.0),
+        ] {
+            let cap = exact(page_index, cap);
+            let body = exact(page_index, body);
+            assert!((cap.x - 36.0).abs() < 0.01);
+            assert!((body.x - 36.0).abs() < 0.01);
+            assert!(((cap.baseline_y - body.baseline_y) - expected_advance).abs() < 0.01);
+        }
+        assert!(fragments(4).iter().all(|fragment| fragment.text != "O"));
+        assert_eq!(
+            layout
+                .pages
+                .iter()
+                .map(|page| page.flow_exclusions.len())
+                .collect::<Vec<_>>(),
+            vec![1, 0, 1, 0, 0, 0, 1, 0]
+        );
     }
 
     #[test]

@@ -75505,6 +75505,74 @@ fn signed_absolute_frame_offsets_remain_bounded_passive_geometry() {
 }
 
 #[test]
+fn signed_frame_dimensions_remain_bounded_passive_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-signed-dimensions-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let frames = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1 => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 8);
+    assert_eq!(frames[1].style.frame_width_twips, Some(-720));
+    assert_eq!(frames[2].style.frame_height_twips, Some(-720));
+    assert_eq!(frames[4].style.frame_height_twips, None);
+    assert_eq!(frames[5].style.frame_height_twips, Some(1_440));
+    assert_eq!(frames[6].style.frame_width_twips, Some(720));
+    assert_eq!(frames[7].style.frame_width_twips, Some(-720));
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-signed-dimensions.rtf");
+    let output_path = dir.path().join("framed-drop-cap-signed-dimensions.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 8);
+    let page_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>();
+    for visible in [
+        "Positive width positive height",
+        "Negative width positive height",
+        "Positive width negative height",
+        "Negative width negative height",
+        "Negative width only",
+        "Negative width tall height",
+        "Last positive width",
+        "Last negative width",
+    ] {
+        assert!(page_text.iter().any(|text| text.contains(visible)));
+    }
+    assert!(!page_text[4].contains('O'));
+    for forbidden in ["dropcapli", "dropcapt", "absw", "absh"] {
+        assert!(!page_text.iter().any(|text| text.contains(forbidden)));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

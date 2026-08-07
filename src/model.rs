@@ -1014,11 +1014,13 @@ pub struct ParagraphStyle {
     pub max_consecutive_hyphenated_lines: Option<usize>,
     pub hyphenation_zone_twips: i32,
     pub drop_cap_lines: i32,
-    /// Bounded paragraph-frame width retained for complete Word drop-cap
-    /// frames. Ordinary paragraphs leave this unset.
+    /// Bounded signed paragraph-frame width retained for complete Word
+    /// drop-cap frames. A negative width selects Word's in-flow frame
+    /// recovery; ordinary paragraphs leave this unset.
     pub frame_width_twips: Option<i32>,
-    /// Bounded paragraph-frame height retained for complete Word drop-cap
-    /// frames. Ordinary paragraphs leave this unset.
+    /// Bounded signed paragraph-frame height retained for complete Word
+    /// drop-cap frames. Layout uses its magnitude while preserving the sign
+    /// for Word-compatible exact/minimum-height recovery.
     pub frame_height_twips: Option<i32>,
     /// Bounded horizontal distance between a paragraph frame and surrounding
     /// body text. This enlarges only passive flow exclusion geometry.

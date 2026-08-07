@@ -3889,6 +3889,37 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
         },
         ReferenceFixture {
+            input: "fixtures/framed-drop-cap-signed-dimensions-passive.rtf",
+            expected_pages: 8,
+            must_preserve_text: &[
+                "Positive width positive height",
+                "Negative width positive height",
+                "Positive width negative height",
+                "Negative width negative height",
+                "Negative width only",
+                "Negative width tall height",
+                "Last positive width",
+                "Last negative width",
+            ],
+            must_not_leak: &[
+                b"dropcapli",
+                b"dropcapt",
+                b"absw",
+                b"absh",
+                b"/JavaScript",
+                b"/EmbeddedFile",
+                b"/Launch",
+                b"/OpenAction",
+                b"/RichMedia",
+                b"/AcroForm",
+                b"/Annots",
+            ],
+            must_contain_pdf: &[],
+            must_emit_diagnostics: &[
+                "paragraph frame dimensions interpreted through bounded passive flow layout",
+            ],
+        },
+        ReferenceFixture {
             input: "fixtures/text-effects-passive.rtf",
             expected_pages: 1,
             must_preserve_text: &[
