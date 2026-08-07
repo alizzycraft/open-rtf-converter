@@ -29136,6 +29136,38 @@ fn picture_scaling_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn paragraph_start_images_do_not_create_an_extra_blank_flow_line() {
+    let position = |input: &[u8], needle: &str| {
+        let parsed = parse_rtf_bytes(input).unwrap();
+        assert_eq!(parsed.document.inline_images.len(), 1);
+        assert_eq!(parsed.document.inline_image_block_indices.len(), 1);
+
+        let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();
+        audit_passive_pdf_bytes(&output.pdf).unwrap();
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        pdf_first_text_position_for_text(&content, needle)
+            .unwrap_or_else(|| panic!("missing PDF text position for {needle:?}"))
+    };
+
+    let alpha = position(include_bytes!("../fixtures/png-alpha.rtf"), "After");
+    let scaled = position(
+        include_bytes!("../fixtures/picture-scaling-passive.rtf"),
+        "After",
+    );
+
+    assert!(
+        (alpha.1 - 659.02).abs() < 0.03,
+        "alpha-image paragraph should match Word flow: {alpha:?}"
+    );
+    assert!(
+        (scaled.1 - 635.02).abs() < 0.03,
+        "scaled-image paragraph should match Word flow: {scaled:?}"
+    );
+}
+
+#[test]
 fn picture_crop_uses_authored_goal_dimensions_without_control_leakage() {
     let image_hex = bytes_to_hex(&minimal_jpeg_with_dimensions(2, 1));
     let input = rtf(&[

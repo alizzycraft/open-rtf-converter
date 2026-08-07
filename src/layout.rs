@@ -16583,6 +16583,36 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_start_images_consume_only_their_authored_paragraph() {
+        let provider = FontProvider::browser_safe_defaults();
+        let after_baseline_from_page_top = |rtf: &str, needle: &str| {
+            let parsed = parse_rtf(rtf).expect("image fixture should parse");
+            assert_eq!(parsed.document.inline_images.len(), 1);
+            assert_eq!(parsed.document.inline_image_block_indices.len(), 1);
+            let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+            let after = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(text) if text.text.contains(needle) => Some(text),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing text starting with {needle:?}"));
+            layout.pages[0].height - after.baseline_y
+        };
+
+        let alpha =
+            after_baseline_from_page_top(include_str!("../fixtures/png-alpha.rtf"), "After");
+        let scaled = after_baseline_from_page_top(
+            include_str!("../fixtures/picture-scaling-passive.rtf"),
+            "After",
+        );
+
+        assert!((alpha - 132.98).abs() < 0.03, "alpha after={alpha}");
+        assert!((scaled - 156.98).abs() < 0.03, "scaled after={scaled}");
+    }
+
+    #[test]
     fn applies_picture_crop_before_goal_scaling() {
         let parsed = parse_rtf(include_str!("../fixtures/picture-scaling-passive.rtf"))
             .expect("picture scaling fixture should parse");

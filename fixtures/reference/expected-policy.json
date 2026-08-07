@@ -145,7 +145,7 @@
         "/SMask"
       ],
       "known_gaps": [
-        "The registered Word 16.0 reference matches the 2-by-1 alpha mask exactly (`[0, 255]`), paints the same opaque blue sample, and uses the same 72-by-36-point frame. Fully transparent base RGB differs internally but is mathematically inert on every page background; following flow differs by at most 0.48 points."
+        "The registered Word 16.0 reference matches the 2-by-1 alpha mask exactly (`[0, 255]`), paints the same opaque blue sample, and uses the same 72-by-36-point frame. Fully transparent base RGB differs internally but is mathematically inert on every page background. Treating the paragraph-start picture as inline content removes the former extra blank line; current/Word surrounding baselines now differ by at most 0.01 points."
       ]
     },
     {
@@ -176,7 +176,7 @@
         "/SMask"
       ],
       "known_gaps": [
-        "The registered Word 16.0 reference matches the indexed `tRNS` alpha mask exactly (`[0, 255]`), paints the same opaque blue palette sample, and uses the same 72-by-36-point frame. Fully transparent palette RGB is mathematically inert on every page background; following flow differs by at most 0.48 points."
+        "The registered Word 16.0 reference matches the indexed `tRNS` alpha mask exactly (`[0, 255]`), paints the same opaque blue palette sample, and uses the same 72-by-36-point frame. Fully transparent palette RGB is mathematically inert on every page background. Treating the paragraph-start picture as inline content removes the former extra blank line; current/Word surrounding baselines now differ by at most 0.01 points."
       ]
     },
     {
@@ -6463,7 +6463,7 @@
         "/Subtype /Image"
       ],
       "known_gaps": [
-        "Word fully clips the two-pixel source because the positive crop exceeds its natural bitmap extent while retaining a 30-by-60-point flow frame; the converter matches that visible behavior but keeps the sanitized, undrawn image XObject in page resources. Bundled Times-compatible text metrics remain wider than Word's Times New Roman."
+        "Word fully clips the two-pixel source because the positive crop exceeds its natural bitmap extent while retaining a 30-by-60-point flow frame; the converter matches that visible behavior but keeps the sanitized, undrawn image XObject in page resources. Treating the paragraph-start picture as inline content removes the former extra blank line; source-corrected surrounding baselines differ by at most 0.01 points, while Word retains non-painted trailing paragraph spaces in extraction."
       ]
     },
     {

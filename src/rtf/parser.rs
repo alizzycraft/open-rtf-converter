@@ -16331,7 +16331,7 @@ impl Parser {
             }
         } else if destination == Destination::Body
             && image.placement.is_none()
-            && !self.current_paragraph.runs.is_empty()
+            && !self.state.inside_shape
         {
             let image_index = self.document.inline_images.len();
             let marker =
