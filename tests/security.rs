@@ -74577,7 +74577,7 @@ fn page_borders_render_passively_without_control_leakage() {
 }
 
 #[test]
-fn page_border_art_renders_passive_line_fallback_without_control_leakage() {
+fn page_border_art_renders_passive_vector_template_without_control_leakage() {
     let input = rtf(&[
         "{",
         "\\",
@@ -74597,14 +74597,14 @@ fn page_border_art_renders_passive_line_fallback_without_control_leakage() {
     assert!(parsed.document.page.page_borders.top.visible);
     assert_eq!(
         parsed.document.page.page_borders.top.style,
-        BorderStyle::Single
+        BorderStyle::BorderArtScissors
     );
     assert_eq!(parsed.document.page.page_borders.top.width_twips, 80);
     assert!(text.contains("Body"));
     assert!(parsed.diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("page border art rendered as bounded passive line border fallback")
+            .contains("page border art 42 rendered as bounded passive vector template")
     }));
     assert!(
         parsed

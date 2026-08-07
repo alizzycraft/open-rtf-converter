@@ -919,6 +919,8 @@ pub enum BorderStyle {
     ThinThick,
     ThickThin,
     ThinThickThin,
+    /// Word border-art ID 42, normalized to a bounded passive scissors-and-strip template.
+    BorderArtScissors,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

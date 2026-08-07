@@ -4153,16 +4153,20 @@ fn layout_page_borders(
         };
 
         if borders.top.visible {
-            let (width, color, style) = page_border_stroke(&borders.top, document);
-            page.items.push(LayoutItem::Line {
-                x1: left,
-                y1: top,
-                x2: right,
-                y2: top,
-                width,
-                color,
-                style,
-            });
+            if borders.top.style == BorderStyle::BorderArtScissors {
+                layout_scissors_page_border_art(page, left, right, top, document, &borders.top);
+            } else {
+                let (width, color, style) = page_border_stroke(&borders.top, document);
+                page.items.push(LayoutItem::Line {
+                    x1: left,
+                    y1: top,
+                    x2: right,
+                    y2: top,
+                    width,
+                    color,
+                    style,
+                });
+            }
         }
         if borders.bottom.visible {
             let (width, color, style) = page_border_stroke(&borders.bottom, document);
@@ -7412,6 +7416,225 @@ fn page_border_stroke(border: &TableCellBorder, document: &Document) -> (f32, Pd
         width = 0.72;
     }
     (width, color, style)
+}
+
+fn layout_scissors_page_border_art(
+    page: &mut LayoutPage,
+    left: f32,
+    right: f32,
+    top: f32,
+    document: &Document,
+    border: &TableCellBorder,
+) {
+    let color = border
+        .color_index
+        .map(|index| color_for_index(document, index))
+        .unwrap_or_default();
+    let white = PdfColor {
+        red: 1.0,
+        green: 1.0,
+        blue: 1.0,
+    };
+    let push_fill = |page: &mut LayoutPage, x: f32, y: f32, width: f32, height: f32, color| {
+        if width > 0.0 && height > 0.0 {
+            page.items.push(LayoutItem::Highlight {
+                x,
+                y,
+                width,
+                height,
+                color,
+            });
+        }
+    };
+
+    // Word's ID-42 tile starts with a clipped scissors glyph. These bounded
+    // primitives preserve its visible silhouette without retaining Office art payloads.
+    page.items.push(LayoutItem::Ellipse {
+        x: left - 0.12,
+        y: top + 13.34,
+        width: 9.46,
+        height: 7.42,
+        stroke_width: 0.0,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(color),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    page.items.push(LayoutItem::Ellipse {
+        x: left + 1.08,
+        y: top + 14.95,
+        width: 6.77,
+        height: 4.25,
+        stroke_width: 0.0,
+        stroke_color: white,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(white),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    page.items.push(LayoutItem::Ellipse {
+        x: left + 5.33,
+        y: top + 22.97,
+        width: 7.25,
+        height: 8.95,
+        stroke_width: 0.0,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(color),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    page.items.push(LayoutItem::Polygon {
+        points: vec![
+            LayoutPoint {
+                x: left + 4.65,
+                y: top + 13.8,
+            },
+            LayoutPoint {
+                x: left + 11.04,
+                y: top + 17.6,
+            },
+            LayoutPoint {
+                x: left + 16.25,
+                y: top + 17.6,
+            },
+            LayoutPoint {
+                x: left + 8.4,
+                y: top + 14.9,
+            },
+        ],
+        paths: Vec::new(),
+        overlay_paths: Vec::new(),
+        fill_rule: StaticImageVectorFillRule::Winding,
+        stroke_width: 0.0,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(color),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    page.items.push(LayoutItem::Polygon {
+        points: vec![
+            LayoutPoint {
+                x: left + 7.8,
+                y: top + 20.6,
+            },
+            LayoutPoint {
+                x: left + 11.04,
+                y: top + 16.4,
+            },
+            LayoutPoint {
+                x: left + 14.15,
+                y: top + 16.4,
+            },
+            LayoutPoint {
+                x: left + 10.9,
+                y: top + 20.6,
+            },
+        ],
+        paths: Vec::new(),
+        overlay_paths: Vec::new(),
+        fill_rule: StaticImageVectorFillRule::Winding,
+        stroke_width: 0.0,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(color),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    page.items.push(LayoutItem::Polygon {
+        points: vec![
+            LayoutPoint {
+                x: left + 14.12,
+                y: top + 20.41,
+            },
+            LayoutPoint {
+                x: left + 10.81,
+                y: top + 17.36,
+            },
+            LayoutPoint {
+                x: left + 28.57,
+                y: top + 17.39,
+            },
+            LayoutPoint {
+                x: left + 32.12,
+                y: top + 20.41,
+            },
+        ],
+        paths: Vec::new(),
+        overlay_paths: Vec::new(),
+        fill_rule: StaticImageVectorFillRule::Winding,
+        stroke_width: 0.14,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(white),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+    page.items.push(LayoutItem::Polygon {
+        points: vec![
+            LayoutPoint {
+                x: left + 13.12,
+                y: top + 17.36,
+            },
+            LayoutPoint {
+                x: left + 16.04,
+                y: top + 17.36,
+            },
+            LayoutPoint {
+                x: left + 19.28,
+                y: top + 13.28,
+            },
+            LayoutPoint {
+                x: left + 16.04,
+                y: top + 13.28,
+            },
+        ],
+        paths: Vec::new(),
+        overlay_paths: Vec::new(),
+        fill_rule: StaticImageVectorFillRule::Winding,
+        stroke_width: 0.14,
+        stroke_color: color,
+        stroke_style: LineStyle::Solid,
+        fill_color: Some(white),
+        fill_gradient_color: None,
+        fill_pattern: ShadingPattern::None,
+    });
+
+    // Preserve Word's complete-tile cadence: a short lead-in, five long bars,
+    // and a clipped final tile rather than stretching the pattern to the margin.
+    push_fill(page, left + 20.06, top + 6.79, 12.0, 5.38, color);
+    push_fill(page, left + 20.06, top - 0.12, 5.35, 12.29, color);
+    for (x, width) in [
+        (36.38, 25.34),
+        (70.34, 25.34),
+        (104.33, 25.34),
+        (138.31, 25.34),
+        (172.30, 25.42),
+    ] {
+        push_fill(page, left + x, top + 6.67, width, 5.26, color);
+    }
+    let final_left = (left + 202.06).min(right);
+    let final_right = (left + 214.11).min(right);
+    push_fill(
+        page,
+        final_left,
+        top + 6.65,
+        (final_right - final_left).max(0.0),
+        5.23,
+        color,
+    );
+    let cap_left = (left + 208.75).min(right);
+    let cap_right = (left + 214.08).min(right);
+    push_fill(
+        page,
+        cap_left,
+        top - 0.12,
+        (cap_right - cap_left).max(0.0),
+        12.05,
+        color,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -12633,6 +12856,7 @@ fn line_style_for_border_style(style: BorderStyle) -> LineStyle {
         BorderStyle::ThinThick => LineStyle::ThinThick,
         BorderStyle::ThickThin => LineStyle::ThickThin,
         BorderStyle::ThinThickThin => LineStyle::ThinThickThin,
+        BorderStyle::BorderArtScissors => LineStyle::Solid,
     }
 }
 
@@ -25799,6 +26023,46 @@ mod tests {
 
         assert_eq!(top_border, Some(&LineStyle::Double));
         assert_eq!(left_border, Some(&LineStyle::Dashed));
+    }
+
+    #[test]
+    fn lays_out_word_border_art_42_as_bounded_scissors_and_strip() {
+        let parsed = parse_rtf(include_str!("../fixtures/page-border-art-passive.rtf")).unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let page = &layout.pages[0];
+        let art = page
+            .items
+            .iter()
+            .filter(|item| !matches!(item, LayoutItem::Text(_)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(art.len(), 16);
+        assert!(art.iter().any(|item| matches!(
+            item,
+            LayoutItem::Ellipse { x, y, width, height, .. }
+                if (*x - 35.88).abs() < 0.01
+                    && (*y - 385.34).abs() < 0.01
+                    && (*width - 9.46).abs() < 0.01
+                    && (*height - 7.42).abs() < 0.01
+        )));
+        assert!(art.iter().any(|item| matches!(
+            item,
+            LayoutItem::Polygon { points, stroke_width, fill_color: Some(_), .. }
+                if (*stroke_width - 0.14).abs() < 0.001
+                    && points.iter().any(|point| (point.x - 68.12).abs() < 0.01)
+        )));
+        assert!(art.iter().any(|item| matches!(
+            item,
+            LayoutItem::Highlight { x, y, width, height, .. }
+                if (*x - 72.38).abs() < 0.01
+                    && (*y - 378.67).abs() < 0.01
+                    && (*width - 25.34).abs() < 0.01
+                    && (*height - 5.26).abs() < 0.01
+        )));
+        assert!(
+            art.iter()
+                .all(|item| !matches!(item, LayoutItem::Line { .. }))
+        );
     }
 
     #[test]

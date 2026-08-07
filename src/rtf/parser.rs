@@ -5731,11 +5731,19 @@ impl Parser {
                     BorderSelection::Page(_)
                 ) =>
             {
-                self.set_current_border_style(BorderStyle::Single);
-                self.diagnostics.push(Diagnostic::warning(
-                    "page border art rendered as bounded passive line border fallback",
-                    Some(offset),
-                ));
+                if control.parameter == Some(42) {
+                    self.set_current_border_style(BorderStyle::BorderArtScissors);
+                    self.diagnostics.push(Diagnostic::warning(
+                        "page border art 42 rendered as bounded passive vector template",
+                        Some(offset),
+                    ));
+                } else {
+                    self.set_current_border_style(BorderStyle::Single);
+                    self.diagnostics.push(Diagnostic::warning(
+                        "page border art rendered as bounded passive line border fallback",
+                        Some(offset),
+                    ));
+                }
             }
             "brdrdot" => self.set_current_border_style(BorderStyle::Dotted),
             "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrdashdot"
@@ -56523,19 +56531,19 @@ After\par}"#;
     }
 
     #[test]
-    fn normalizes_page_border_art_as_passive_line_fallback() {
+    fn normalizes_page_border_art_42_as_passive_vector_template() {
         let output = parse_rtf(r"{\rtf1\pgbrdrt\brdrart42\brdrw80 Body\par}").unwrap();
 
         assert!(output.document.page.page_borders.top.visible);
         assert_eq!(
             output.document.page.page_borders.top.style,
-            BorderStyle::Single
+            BorderStyle::BorderArtScissors
         );
         assert_eq!(output.document.page.page_borders.top.width_twips, 80);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("page border art rendered as bounded passive line border fallback")
+                .contains("page border art 42 rendered as bounded passive vector template")
         }));
         assert!(
             output

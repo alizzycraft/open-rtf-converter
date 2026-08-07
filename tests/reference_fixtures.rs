@@ -2578,7 +2578,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             ],
             must_contain_pdf: &[],
             must_emit_diagnostics: &[
-                "page border art rendered as bounded passive line border fallback",
+                "page border art 42 rendered as bounded passive vector template",
             ],
         },
         ReferenceFixture {

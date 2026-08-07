@@ -3083,7 +3083,7 @@
         "Word page border art is rendered as a bounded passive line border fallback instead of preserving art payload semantics."
       ],
       "expected_diagnostics": [
-        "page border art rendered as bounded passive line border fallback"
+        "page border art 42 rendered as bounded passive vector template"
       ],
       "forbidden_pdf_markers": [
         "pgbrdrt",
@@ -3098,7 +3098,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that border-art ID 42 is a proprietary scissors-and-dashed-strip tile rendered as 34 vector paths (30 fills and four 0.14-point strokes), with a clipped union from x=35.88 to 250.16 and y=-7.92 to 24.18 points. The bounded passive fallback intentionally preserves neither the art identity nor its tiling semantics: it emits one black 4-point line from x=36.00 to 270.00 at y=24.00, so the left origin and art-band inner edge differ by only 0.12 and 0.18 points while the line extends 19.84 points farther right. The 4-point fallback exactly reflects the authored brdrw80 width and remains the documented acceptable approximation. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; four-times renders were visually inspected."
+        "The focused Word 16.0 audit confirms that border-art ID 42 is a scissors-and-dashed-strip tile rendered as 34 vector paths. WordCompatiblePassive now recognizes that ID and emits a bounded 16-primitive passive template with the same scissors identity, outlined blades, complete-tile dash cadence, lead/final corners, and page clipping. Its clipped union is (35.88,-7.92)-(250.11,24.12) points versus Word's (35.88,-7.92)-(250.16,24.18); the simplified ring/joint contours remain an acceptable passive approximation. Unknown border-art IDs retain the bounded authored-width line fallback. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; eight-times crops and full pages were visually inspected."
       ]
     },
     {
