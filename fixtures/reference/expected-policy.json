@@ -4553,6 +4553,47 @@
       ]
     },
     {
+      "id": "framed-drop-cap-passive-layout",
+      "input": "fixtures/framed-drop-cap-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "D",
+        "First framed drop-cap paragraph",
+        "body text around the retained passive",
+        "I",
+        "Second framed drop-cap paragraph",
+        "body flow.",
+        "Plain paragraph after both framed drop-cap"
+      ],
+      "intentional_security_differences": [
+        "Complete drop-cap frame controls become bounded passive text placement and flow-exclusion geometry; raw controls and editable frame metadata are not retained in the PDF."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves that a one-character paragraph carrying bounded absw/absh frame dimensions plus dropcapli/dropcapt remains at its authored 12-point size, floats at the body origin without consuming a block line, and excludes the left 36 points from the following three body lines. Word and current have identical thirteen-line flow for both authored drop-cap types: every x origin differs by 0.024 points, glyph endpoints by at most 0.19 points, and baselines retain only the established 0.95-1.02-point bundled Arial-compatible metric residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

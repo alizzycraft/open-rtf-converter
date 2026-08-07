@@ -74943,6 +74943,61 @@ fn drop_cap_controls_render_passively_without_control_leakage() {
 }
 
 #[test]
+fn framed_drop_cap_uses_only_bounded_passive_flow_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let paragraphs = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(paragraphs[0].style.drop_cap_lines, 3);
+    assert_eq!(paragraphs[0].style.frame_width_twips, Some(720));
+    assert_eq!(paragraphs[0].style.frame_height_twips, Some(720));
+    assert_eq!(paragraphs[2].style.drop_cap_lines, 2);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| { !diagnostic.message.contains("unsupported RTF control") })
+    );
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap.rtf");
+    let output_path = dir.path().join("framed-drop-cap.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+    let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+    let rendered_text = decoded_pdf_text(&content);
+    for visible in ["D", "First framed", "I", "Second framed", "Plain paragraph"] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in ["dropcapli", "dropcapt", "absw", "absh"] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

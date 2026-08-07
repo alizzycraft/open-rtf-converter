@@ -6253,6 +6253,9 @@ impl Parser {
             }
             "dropcapli" => self.set_drop_cap_lines(control.parameter, offset),
             "dropcapt" => self.set_drop_cap_type(control.parameter),
+            name @ ("absw" | "absh") => {
+                self.set_paragraph_frame_dimension(name, control.parameter, offset)
+            }
             "li" | "lin" => {
                 if !self.suppress_word_legacy_list_paragraph {
                     self.state.paragraph.left_indent_twips =
@@ -6730,9 +6733,6 @@ impl Parser {
                 self.reject_active_content_only(feature, offset)?;
             }
             name if let Some(message) = word_layout_compatibility_control_message(name) => {
-                if matches!(name, "absw" | "absh") {
-                    self.state.paragraph_frame_dimensions_seen = true;
-                }
                 self.diagnostics
                     .push(Diagnostic::warning(message, Some(offset)));
             }
@@ -7809,6 +7809,30 @@ impl Parser {
         } else if self.state.paragraph.drop_cap_lines == 0 {
             self.state.paragraph.drop_cap_lines = 3;
         }
+    }
+
+    fn set_paragraph_frame_dimension(&mut self, control: &str, value: Option<i32>, offset: usize) {
+        let value = value.unwrap_or(0).unsigned_abs().min(i32::MAX as u32) as i32;
+        let clamped = value.min(self.limits().max_shape_dimension_twips.max(1));
+        if clamped != value {
+            self.diagnostics.push(Diagnostic::warning(
+                format!("paragraph frame dimension clamped from {value} to {clamped} twips"),
+                Some(offset),
+            ));
+        }
+        let dimension = (clamped > 0).then_some(clamped);
+        if control == "absw" {
+            self.state.paragraph.frame_width_twips = dimension;
+        } else {
+            self.state.paragraph.frame_height_twips = dimension;
+        }
+        self.state.paragraph_frame_dimensions_seen =
+            self.state.paragraph.frame_width_twips.is_some()
+                || self.state.paragraph.frame_height_twips.is_some();
+        self.diagnostics.push(Diagnostic::warning(
+            "paragraph frame dimensions interpreted through bounded passive flow layout",
+            Some(offset),
+        ));
     }
 
     fn clamp_line_spacing(&mut self, value: Option<i32>, offset: usize) -> Option<i32> {
@@ -26863,6 +26887,12 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.drop_cap_lines == default.drop_cap_lines {
         output.drop_cap_lines = base.drop_cap_lines;
+    }
+    if output.frame_width_twips == default.frame_width_twips {
+        output.frame_width_twips = base.frame_width_twips;
+    }
+    if output.frame_height_twips == default.frame_height_twips {
+        output.frame_height_twips = base.frame_height_twips;
     }
     if output.left_indent_twips == default.left_indent_twips {
         output.left_indent_twips = base.left_indent_twips;
@@ -57644,6 +57674,27 @@ After\par}"#;
         };
 
         assert_eq!(first.style.drop_cap_lines, 3);
+        assert_eq!(first.style.frame_width_twips, Some(1_440));
+        assert_eq!(first.style.frame_height_twips, Some(720));
+    }
+
+    #[test]
+    fn word_compatible_mode_ignores_drop_cap_after_frame_dimension_reset() {
+        let input = [
+            "{\\rtf1",
+            "\\absw720",
+            "\\absw0",
+            "\\dropcapli3",
+            "\\dropcapt1 Dropped",
+            "\\par}",
+        ]
+        .concat();
+        let output = parse_rtf(&input).unwrap();
+        let Block::Paragraph(paragraph) = &output.document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(paragraph.style.drop_cap_lines, 0);
+        assert_eq!(paragraph.style.frame_width_twips, None);
     }
 
     #[test]

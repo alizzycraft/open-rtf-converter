@@ -1147,6 +1147,20 @@ impl LayoutEngine {
                     );
                 }
                 Block::Paragraph(paragraph) => {
+                    if layout_framed_drop_cap_paragraph(
+                        &mut pages,
+                        &mut cursor_y,
+                        paragraph,
+                        geometry.body_width(current_column),
+                        &mut geometry,
+                        &mut current_column,
+                        document,
+                        document_stats,
+                        font_provider,
+                    ) {
+                        last_paragraph_anchor = Some((pages.len(), current_column, cursor_y));
+                        continue;
+                    }
                     if let Some(Block::Table(table)) = document.blocks.get(block_idx + 1) {
                         pending_floating_table_preview =
                             preview_immediately_following_floating_table_exclusion(
@@ -7823,6 +7837,87 @@ fn layout_paragraph(
         None,
         None,
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_framed_drop_cap_paragraph(
+    pages: &mut Vec<LayoutPage>,
+    cursor_y: &mut f32,
+    paragraph: &Paragraph,
+    content_width: f32,
+    geometry: &mut PageGeometry,
+    current_column: &mut usize,
+    document: &Document,
+    document_stats: DocumentStats,
+    font_provider: Option<&FontProvider>,
+) -> bool {
+    if paragraph.style.drop_cap_lines <= 1 {
+        return false;
+    }
+    let Some(frame_width_twips) = paragraph.style.frame_width_twips else {
+        return false;
+    };
+    let frame_width = twips_to_points(frame_width_twips).clamp(1.0, content_width.max(1.0));
+    let mut passive_frame_paragraph = paragraph.clone();
+    passive_frame_paragraph.style.drop_cap_lines = 0;
+    passive_frame_paragraph.style.frame_width_twips = None;
+    passive_frame_paragraph.style.frame_height_twips = None;
+    passive_frame_paragraph.style.space_before_twips = 0;
+    passive_frame_paragraph.style.space_after_twips = 0;
+    let markers = current_marker_context(pages, document_stats);
+    let fallback_height = wrap_paragraph_with_font_provider(
+        &passive_frame_paragraph,
+        frame_width,
+        &markers,
+        document,
+        font_provider,
+    )
+    .first()
+    .map_or(12.0, |line| line.height)
+        * paragraph.style.drop_cap_lines as f32;
+    let frame_height = paragraph
+        .style
+        .frame_height_twips
+        .map(twips_to_points)
+        .unwrap_or(fallback_height)
+        .clamp(
+            1.0,
+            (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
+        );
+    if *cursor_y - frame_height < geometry.margin_bottom {
+        advance_column_or_page(pages, cursor_y, geometry, current_column);
+    }
+    let frame_top_y = *cursor_y;
+    let mut frame_cursor_y = frame_top_y;
+    let mut frame_geometry = *geometry;
+    let mut frame_column = *current_column;
+    layout_paragraph(
+        pages,
+        &mut frame_cursor_y,
+        &passive_frame_paragraph,
+        false,
+        false,
+        false,
+        frame_width,
+        geometry.margin_bottom,
+        &mut frame_geometry,
+        &mut frame_column,
+        document,
+        document_stats,
+        None,
+        &markers,
+        font_provider,
+    );
+    if let Some(page) = pages.last_mut() {
+        page.flow_exclusions.push(FlowExclusion {
+            x: geometry.body_left(*current_column),
+            y: frame_top_y - frame_height,
+            width: frame_width,
+            height: frame_height,
+            wrap_side: StaticImageWrapSide::Right,
+        });
+    }
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -22694,6 +22789,42 @@ mod tests {
         assert!(fragments.iter().skip(1).all(|fragment| {
             fragment.style.font_size_half_points == CharacterStyle::default().font_size_half_points
         }));
+    }
+
+    #[test]
+    fn framed_word_drop_cap_floats_without_enlarging_and_wraps_following_text() {
+        let parsed = crate::rtf::parse_rtf(include_str!("../fixtures/framed-drop-cap-passive.rtf"))
+            .expect("framed drop-cap fixture should parse");
+        let layout = LayoutEngine::layout(&parsed.document);
+        let fragments = layout.pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let fragment = |needle: &str| {
+            fragments
+                .iter()
+                .copied()
+                .find(|fragment| fragment.text.contains(needle))
+                .unwrap_or_else(|| panic!("missing text fragment {needle:?}"))
+        };
+
+        let first_cap = fragment("D");
+        let first_wrapped = fragment("First ");
+        let first_full_width = fragment("body ");
+        let second_cap = fragment("I");
+        let second_wrapped = fragment("Second ");
+        assert_eq!(first_cap.style.font_size_half_points, 24);
+        assert_eq!(second_cap.style.font_size_half_points, 24);
+        assert!((first_cap.x - 36.0).abs() < 0.01);
+        assert!((first_wrapped.x - 72.0).abs() < 0.01);
+        assert!((first_full_width.x - 36.0).abs() < 0.01);
+        assert!((first_cap.baseline_y - first_wrapped.baseline_y).abs() < 0.01);
+        assert!((second_cap.baseline_y - second_wrapped.baseline_y).abs() < 0.01);
+        assert_eq!(layout.pages[0].flow_exclusions.len(), 2);
     }
 
     #[test]
