@@ -3357,6 +3357,40 @@
       ]
     },
     {
+      "id": "scaled-justification-passive-layout",
+      "input": "fixtures/scaled-justification-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/scaled-justification-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Plain one two three four five six",
+        "Scale50 one two three four five six seven eight nine ten eleven",
+        "Scale150 one two",
+        "fourteen fifteen",
+        "sixteen."
+      ],
+      "intentional_security_differences": [
+        "Justification and horizontal scaling become bounded passive text geometry; raw controls and editable document metadata are not retained."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "charscalex50",
+        "charscalex150",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe confirms that justified non-final lines exclude their wrapped trailing space from both the stretch-gap count and effective natural width at 50%, 100%, and 150% character scaling. WordCompatiblePassive now uses the selected font's measured trailing-space geometry and keeps justification expansion in page units under PDF horizontal scaling. All eight corresponding justified glyph endpoints differ from Word by at most 0.17 points, with identical twelve-line flow. Both outputs are one-page text-only PDFs with no drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "section-grid-page-number-passive-layout",
       "input": "fixtures/section-grid-page-number-passive.rtf",
       "category": "acceptable_approximation",

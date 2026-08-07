@@ -5373,17 +5373,17 @@ fn draw_passive_vector_only_dingbat_text(
         }
         if !is_zero_width_pdf_char(ch) {
             visible_index += 1;
-            let mut advance = source_dingbat_advance_points(source_font, ch, font_size)
-                .unwrap_or_else(|| {
+            let advance =
+                source_dingbat_advance_points(source_font, ch, font_size).unwrap_or_else(|| {
                     pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style)
                 });
+            cursor += advance * horizontal_scale;
             if ch == ' ' || ch == '\u{00a0}' {
-                advance += fragment.word_spacing;
+                cursor += fragment.word_spacing;
             }
             if visible_index < visible_count {
-                advance += character_spacing;
+                cursor += character_spacing;
             }
-            cursor += advance * horizontal_scale;
         }
     }
     content.restore_state();
@@ -5429,14 +5429,14 @@ fn draw_passive_emphasis_marks(content: &mut Content, fragment: &TextFragment) {
             );
         }
         if !is_zero_width_pdf_char(ch) {
-            let mut advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            let advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            cursor += advance * horizontal_scale;
             if ch == ' ' || ch == '\u{00a0}' {
-                advance += fragment.word_spacing;
+                cursor += fragment.word_spacing;
             }
             if visible_index < visible_count {
-                advance += character_spacing;
+                cursor += character_spacing;
             }
-            cursor += advance * horizontal_scale;
         }
     }
     content.restore_state();
@@ -5502,14 +5502,14 @@ fn draw_passive_checkbox_overlays(content: &mut Content, fragment: &TextFragment
         }
         if !is_zero_width_pdf_char(ch) {
             visible_index += 1;
-            let mut advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            let advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            cursor += advance * horizontal_scale;
             if ch == ' ' || ch == '\u{00a0}' {
-                advance += fragment.word_spacing;
+                cursor += fragment.word_spacing;
             }
             if visible_index < visible_count {
-                advance += character_spacing;
+                cursor += character_spacing;
             }
-            cursor += advance * horizontal_scale;
         }
     }
     content.restore_state();
@@ -6403,14 +6403,14 @@ fn draw_passive_dingbat_overlays(content: &mut Content, fragment: &TextFragment)
         }
         if !is_zero_width_pdf_char(ch) {
             visible_index += 1;
-            let mut advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            let advance = pdf_base_glyph_advance(ch, fragment.font_family, &fragment.style);
+            cursor += advance * horizontal_scale;
             if ch == ' ' || ch == '\u{00a0}' {
-                advance += fragment.word_spacing;
+                cursor += fragment.word_spacing;
             }
             if visible_index < visible_count {
-                advance += character_spacing;
+                cursor += character_spacing;
             }
-            cursor += advance * horizontal_scale;
         }
     }
     content.restore_state();

@@ -3559,6 +3559,8 @@ fn layout_shape_text(
                 &paragraph.style,
                 paragraph_line_width(content_width, &paragraph.style, is_first_line),
                 is_last_line,
+                document,
+                font_provider,
             );
             let character_spacing = distributed_character_spacing(
                 line,
@@ -4351,6 +4353,8 @@ fn layout_repeating_header_footer(
                     &paragraph.style,
                     paragraph_line_width(geometry.content_width, &paragraph.style, line_idx == 0),
                     line_idx + 1 == line_count,
+                    document,
+                    font_provider,
                 );
                 let character_spacing = distributed_character_spacing(
                     &line,
@@ -4985,6 +4989,7 @@ fn layout_table(
             margin_left,
             table_width,
             document,
+            font_provider,
             table.borders_visible,
             true,
             next_row,
@@ -5084,6 +5089,7 @@ fn push_repeating_table_headers(
             margin_left,
             table_width,
             document,
+            font_provider,
             borders_visible,
             true,
             None,
@@ -5159,6 +5165,7 @@ fn push_split_table_row(
             margin_left,
             table_width,
             document,
+            font_provider,
             borders_visible,
             render_nested_child_grids,
             is_final_fragment.then_some(()).and(next_row),
@@ -6275,6 +6282,7 @@ fn push_table_row(
     margin_left: f32,
     table_width: f32,
     document: &Document,
+    font_provider: Option<&FontProvider>,
     borders_visible: bool,
     render_nested_child_grids: bool,
     next_row: Option<&TableRow>,
@@ -6413,6 +6421,8 @@ fn push_table_row(
                     prepared_line.is_first_line,
                 ),
                 prepared_line.is_last_line,
+                document,
+                font_provider,
             );
             let character_spacing = distributed_character_spacing(
                 &prepared_line.line,
@@ -8126,6 +8136,8 @@ fn layout_paragraph_with_auto_footnotes(
             &paragraph.style,
             paragraph_line_width(line_content_width, &paragraph.style, line_idx == 0),
             line_idx + 1 == line_count,
+            document,
+            font_provider,
         );
         let character_spacing = distributed_character_spacing(
             &line,
@@ -12992,6 +13004,8 @@ fn justified_word_spacing(
     style: &ParagraphStyle,
     available_width: f32,
     is_last_line: bool,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
 ) -> f32 {
     if !matches!(
         style.alignment,
@@ -13001,15 +13015,48 @@ fn justified_word_spacing(
     {
         return 0.0;
     }
-    let space_count = line
+    let total_space_count = line
         .runs
         .iter()
         .map(|run| regular_space_count(&run.text))
         .sum::<usize>();
+    let (trailing_space_count, trailing_space_width) =
+        trailing_regular_space_geometry(line, style, document, font_provider);
+    let space_count = total_space_count.saturating_sub(trailing_space_count);
     if space_count == 0 {
         return 0.0;
     }
-    ((available_width - line.width) / space_count as f32).max(0.0)
+    ((available_width - (line.width - trailing_space_width)) / space_count as f32).max(0.0)
+}
+
+fn trailing_regular_space_geometry(
+    line: &Line,
+    paragraph_style: &ParagraphStyle,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> (usize, f32) {
+    let mut count = 0usize;
+    let mut width = 0.0;
+    for run in line.runs.iter().rev() {
+        let trailing_count = run.text.chars().rev().take_while(|ch| *ch == ' ').count();
+        if trailing_count == 0 {
+            break;
+        }
+        count += trailing_count;
+        let trimmed_text = run.text.trim_end_matches(' ');
+        let trimmed_width = if trimmed_text.is_empty() {
+            0.0
+        } else {
+            let mut trimmed_run = run.clone();
+            trimmed_run.text = trimmed_text.to_string();
+            measure_flow_run(&trimmed_run, 0.0, paragraph_style, document, font_provider)
+        };
+        width += (run.width - trimmed_width).max(0.0);
+        if !trimmed_text.is_empty() {
+            break;
+        }
+    }
+    (count, width)
 }
 
 fn distributed_character_spacing(
@@ -20472,6 +20519,51 @@ mod tests {
         assert!(
             word_spacings.iter().any(|spacing| *spacing == 0.0),
             "expected final justified line to remain unstretched: {word_spacings:?}"
+        );
+    }
+
+    #[test]
+    fn justification_excludes_wrapped_trailing_space_at_every_character_scale() {
+        let parsed = crate::rtf::parse_rtf(
+            r"{\rtf1\ansi\paperw4320\paperh7920\margl360\margr360\fs24
+            \qj Plain one two three four five six seven eight nine ten eleven twelve.\par
+            \qj\charscalex50 Scale50 one two three four five six seven eight nine ten eleven twelve.\par
+            \qj\charscalex150 Scale150 one two three four five six seven eight nine ten eleven twelve.\par}",
+        )
+        .unwrap();
+        let layout = LayoutEngine::layout(&parsed.document);
+        let right_edge = 198.0;
+        let mut lines = std::collections::BTreeMap::<i32, Vec<&TextFragment>>::new();
+        for item in &layout.pages[0].items {
+            if let LayoutItem::Text(fragment) = item {
+                lines
+                    .entry((fragment.baseline_y * 100.0).round() as i32)
+                    .or_default()
+                    .push(fragment);
+            }
+        }
+        let justified_endpoints = lines
+            .values()
+            .filter(|line| line.iter().any(|fragment| fragment.word_spacing > 0.0))
+            .map(|line| {
+                line.iter()
+                    .map(|fragment| {
+                        fragment.x
+                            + measure_text_with_family(
+                                fragment.text.trim_end_matches(' '),
+                                &fragment.style,
+                                fragment.font_family,
+                            )
+                    })
+                    .fold(f32::NEG_INFINITY, f32::max)
+            })
+            .collect::<Vec<_>>();
+        assert!(justified_endpoints.len() >= 3, "{justified_endpoints:?}");
+        assert!(
+            justified_endpoints
+                .iter()
+                .all(|endpoint| (*endpoint - right_edge).abs() < 0.02),
+            "justified glyph endpoints must reach the body edge: {justified_endpoints:?}"
         );
     }
 
