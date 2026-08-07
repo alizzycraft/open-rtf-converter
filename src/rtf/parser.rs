@@ -58067,6 +58067,34 @@ After\par}"#;
     }
 
     #[test]
+    fn unequal_paragraph_frame_intersections_remain_bounded_metadata() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-overlap-geometry-passive.rtf"
+        ))
+        .unwrap();
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter(|block| {
+                matches!(block, Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1)
+            })
+            .count();
+        assert_eq!(frames, 10);
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(
+                "paragraph frame control \\absnoovrlp retained through bounded passive placement",
+            )
+        }));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
     fn word_compatible_mode_retains_bounded_horizontal_frame_text_distance() {
         let output = parse_rtf(include_str!(
             "../../fixtures/framed-drop-cap-wrap-distance-passive.rtf"

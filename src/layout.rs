@@ -8144,16 +8144,32 @@ fn layout_framed_drop_cap_paragraph(
         },
         kind: FlowExclusionKind::ParagraphFrame,
     };
-    let removed_preview_exclusion = if let Some(preview) = absolute_frame_preview {
-        pages.last_mut().and_then(|page| {
-            page.flow_exclusions
+    let frame_page_index = pages.len().saturating_sub(1);
+    let mut removed_frame_exclusions = Vec::new();
+    if paragraph.style.frame_vertical_anchor != StaticShapeVerticalAnchor::Paragraph {
+        if let Some(page) = pages.get_mut(frame_page_index) {
+            let mut index = 0;
+            while index < page.flow_exclusions.len() {
+                if page.flow_exclusions[index].kind == FlowExclusionKind::ParagraphFrame {
+                    let original_index = index + removed_frame_exclusions.len();
+                    removed_frame_exclusions
+                        .push((original_index, page.flow_exclusions.remove(index)));
+                } else {
+                    index += 1;
+                }
+            }
+        }
+    } else if let Some(preview) = absolute_frame_preview {
+        if let Some(page) = pages.get_mut(frame_page_index) {
+            if let Some(index) = page
+                .flow_exclusions
                 .iter()
                 .position(|exclusion| same_flow_exclusion(*exclusion, preview))
-                .map(|index| (index, page.flow_exclusions.remove(index)))
-        })
-    } else {
-        None
-    };
+            {
+                removed_frame_exclusions.push((index, page.flow_exclusions.remove(index)));
+            }
+        }
+    }
     let frame_item_start = pages.last().map(|page| page.items.len()).unwrap_or(0);
     let mut frame_cursor_y = frame_top_y;
     let mut frame_geometry = *geometry;
@@ -8180,11 +8196,14 @@ fn layout_framed_drop_cap_paragraph(
         for item in page.items.iter_mut().skip(frame_item_start) {
             shift_layout_item_x(item, frame_x_shift);
         }
-        if let Some((index, exclusion)) = removed_preview_exclusion {
+        if absolute_frame_preview.is_none() {
+            page.flow_exclusions.push(frame_exclusion);
+        }
+    }
+    if let Some(page) = pages.get_mut(frame_page_index) {
+        for (index, exclusion) in removed_frame_exclusions {
             page.flow_exclusions
                 .insert(index.min(page.flow_exclusions.len()), exclusion);
-        } else if absolute_frame_preview.is_none() {
-            page.flow_exclusions.push(frame_exclusion);
         }
     }
     true
@@ -23708,6 +23727,54 @@ mod tests {
                     .all(|exclusion| exclusion.kind == FlowExclusionKind::ParagraphFrame)
             );
         }
+    }
+
+    #[test]
+    fn unequal_absolute_frames_keep_authored_origins_through_intersections() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-overlap-geometry-passive.rtf"
+        ))
+        .expect("frame overlap-geometry fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 5);
+
+        let cap = |page_index: usize, text: &str| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text == text => Some(fragment),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing page {} cap {text:?}", page_index + 1))
+        };
+
+        for (page_index, first, second) in [(0, "A", "B"), (4, "I", "J")] {
+            let first = cap(page_index, first);
+            let second = cap(page_index, second);
+            assert!((first.x - 36.0).abs() < 0.01);
+            assert!((second.x - 36.0).abs() < 0.01);
+            assert!((first.baseline_y - second.baseline_y).abs() < 0.01);
+        }
+
+        assert!((cap(1, "C").x - 36.0).abs() < 0.01);
+        assert!((cap(1, "D").x - 72.0).abs() < 0.01);
+        assert!((cap(1, "C").baseline_y - cap(1, "D").baseline_y).abs() < 0.01);
+        assert!((cap(2, "E").x - 36.0).abs() < 0.01);
+        assert!((cap(2, "F").x - 36.0).abs() < 0.01);
+        assert!(((cap(2, "E").baseline_y - cap(2, "F").baseline_y) - 18.0).abs() < 0.01);
+        assert!((cap(3, "G").x - 36.0).abs() < 0.01);
+        assert!((cap(3, "H").x - 90.0).abs() < 0.01);
+
+        assert_eq!(
+            layout
+                .pages
+                .iter()
+                .map(|page| page.flow_exclusions.len())
+                .collect::<Vec<_>>(),
+            vec![2, 2, 2, 2, 2]
+        );
     }
 
     #[test]

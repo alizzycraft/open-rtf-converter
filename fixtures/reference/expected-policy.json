@@ -5056,6 +5056,51 @@
       ]
     },
     {
+      "id": "framed-drop-cap-overlap-geometry-passive-layout",
+      "input": "fixtures/framed-drop-cap-overlap-geometry-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-overlap-geometry-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 5,
+      "must_preserve_text": [
+        "Unequal same origin alpha beta gamma",
+        "Horizontal intersection alpha beta gamma",
+        "Vertical intersection alpha beta gamma",
+        "Separated frames alpha beta gamma",
+        "No-overlap unequal alpha beta gamma"
+      ],
+      "intentional_security_differences": [
+        "Absolute frame intersections are reduced to bounded passive text and flow exclusions; raw editable frame and collision metadata never crosses into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame control \\absnoovrlp retained through bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "absnoovrlp",
+        "phpg",
+        "pvpg",
+        "posx",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A five-page Word 16.0 probe proves that only identical-origin, identical-size absolute paragraph frames use the separately registered natural-line stack. Unequal frames with the same origin overprint exactly, including under absnoovrlp; partial horizontal and vertical intersections retain both authored origins, and separated frames remain independent. Anchored frame text now ignores other paragraph-frame flow exclusions while still honoring generic passive obstacles and the bounded identical-frame stack rule. Current and Word retain identical visible text, word order, line grouping, and all ten frame origins: x differs by 0.024 points and y boxes retain the established 0.93-0.95-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",
