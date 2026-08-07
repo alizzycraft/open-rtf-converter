@@ -23615,6 +23615,37 @@ fn office_math_fraction_reference_uses_word_inline_object_lead_in() {
 }
 
 #[test]
+fn arial_source_baseline_recovery_scales_without_changing_passive_output() {
+    let position = |input: &[u8], needle: &str| {
+        let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();
+        audit_passive_pdf_bytes(&output.pdf).unwrap();
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        pdf_first_text_position_for_text(&content, needle)
+            .unwrap_or_else(|| panic!("missing PDF text position for {needle:?}"))
+    };
+
+    let twelve_point = position(
+        include_bytes!("../fixtures/nonvisible-storage-fields-passive.rtf"),
+        "Visible",
+    );
+    let twenty_four_point = position(
+        include_bytes!("../fixtures/paragraph-keep-pagination-passive.rtf"),
+        "Filler",
+    );
+
+    assert!(
+        (twelve_point.1 - 348.70).abs() < 0.03,
+        "12-point Arial source baseline should match Word: {twelve_point:?}"
+    );
+    assert!(
+        (twenty_four_point.1 - 139.40).abs() < 0.03,
+        "24-point Arial source baseline should scale linearly: {twenty_four_point:?}"
+    );
+}
+
+#[test]
 fn office_math_nary_limit_locations_are_bounded_passive_metadata() {
     let input = rtf(&[
         "{",

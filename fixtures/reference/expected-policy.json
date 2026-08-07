@@ -1887,7 +1887,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Focused Word audit is complete: paragraph-relative shape top/bottom and all six wrapped text lines now match Word. Converter glyph boxes retain the established bundled Arial-compatible vertical residual of about 0.95 points."
+        "Focused Word audit is complete: paragraph-relative shape top/bottom and all six wrapped text lines now match Word. Converter glyph boxes retain the established bundled Arial-compatible vertical residual of about 0.95 points. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -1935,7 +1935,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Focused Word audit is complete: 9/36/0/18-point left/right/top/bottom wrap distances, the paragraph-relative shape frame, and all eight text lines now match Word. Converter glyph boxes retain the established bundled Arial-compatible vertical residual of about 0.95 points."
+        "Focused Word audit is complete: 9/36/0/18-point left/right/top/bottom wrap distances, the paragraph-relative shape frame, and all eight text lines now match Word. Converter glyph boxes retain the established bundled Arial-compatible vertical residual of about 0.95 points. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -1977,7 +1977,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The positioned rows now share Word's margin-relative floating origin, wrap margins affect only the surrounding exclusion, and an immediately preceding paragraph receives bounded exclusion lookahead. All visible text line breaks match Word; text origins remain within about 0.86 points vertically and 0.08 points horizontally because of bundled Arial-compatible metrics."
+        "The positioned rows now share Word's margin-relative floating origin, wrap margins affect only the surrounding exclusion, and an immediately preceding paragraph receives bounded exclusion lookahead. All visible text line breaks match Word; text origins remain within about 0.86 points vertically and 0.08 points horizontally because of bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.07 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -2023,7 +2023,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word audit confirms that the fixture's standalone lowercase \\msup slot is not a valid script container and remains 12-point baseline text. Math zones select the declared Cambria Math family, apply bounded relation/binary-operator spacing without changing searchable model text, and stack bar fractions as one centered inline object. Independently recovered Cambria Math advances close the ordinary equation's former 2.98-point accumulated width error: its following run origin differs from Word by 0.02 points. The separately calibrated 71%-scale fraction path remains isolated from those full-size advances; current/Word fraction widths differ by 0.02 points, numerator baseline offset differs by 0.08 points, and denominator/rule offsets match exactly. The stacked fraction now shares Word's measured layout-only Office Math object lead-in: its origin differs by 0.11 points and following text resumes within 0.09 points. Bundled Tinos retains different glyph contours and the shared 0.95-point vertical font-metric residual. The stripped adjacent OLE object remains an intentional security difference."
+        "The focused Word audit confirms that the fixture's standalone lowercase \\msup slot is not a valid script container and remains 12-point baseline text. Math zones select the declared Cambria Math family, apply bounded relation/binary-operator spacing without changing searchable model text, and stack bar fractions as one centered inline object. Independently recovered Cambria Math advances close the ordinary equation's former 2.98-point accumulated width error: its following run origin differs from Word by 0.02 points. The separately calibrated 71%-scale fraction path remains isolated from those full-size advances; current/Word fraction widths differ by 0.02 points, numerator baseline offset differs by 0.08 points, and denominator/rule offsets match exactly. The stacked fraction shares Word's measured layout-only Office Math object lead-in: its origin differs by 0.11 points and following text resumes within 0.09 points. Bounded Arial source-baseline recovery makes the ordinary math/text baseline exact; bundled Tinos retains only different glyph contours. The stripped adjacent OLE object remains an intentional security difference."
       ]
     },
     {
@@ -2630,7 +2630,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference confirms exact whitespace recovery: stripping ADDIN, PRIVATE, PRINT, RD, XE, TC, and TA retains both authored surrounding spaces on every line and leaks no payload or link. Horizontal origins agree within 0.02 points; bundled Arial-compatible line pitch accumulates to a 0.77-point vertical difference by the ninth line."
+        "The registered Word 16.0 reference confirms exact whitespace recovery: stripping ADDIN, PRIVATE, PRINT, RD, XE, TC, and TA retains both authored surrounding spaces on every line and leaks no payload or link. Horizontal origins agree within 0.02 points; bundled Arial-compatible line pitch accumulates to a 0.77-point vertical difference by the ninth line. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.05 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3000,7 +3000,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference proves that a level-three list template containing its parent placeholders yields 1.1.1 for all three STYLEREF number switches (\\n, \\r, and \\w), both in ordinary body flow and from a following level-three list paragraph. WordCompatiblePassive now retains the complete authored context instead of reducing \\n to the final component. Current and Word have identical eight-line grouping; matching lines begin within 0.03 points horizontally and retain the established 0.95-point bundled Arial-compatible vertical residual. Current line endpoints are up to about 3.44 points shorter because of bundled font metrics. Both PDFs are one-page text-only output with zero drawings, images, links, annotations, widgets, or actions."
+        "The registered Word 16.0 reference proves that a level-three list template containing its parent placeholders yields 1.1.1 for all three STYLEREF number switches (\\n, \\r, and \\w), both in ordinary body flow and from a following level-three list paragraph. WordCompatiblePassive now retains the complete authored context instead of reducing \\n to the final component. Current and Word have identical eight-line grouping; matching lines begin within 0.03 points horizontally and retain the established 0.95-point bundled Arial-compatible vertical residual. Current line endpoints are up to about 3.44 points shorter because of bundled font metrics. Both PDFs are one-page text-only output with zero drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3159,7 +3159,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Focused multi-page Word 16.0 probes confirm exact restart semantics with non-default starts: continuous mode emits 5/6 then 7/8 across an explicit page break, per-page mode emits 5/6 on both pages, and per-section mode emits 5/6 then the second section's authored 7/8. Current output matches every number, page count, and 13.8-point cadence; number origins retain only the established bundled Arial-compatible residual of 0.312 points horizontally and 0.951 vertically."
+        "Focused multi-page Word 16.0 probes confirm exact restart semantics with non-default starts: continuous mode emits 5/6 then 7/8 across an explicit page break, per-page mode emits 5/6 on both pages, and per-section mode emits 5/6 then the second section's authored 7/8. Current output matches every number, page count, and 13.8-point cadence; number origins retain only the established bundled Arial-compatible residual of 0.312 points horizontally and 0.951 vertically. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3192,7 +3192,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that border-art ID 42 is a scissors-and-dashed-strip tile rendered as 34 vector paths. WordCompatiblePassive emits a bounded 16-primitive passive template with measured joint quadrilaterals, Word's ring-over-joint paint order, outlined blades, complete-tile dash cadence, lead/final corners, and page clipping. Its clipped union is (35.88,-7.92)-(250.11,24.12) points versus Word's (35.88,-7.92)-(250.16,24.18); the ellipse-based rings replace Word's segmented cubic contours but are visually equivalent at eight-times inspection. Unknown border-art IDs retain the bounded authored-width line fallback. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; eight-times crops and full pages were visually inspected."
+        "The focused Word 16.0 audit confirms that border-art ID 42 is a scissors-and-dashed-strip tile rendered as 34 vector paths. WordCompatiblePassive emits a bounded 16-primitive passive template with measured joint quadrilaterals, Word's ring-over-joint paint order, outlined blades, complete-tile dash cadence, lead/final corners, and page clipping. Its clipped union is (35.88,-7.92)-(250.11,24.12) points versus Word's (35.88,-7.92)-(250.16,24.18); the ellipse-based rings replace Word's segmented cubic contours but are visually equivalent at eight-times inspection. Unknown border-art IDs retain the bounded authored-width line fallback. Body text origins differ by 0.02 points horizontally and the established 0.95-point bundled Arial-compatible vertical residual. Both PDFs are one page with zero raster images, links, annotations, widgets, or actions; eight-times crops and full pages were visually inspected. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3428,7 +3428,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that pgnx360/pgny1440 leave the authored Page 1 header at its ordinary 36-point margin/header origin and emit a separate right-aligned legacy auto-page number whose right edge is 18 points beyond the body margin and whose glyph top is 72 points from the page top. WordCompatiblePassive now reproduces that two-number structure instead of moving the entire header; the header marker also receives Word's measured 2-point layout-only lead-in. The legacy number right edge differs by 0.17 points and its glyph top by 0.55 points from Word after bundled Arial-compatible metrics. The conflicting sectlinegrid360/sectdefaultcl/sectspecifycl/sectspecifyl sequence restores Word's 18-point body pitch in WordCompatiblePassive, while StrictSpec retains the explicit default-grid clearing behavior. Header/body x origins differ by at most 0.08 points and body vertical origins by the established 0.91-point font-metric residual. Both one-page PDFs contain identical visible structure with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected."
+        "The focused Word 16.0 audit confirms that pgnx360/pgny1440 leave the authored Page 1 header at its ordinary 36-point margin/header origin and emit a separate right-aligned legacy auto-page number whose right edge is 18 points beyond the body margin and whose glyph top is 72 points from the page top. WordCompatiblePassive now reproduces that two-number structure instead of moving the entire header; the header marker also receives Word's measured 2-point layout-only lead-in. The legacy number right edge differs by 0.17 points and its glyph top by 0.55 points from Word after bundled Arial-compatible metrics. The conflicting sectlinegrid360/sectdefaultcl/sectspecifycl/sectspecifyl sequence restores Word's 18-point body pitch in WordCompatiblePassive, while StrictSpec retains the explicit default-grid clearing behavior. Header/body x origins differ by at most 0.08 points and body vertical origins by the established 0.91-point font-metric residual. Both one-page PDFs contain identical visible structure with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3596,7 +3596,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Focused Word 16.0 probes and Word's parsed cell-margin object model confirm a stable compatibility rule: per-cell `\\clpadl` and `\\clpadt` map to top and left respectively, row defaults retain their published sides, every cell shares the row's largest effective top inset, and modern bottom padding replaces the legacy half-`\\trgaph` post-table clearance. WordCompatiblePassive reproduces that bounded behavior while StrictSpec retains the published RTF side mapping. Corrected first/second cell x origins differ by 0.024/0.05 points, and all cell/following baselines retain only the shared 0.951-0.953-point bundled Arial-compatible metric residual."
+        "Focused Word 16.0 probes and Word's parsed cell-margin object model confirm a stable compatibility rule: per-cell `\\clpadl` and `\\clpadt` map to top and left respectively, row defaults retain their published sides, every cell shares the row's largest effective top inset, and modern bottom padding replaces the legacy half-`\\trgaph` post-table clearance. WordCompatiblePassive reproduces that bounded behavior while StrictSpec retains the published RTF side mapping. Corrected first/second cell x origins differ by 0.024/0.05 points, and all cell/following baselines retain only the shared 0.951-0.953-point bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3737,7 +3737,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word baseline confirms the same top/center/bottom anchoring and following-paragraph position. Relative to the preceding paragraph baseline, current top/center/bottom cell baselines differ from Word by at most 0.04 points and post-table flow by 0.07 points; the shared 0.91-0.97-point absolute vertical offset is the established bundled Arial-compatible font-metric residual, not a table-layout error. Current cell x origins differ by at most 0.07 points, and unspecified authored border colors match Word black."
+        "The registered Word baseline confirms the same top/center/bottom anchoring and following-paragraph position. Relative to the preceding paragraph baseline, current top/center/bottom cell baselines differ from Word by at most 0.04 points and post-table flow by 0.07 points; the shared 0.91-0.97-point absolute vertical offset is the established bundled Arial-compatible font-metric residual, not a table-layout error. Current cell x origins differ by at most 0.07 points, and unspecified authored border colors match Word black. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.08 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3866,7 +3866,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, the 72-point kept row begins page two with both lines intact, and the normal row plus post-table paragraph follow at the same 36-point cadence. Origins differ by at most about 1.0 point vertically from bundled Arial-compatible metrics."
+        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, the 72-point kept row begins page two with both lines intact, and the normal row plus post-table paragraph follow at the same 36-point cadence. Origins differ by at most about 1.0 point vertically from bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.08 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3906,7 +3906,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, and the keep-follow row plus its follower move together to page two before the post-table paragraph. Horizontal origins differ by 0.02 points and vertical origins by at most about 0.98 points from bundled Arial-compatible metrics."
+        "The registered Word 16.0 reference and converter have identical two-page grouping: page one ends after `Filler row 3`, and the keep-follow row plus its follower move together to page two before the post-table paragraph. Horizontal origins differ by 0.02 points and vertical origins by at most about 0.98 points from bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.06 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -3946,7 +3946,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Bundled Arial-compatible 24-point line metrics place line tops about 2.5 points above Word while preserving the same page grouping and horizontal geometry."
+        "Bundled Arial-compatible 24-point line metrics place line tops about 2.5 points above Word while preserving the same page grouping and horizontal geometry. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4064,7 +4064,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The converter matches Word's exact two-page grouping: page one contains only `First page text`, and both following paragraphs start at the top of page two. Text origins differ by 0.02 points horizontally and at most 0.80 points vertically from bundled Arial-compatible metrics."
+        "The converter matches Word's exact two-page grouping: page one contains only `First page text`, and both following paragraphs start at the top of page two. Text origins differ by 0.02 points horizontally and at most 0.80 points vertically from bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4199,7 +4199,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word applies the final vertical-alignment setting retroactively to the whole section. The converter now does the same: the final `\\vertalt` places both paragraphs at the top, with origins differing by 0.02 points horizontally and at most 0.80 points vertically from bundled Arial-compatible metrics."
+        "Word applies the final vertical-alignment setting retroactively to the whole section. The converter now does the same: the final `\\vertalt` places both paragraphs at the top, with origins differing by 0.02 points horizontally and at most 0.80 points vertically from bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4437,7 +4437,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms that parameterless automatic spacing does not synthesize a gap and contextual spacing suppresses the boundary when either adjacent same-style paragraph opts in. All five converter baselines now follow Word's unspaced cadence; bundled Arial-compatible line metrics produce diminishing vertical residuals of 0.80, 0.60, 0.40, 0.20, and 0.00 points."
+        "The Word baseline confirms that parameterless automatic spacing does not synthesize a gap and contextual spacing suppresses the boundary when either adjacent same-style paragraph opts in. All five converter baselines now follow Word's unspaced cadence; bundled Arial-compatible line metrics produce diminishing vertical residuals of 0.80, 0.60, 0.40, 0.20, and 0.00 points. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4480,7 +4480,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word baseline confirms one-page flow and automatic recovery for the extreme value. Multiple spacing now preserves the natural first-line glyph baseline while expanding bounded line advance: the second double-spaced line differs by 0.20 points vertically, exact-line two by 0.05 points, and subsequent lines by at most 0.39 points. The first double-spaced line remains 2.64 points high because bundled Arial-compatible leading differs from Word's font metrics."
+        "The Word baseline confirms one-page flow and automatic recovery for the extreme value. Multiple spacing now preserves the natural first-line glyph baseline while expanding bounded line advance: the second double-spaced line differs by 0.20 points vertically, exact-line two by 0.05 points, and subsequent lines by at most 0.39 points. The first double-spaced line remains 2.64 points high because bundled Arial-compatible leading differs from Word's font metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4514,7 +4514,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that softline, softcol, and softpage are zero-width passive hints in this ordinary single-column paragraph: Word and the converter preserve the identical seven-word first line and three-word second line without forcing line, column, or page breaks. Corresponding word x origins differ by at most 0.14 points, both line intervals are 13.8 points, and vertical origins retain only the established 0.95-point bundled Arial-compatible metric residual. Word extraction includes trailing paragraph spaces while the converter does not, with no visible or wrapping effect. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected. Exact near-threshold hint selection is not exercised by this registered fixture, but stripping the hints is faithful to its Word output and keeps raw controls outside searchable PDF text."
+        "The focused Word 16.0 audit confirms that softline, softcol, and softpage are zero-width passive hints in this ordinary single-column paragraph: Word and the converter preserve the identical seven-word first line and three-word second line without forcing line, column, or page breaks. Corresponding word x origins differ by at most 0.14 points, both line intervals are 13.8 points, and vertical origins retain only the established 0.95-point bundled Arial-compatible metric residual. Word extraction includes trailing paragraph spaces while the converter does not, with no visible or wrapping effect. Both PDFs are one page with zero drawings, images, links, annotations, widgets, or actions; four-times renders were visually inspected. Exact near-threshold hint selection is not exercised by this registered fixture, but stripping the hints is faithful to its Word output and keeps raw controls outside searchable PDF text. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4549,7 +4549,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Bundled Arial-compatible font metrics differ slightly from Word's Arial metrics; observed baselines differ by at most about 0.8 points."
+        "Bundled Arial-compatible font metrics differ slightly from Word's Arial metrics; observed baselines differ by at most about 0.8 points. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4590,7 +4590,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused Word 16.0 probe proves that a one-character paragraph carrying bounded absw/absh frame dimensions plus dropcapli/dropcapt remains at its authored 12-point size, floats at the body origin without consuming a block line, and excludes the left 36 points from the following three body lines. Word and current have identical thirteen-line flow for both authored drop-cap types: every x origin differs by 0.024 points, glyph endpoints by at most 0.19 points, and baselines retain only the established 0.95-1.02-point bundled Arial-compatible metric residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+        "A focused Word 16.0 probe proves that a one-character paragraph carrying bounded absw/absh frame dimensions plus dropcapli/dropcapt remains at its authored 12-point size, floats at the body origin without consuming a block line, and excludes the left 36 points from the following three body lines. Word and current have identical thirteen-line flow for both authored drop-cap types: every x origin differs by 0.024 points, glyph endpoints by at most 0.19 points, and baselines retain only the established 0.95-1.02-point bundled Arial-compatible metric residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.07 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4631,7 +4631,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused Word 16.0 probe proves that a width-only drop-cap frame derives its height from the framed text's natural one-line box, while a height-only frame derives its width from the framed glyph's natural advance. Word and current have identical eleven-line flow. The width-only following line begins at x=72 and the next line returns to x=36 in both outputs; the height-only body begins at x=44.664 in Word and x=44.666 currently for three lines before returning to x=36. Other x origins differ by 0.024 points, glyph endpoints by at most 0.14 points, and baselines retain the established 0.95-1.00-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+        "A focused Word 16.0 probe proves that a width-only drop-cap frame derives its height from the framed text's natural one-line box, while a height-only frame derives its width from the framed glyph's natural advance. Word and current have identical eleven-line flow. The width-only following line begins at x=72 and the next line returns to x=36 in both outputs; the height-only body begins at x=44.664 in Word and x=44.666 currently for three lines before returning to x=36. Other x origins differ by 0.024 points, glyph endpoints by at most 0.14 points, and baselines retain the established 0.95-1.00-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.05 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4674,7 +4674,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused Word 16.0 probe proves that dxfrtext180 and dfrmtxtx240 enlarge a 36-point drop-cap frame's right-side text exclusion by exactly 9 and 12 points, moving following text from x=72.024 to x=81.024 and x=84.024. dfrmtxty360 is inert for this path and retains x=72.024 with the same three excluded lines. Current reproduces x=72/81/84/72 and identical four-group line flow; geometrically corresponding word origins and endpoints differ by at most 0.12 points, while vertical boxes retain the established 0.93-1.05-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+        "A focused Word 16.0 probe proves that dxfrtext180 and dfrmtxtx240 enlarge a 36-point drop-cap frame's right-side text exclusion by exactly 9 and 12 points, moving following text from x=72.024 to x=81.024 and x=84.024. dfrmtxty360 is inert for this path and retains x=72.024 with the same three excluded lines. Current reproduces x=72/81/84/72 and identical four-group line flow; geometrically corresponding word origins and endpoints differ by at most 0.12 points, while vertical boxes retain the established 0.93-1.05-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.10 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4725,7 +4725,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused Word 16.0 probe proves column-default x=36, margin-relative posx720 x=72, page-relative posx720 x=36, margin-centered x=135.05, margin-right x=234.10, and paragraph-relative posy360 as an 18-point downward frame shift. Positioned frames wrap through all bounded free intervals: an intact word that cannot fit the left interval advances to the right interval, later short words can use the left interval, and nonpainted trailing spaces do not force a visible word away from an exclusion edge. Current reproduces x=36/72/36/135/36/234 and identical 128-word line grouping; corresponding word origins and endpoints differ by at most 0.16 points, while vertical boxes retain the established 0.95-1.08-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions."
+        "A focused Word 16.0 probe proves column-default x=36, margin-relative posx720 x=72, page-relative posx720 x=36, margin-centered x=135.05, margin-right x=234.10, and paragraph-relative posy360 as an 18-point downward frame shift. Positioned frames wrap through all bounded free intervals: an intact word that cannot fit the left interval advances to the right interval, later short words can use the left interval, and nonpainted trailing spaces do not force a visible word away from an exclusion edge. Current reproduces x=36/72/36/135/36/234 and identical 128-word line grouping; corresponding word origins and endpoints differ by at most 0.16 points, while vertical boxes retain the established 0.95-1.08-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.08 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -4768,7 +4768,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused Word 16.0 probe uses identical frame glyphs and equal-width case labels to establish that paragraph-frame posyt, posyc, and posyb are inert for complete drop-cap frames anchored with pvpara. Word and current retain identical 68-word order and line grouping; corresponding x origins/endpoints differ by at most 0.12/0.14 points, while vertical boxes retain a 0.39-1.00-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions. The separately registered absolute-overlap reference now closes the later-declared page/margin-frame reflow case that this audit originally exposed."
+        "A focused Word 16.0 probe uses identical frame glyphs and equal-width case labels to establish that paragraph-frame posyt, posyc, and posyb are inert for complete drop-cap frames anchored with pvpara. Word and current retain identical 68-word order and line grouping; corresponding x origins/endpoints differ by at most 0.12/0.14 points, while vertical boxes retain a 0.39-1.00-point bundled Arial-compatible residual. Both outputs are one-page text-only PDFs without drawings, images, links, annotations, widgets, or actions. The separately registered absolute-overlap reference now closes the later-declared page/margin-frame reflow case that this audit originally exposed. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.56 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5007,7 +5007,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused Word 16.0 probe proves that negative absw selects an in-flow frame rather than the ordinary floating exclusion: with absh720/absh-720 the framed glyph remains at x=36 and following body begins full-width exactly 36 points later; absh1440 advances it by 72 points. A negative width without authored height suppresses the one-character frame and consumes no extra vertical space. Negative absh retains the authored magnitude on the positive-width floating path, and repeated absw controls use the final signed value. The safe model now preserves bounded signs, excludes negative-width frames from absolute preview planning, and never exports raw frame metadata. Current and Word retain identical visible text, word order, and line grouping on all eight pages; x origins/endpoints differ by at most 0.19/0.16 points and y boxes retain a 0.73-0.96-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+        "A focused Word 16.0 probe proves that negative absw selects an in-flow frame rather than the ordinary floating exclusion: with absh720/absh-720 the framed glyph remains at x=36 and following body begins full-width exactly 36 points later; absh1440 advances it by 72 points. A negative width without authored height suppresses the one-character frame and consumes no extra vertical space. Negative absh retains the authored magnitude on the positive-width floating path, and repeated absw controls use the final signed value. The safe model now preserves bounded signs, excludes negative-width frames from absolute preview planning, and never exports raw frame metadata. Current and Word retain identical visible text, word order, and line grouping on all eight pages; x origins/endpoints differ by at most 0.19/0.16 points and y boxes retain a 0.73-0.96-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.20 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5097,7 +5097,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A five-page Word 16.0 probe proves that only identical-origin, identical-size absolute paragraph frames use the separately registered natural-line stack. Unequal frames with the same origin overprint exactly, including under absnoovrlp; partial horizontal and vertical intersections retain both authored origins, and separated frames remain independent. Anchored frame text now ignores other paragraph-frame flow exclusions while still honoring generic passive obstacles and the bounded identical-frame stack rule. Current and Word retain identical visible text, word order, line grouping, and all ten frame origins: x differs by 0.024 points and y boxes retain the established 0.93-0.95-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+        "A five-page Word 16.0 probe proves that only identical-origin, identical-size absolute paragraph frames use the separately registered natural-line stack. Unequal frames with the same origin overprint exactly, including under absnoovrlp; partial horizontal and vertical intersections retain both authored origins, and separated frames remain independent. Anchored frame text now ignores other paragraph-frame flow exclusions while still honoring generic passive obstacles and the bounded identical-frame stack rule. Current and Word retain identical visible text, word order, line grouping, and all ten frame origins: x differs by 0.024 points and y boxes retain the established 0.93-0.95-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.20 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5242,7 +5242,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused six-page Word 16.0 probe proves that dxfrtext180 expands an ordinary frame exclusion by 9 points on every side, dfrmtxtx240 expands only the horizontal exclusion by 12 points, and dfrmtxty360 expands only the vertical exclusion by 18 points; negative axis distances are inert. Drop-cap vertical distance retains its separately proven inert behavior. Current and Word preserve identical visible text, word order, line grouping, and all six frame placements. Corresponding flow x origins differ by at most 0.05 points, endpoints by at most 3.50 points under bundled Arial-compatible metrics, and y boxes retain the established 0.73-0.95-point residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+        "A focused six-page Word 16.0 probe proves that dxfrtext180 expands an ordinary frame exclusion by 9 points on every side, dfrmtxtx240 expands only the horizontal exclusion by 12 points, and dfrmtxty360 expands only the vertical exclusion by 18 points; negative axis distances are inert. Drop-cap vertical distance retains its separately proven inert behavior. Current and Word preserve identical visible text, word order, line grouping, and all six frame placements. Corresponding flow x origins differ by at most 0.05 points, endpoints by at most 3.50 points under bundled Arial-compatible metrics, and y boxes retain the established 0.73-0.95-point residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.20 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5397,7 +5397,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A focused six-page Word 16.0 probe proves that frmtxlrtb and frmtxlrtbv remain horizontal, frmtxtbrl and frmtxtbrlv rotate top-to-bottom with columns progressing right-to-left, and frmtxbtlr rotates bottom-to-top with columns progressing left-to-right. Vertical text wraps against the frame height and uses a 14.16-point cross-column pitch at 12 points. Current/Word rotated column origins differ by at most 0.07 points, long-column endpoints by at most 0.02 points, and short-column endpoints by the established 3.42-point bundled Arial-compatible width residual. Horizontal frame/body origins retain at most 0.05-point x and 0.95-point y residuals. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+        "A focused six-page Word 16.0 probe proves that frmtxlrtb and frmtxlrtbv remain horizontal, frmtxtbrl and frmtxtbrlv rotate top-to-bottom with columns progressing right-to-left, and frmtxbtlr rotates bottom-to-top with columns progressing left-to-right. Vertical text wraps against the frame height and uses a 14.16-point cross-column pitch at 12 points. Current/Word rotated column origins differ by at most 0.07 points, long-column endpoints by at most 0.02 points, and short-column endpoints by the established 3.42-point bundled Arial-compatible width residual. Horizontal frame/body origins retain at most 0.05-point x and 0.95-point y residuals. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.20 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5581,7 +5581,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word and the converter now use identical five-line emergency character-boundary wrapping: `Antidisestablis` / `hmentarianis` / `m` and `Characteristic` / `ally`, with no invented hyphen glyphs. Word's trailing paragraph spaces are non-painted extraction artifacts. Line starts differ by 0.024 points, endpoints by at most 0.084 points before those spaces, and baselines by the established 0.91-0.96-point bundled Arial-compatible glyph-box residual."
+        "Word and the converter now use identical five-line emergency character-boundary wrapping: `Antidisestablis` / `hmentarianis` / `m` and `Characteristic` / `ally`, with no invented hyphen glyphs. Word's trailing paragraph spaces are non-painted extraction artifacts. Line starts differ by 0.024 points, endpoints by at most 0.084 points before those spaces, and baselines by the established 0.91-0.96-point bundled Arial-compatible glyph-box residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.02 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5712,7 +5712,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "A fresh Word 16.0 export exposed that the former registered PDF predated the fixture's standard mixed-note rewrite. Word applies implicit section defaults when only document-level numbering controls are present: Arabic footnotes from 1, lower-Roman endnotes from i, full-size bare chftn markers, an immediate endnote band, and bottom-of-page footnotes. The converter now matches those rules while honoring explicit sftn/saftn section overrides. The endnote separator center differs by 0.02 points and its text baseline by the shared roughly one-point bundled Arial-compatible metric residual. Bottom-note text boxes differ vertically by at most 0.28 points; the passive default footnote separator remains 1.29 points lower than Word's line."
+        "A fresh Word 16.0 export exposed that the former registered PDF predated the fixture's standard mixed-note rewrite. Word applies implicit section defaults when only document-level numbering controls are present: Arabic footnotes from 1, lower-Roman endnotes from i, full-size bare chftn markers, an immediate endnote band, and bottom-of-page footnotes. The converter now matches those rules while honoring explicit sftn/saftn section overrides. The endnote separator center differs by 0.02 points and its text baseline by the shared roughly one-point bundled Arial-compatible metric residual. Bottom-note text boxes differ vertically by at most 0.28 points; the passive default footnote separator remains 1.29 points lower than Word's line. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 1.23 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5788,7 +5788,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word reference confirms the explicit 90-point columns, 18-point gap, column-break flow, and text origins within 0.13 points. Word limits the black 0.72-point separator to the occupied 13.8-point section content band; the converter now matches that relative geometry instead of extending a gray rule through the full page body. The remaining roughly 0.95-point absolute vertical offset is the shared bundled Arial-compatible metric residual."
+        "The registered Word reference confirms the explicit 90-point columns, 18-point gap, column-break flow, and text origins within 0.13 points. Word limits the black 0.72-point separator to the occupied 13.8-point section content band; the converter now matches that relative geometry instead of extending a gray rule through the full page body. The remaining roughly 0.95-point absolute vertical offset is the shared bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -5820,7 +5820,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word audit confirms exact same-page column flow: the left and right segments begin at x=36.00/171.00 points versus Word's 36.02/171.07 points and share one baseline. The roughly 0.95-point vertical difference is the shared bundled Arial-compatible metric residual."
+        "The focused Word audit confirms exact same-page column flow: the left and right segments begin at x=36.00/171.00 points versus Word's 36.02/171.07 points and share one baseline. The roughly 0.95-point vertical difference is the shared bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -6286,7 +6286,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference confirms matching horizontal- and vertical-merge border suppression, merged shading coverage, and cell text placement. Positive `\\trrh` values are minimum content heights: Word adds the top cell-border stroke to each row, which the converter now matches while retaining negative exact-height behavior. Current border coordinates are within 0.10 points of Word, text x origins within 0.13 points, and the remaining 0.92-1.00-point vertical text offset is the established bundled Arial-compatible metric residual."
+        "The registered Word 16.0 reference confirms matching horizontal- and vertical-merge border suppression, merged shading coverage, and cell text placement. Positive `\\trrh` values are minimum content heights: Word adds the top cell-border stroke to each row, which the converter now matches while retaining negative exact-height behavior. Current border coordinates are within 0.10 points of Word, text x origins within 0.13 points, and the remaining 0.92-1.00-point vertical text offset is the established bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.05 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -7061,7 +7061,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word reference suppresses both paired legacy pntext markers and their hanging indents. Word-compatible output now matches its four-line flow and 36-point left origin; the remaining roughly one-point vertical difference is the shared bundled Arial-compatible metric residual."
+        "The registered Word reference suppresses both paired legacy pntext markers and their hanging indents. Word-compatible output now matches its four-line flow and 36-point left origin; the remaining roughly one-point vertical difference is the shared bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -7106,7 +7106,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Wingdings spacing, bullseye, checkbox, check, and asymmetric X outlines are reproduced as bounded passive vectors without embedding the legacy font. Passive SYMBOL results retain source-family style only long enough to select the same vector template. All measured contour x bounds are within 0.23 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual."
+        "Word's Wingdings spacing, bullseye, checkbox, check, and asymmetric X outlines are reproduced as bounded passive vectors without embedding the legacy font. Passive SYMBOL results retain source-family style only long enough to select the same vector template. All measured contour x bounds are within 0.23 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -7146,7 +7146,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Wingdings 2 spacing and filled check/X contours are reproduced as bounded passive vectors without embedding the legacy font. Source 0x51, 0x53, and 0x54 remain distinct through normalization so the script, light, and bold boxed-X designs are not collapsed. Authored and SYMBOL-result contour x bounds are within 0.23 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual."
+        "Word's Wingdings 2 spacing and filled check/X contours are reproduced as bounded passive vectors without embedding the legacy font. Source 0x51, 0x53, and 0x54 remain distinct through normalization so the script, light, and bold boxed-X designs are not collapsed. Authored and SYMBOL-result contour x bounds are within 0.23 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -7228,7 +7228,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's Webdings half-em spaces and full-em icon advances are preserved around bounded passive vectors. Source 0x3F remains semantic U+1F4E5 and now reproduces Word's exact three-contour incoming-paper/tray outline; the filled check and full-em hollow box likewise use the registered source geometry. Authored and SYMBOL-result contour x bounds are within 0.24 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual."
+        "Word's Webdings half-em spaces and full-em icon advances are preserved around bounded passive vectors. Source 0x3F remains semantic U+1F4E5 and now reproduces Word's exact three-contour incoming-paper/tray outline; the filled check and full-em hollow box likewise use the registered source geometry. Authored and SYMBOL-result contour x bounds are within 0.24 points of Word; the roughly 0.95-point vertical difference is the shared bundled Arial-compatible baseline residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -8287,7 +8287,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference confirms exact late SECTIONPAGES replacement and per-section pagination: the first section spans pages 1-2 and prints 2, while the second section occupies page 3 and prints 1. Current and Word are three-page text-only PDFs with identical normalized text and zero drawings/images. Text x origins differ by at most 0.17 points; the remaining 0.95-point vertical offset is the established bundled Arial-compatible metric residual."
+        "The registered Word 16.0 reference confirms exact late SECTIONPAGES replacement and per-section pagination: the first section spans pages 1-2 and prints 2, while the second section occupies page 3 and prints 1. Current and Word are three-page text-only PDFs with identical normalized text and zero drawings/images. Text x origins differ by at most 0.17 points; the remaining 0.95-point vertical offset is the established bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -8450,7 +8450,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word reference confirms that z-order 23 foreground shape content paints after both surrounding body paragraphs. The converter now matches that layer sequence, exact 180-by-54-point frame, 7.2-point horizontal and 4-point vertical text insets, and black 0.75-point outline. Shape-text x origin is within 0.38 points; vertical glyph boxes retain the shared roughly 0.95-point bundled Arial-compatible metric residual."
+        "The registered Word reference confirms that z-order 23 foreground shape content paints after both surrounding body paragraphs. The converter now matches that layer sequence, exact 180-by-54-point frame, 7.2-point horizontal and 4-point vertical text insets, and black 0.75-point outline. Shape-text x origin is within 0.38 points; vertical glyph boxes retain the shared roughly 0.95-point bundled Arial-compatible metric residual. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.04 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -8492,7 +8492,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word and converter now emit one plain butt-capped solid line at `(90,96)-(162,132)` with no arrowhead paths; converter stroke width rounds to 0.15 points versus Word's 0.14 points, and bundled Arial-compatible text remains about 0.96 points above Word vertically."
+        "Word and converter now emit one plain butt-capped solid line at `(90,96)-(162,132)` with no arrowhead paths; converter stroke width rounds to 0.15 points versus Word's 0.14 points, and bundled Arial-compatible text remains about 0.96 points above Word vertically. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -8619,7 +8619,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word and converter both suppress the malformed count-less polyline and retain the same two-line text flow; bundled Arial-compatible text remains about 0.96 points above Word vertically."
+        "Word and converter both suppress the malformed count-less polyline and retain the same two-line text flow; bundled Arial-compatible text remains about 0.96 points above Word vertically. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {
@@ -9141,7 +9141,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word audit confirms exact mirrored geometry: both PDFs emit one red 2-point line from (216,144) to (108,108) points with identical page flow. Text origins differ by 0.03 points horizontally and about 0.95 points vertically because of shared bundled Arial-compatible metrics."
+        "The focused Word audit confirms exact mirrored geometry: both PDFs emit one red 2-point line from (216,144) to (108,108) points with identical page flow. Text origins differ by 0.03 points horizontally and about 0.95 points vertically because of shared bundled Arial-compatible metrics. After bounded Arial source-baseline recovery, matching extracted text baselines in this reference differ by at most 0.01 points; any larger vertical residual described above predates this correction or belongs to separately documented non-text geometry."
       ]
     },
     {

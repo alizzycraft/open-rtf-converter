@@ -44,6 +44,7 @@ const WORD_INLINE_IMAGE_BODY_EDGE_TOLERANCE_POINTS: f32 = 1.0;
 const PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS: f32 = 0.84;
 const PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS: f32 = 3.42;
 const PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER: f32 = 1.47;
+const WORD_ARIAL_BASELINE_INSET_EM: f32 = 19.0 / 240.0;
 const MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS: usize = 4;
 const WORD_PARAGRAPH_FRAME_PAGE_EDGE_INSET_POINTS: f32 = 18.0;
 
@@ -9254,6 +9255,7 @@ fn layout_paragraph_with_auto_footnotes(
                 *geometry,
                 state,
                 paragraph.style.suppress_line_numbers,
+                document,
             );
         }
         push_bar_tab_stops(pages, &paragraph.style, x, *cursor_y, line.height);
@@ -9673,6 +9675,7 @@ fn push_passive_line_number(
     geometry: PageGeometry,
     state: &mut LineNumberState,
     suppress_number: bool,
+    document: &Document,
 ) {
     if !geometry.line_numbering.enabled || !line_has_visible_text(line) {
         return;
@@ -9693,7 +9696,9 @@ fn push_passive_line_number(
     let width = measure_text_with_family(&text, &style, PdfFontFamily::Helvetica);
     let distance = twips_to_points(geometry.line_numbering.distance_twips.max(0));
     let x = (margin_left - distance - width).max(0.0);
-    let baseline_y = top_y - line.height + (line.height * 0.25);
+    let baseline_y = top_y - line.height
+        + (line.height * 0.25)
+        + word_compatible_source_line_baseline_delta_points(line, document);
     let Some(page) = pages.last_mut() else {
         return;
     };
@@ -13728,7 +13733,8 @@ fn push_line_with_rotation(
         top_y - baseline_box_height + (baseline_box_height * 0.25) + (line_border_inset * 0.5)
     };
     let mut cursor_advance = 0.0;
-    let mut cursor_baseline_delta = 0.0;
+    let mut cursor_baseline_delta =
+        word_compatible_source_line_baseline_delta_points(line, document);
     let page = pages.last_mut().expect("layout always has a page");
 
     let last_spaced_run_index = line.runs.iter().rposition(|run| {
@@ -13996,6 +14002,25 @@ fn push_line_with_rotation(
         {
             cursor_advance += character_spacing;
         }
+    }
+}
+
+fn word_compatible_source_line_baseline_delta_points(line: &Line, document: &Document) -> f32 {
+    let Some(run) = line.runs.iter().find(|run| {
+        !run.text.trim().is_empty()
+            && !contains_inline_marker(&run.text)
+            && inline_image_marker_index(&run.text).is_none()
+    }) else {
+        return 0.0;
+    };
+    let Some(font) = font_for_style(document, &run.style) else {
+        return 0.0;
+    };
+    let name = font.name.trim().to_ascii_lowercase();
+    if matches!(name.as_str(), "arial" | "liberation sans") {
+        -(run.style.font_size_points() * WORD_ARIAL_BASELINE_INSET_EM)
+    } else {
+        0.0
     }
 }
 
@@ -28050,6 +28075,36 @@ mod tests {
             field_label.baseline_y
         );
         assert!((field_label.baseline_y - after.baseline_y - 13.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn arial_lines_use_word_source_baselines_without_changing_pitch() {
+        let provider = FontProvider::browser_safe_defaults();
+        let first_fragment = |rtf: &str, needle: &str| {
+            let parsed = parse_rtf(rtf).unwrap();
+            let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+            let fragment = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.contains(needle) => Some(fragment),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing text fragment containing {needle:?}"));
+            (layout.pages[0].height, fragment.baseline_y)
+        };
+
+        let (twelve_point_page_height, twelve_point_baseline) = first_fragment(
+            include_str!("../fixtures/nonvisible-storage-fields-passive.rtf"),
+            "Visible",
+        );
+        let (twenty_four_point_page_height, twenty_four_point_baseline) = first_fragment(
+            include_str!("../fixtures/paragraph-keep-pagination-passive.rtf"),
+            "Filler",
+        );
+
+        assert!((twelve_point_page_height - twelve_point_baseline - 47.30).abs() < 0.03);
+        assert!((twenty_four_point_page_height - twenty_four_point_baseline - 40.60).abs() < 0.03);
     }
 
     #[test]
