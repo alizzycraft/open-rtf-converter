@@ -1015,8 +1015,8 @@ pub struct ParagraphStyle {
     pub hyphenation_zone_twips: i32,
     pub drop_cap_lines: i32,
     /// Bounded signed paragraph-frame width retained for complete Word
-    /// paragraph frames. A negative width selects Word's in-flow drop-cap
-    /// frame recovery.
+    /// paragraph frames. A negative width selects Word's bounded first-character
+    /// in-flow frame recovery.
     pub frame_width_twips: Option<i32>,
     /// Bounded signed paragraph-frame height retained for complete Word
     /// drop-cap frames. Layout uses its magnitude while preserving the sign

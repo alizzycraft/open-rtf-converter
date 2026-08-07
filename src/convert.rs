@@ -166,7 +166,8 @@ fn count_layout_item(item: &LayoutItem) -> usize {
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
-            LayoutItem::Opacity { item: nested, .. } => {
+            LayoutItem::Opacity { item: nested, .. }
+            | LayoutItem::ClipRect { item: nested, .. } => {
                 item = nested;
             }
             LayoutItem::Text(_)
@@ -404,7 +405,8 @@ where
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
-            LayoutItem::Opacity { item: nested, .. } => {
+            LayoutItem::Opacity { item: nested, .. }
+            | LayoutItem::ClipRect { item: nested, .. } => {
                 item = nested;
             }
             LayoutItem::Highlight { .. }
@@ -434,7 +436,8 @@ where
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
-            LayoutItem::Opacity { item: nested, .. } => {
+            LayoutItem::Opacity { item: nested, .. }
+            | LayoutItem::ClipRect { item: nested, .. } => {
                 item = nested;
             }
             LayoutItem::Text(_)

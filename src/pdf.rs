@@ -1198,6 +1198,29 @@ fn draw_layout_item(
                 content.restore_state();
                 return;
             }
+            LayoutItem::ClipRect {
+                x,
+                y,
+                width,
+                height,
+                item: nested,
+            } => {
+                content.save_state();
+                content.rect(*x, *y, *width, *height);
+                content.clip_nonzero();
+                content.end_path();
+                draw_layout_item(
+                    content,
+                    nested,
+                    layout,
+                    font_provider,
+                    supplied_fonts,
+                    page_images,
+                    image_ref_cursor,
+                );
+                content.restore_state();
+                return;
+            }
         }
     }
 }
@@ -1454,7 +1477,8 @@ where
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
-            LayoutItem::Opacity { item: nested, .. } => {
+            LayoutItem::Opacity { item: nested, .. }
+            | LayoutItem::ClipRect { item: nested, .. } => {
                 item = nested;
             }
             LayoutItem::Highlight { .. }
@@ -1493,7 +1517,8 @@ where
             LayoutItem::Drawing(fragment) => {
                 item = &fragment.item;
             }
-            LayoutItem::Opacity { item: nested, .. } => {
+            LayoutItem::Opacity { item: nested, .. }
+            | LayoutItem::ClipRect { item: nested, .. } => {
                 item = nested;
             }
             LayoutItem::Text(_)
@@ -1531,6 +1556,7 @@ fn collect_layout_item_opacity_pairs(item: &LayoutItem, pairs: &mut Vec<(u8, u8)
             collect_layout_item_opacity_pairs(item, pairs);
         }
         LayoutItem::Drawing(fragment) => collect_layout_item_opacity_pairs(&fragment.item, pairs),
+        LayoutItem::ClipRect { item, .. } => collect_layout_item_opacity_pairs(item, pairs),
         LayoutItem::Text(_)
         | LayoutItem::Highlight { .. }
         | LayoutItem::Underline { .. }

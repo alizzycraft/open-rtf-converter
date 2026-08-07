@@ -5151,6 +5151,55 @@
       ]
     },
     {
+      "id": "paragraph-frame-height-flow-passive-layout",
+      "input": "fixtures/paragraph-frame-height-flow-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/paragraph-frame-height-flow-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 6,
+      "must_preserve_text": [
+        "Before positive short frame",
+        "After positive short frame",
+        "Before negative short frame",
+        "After negative short frame",
+        "Explicit paragraph frame alpha beta gamma",
+        "Default anchor frame alpha beta gamma",
+        "Width only default frame alpha beta gamma",
+        "Before negative width ordinary frame",
+        "After negative width ordinary frame"
+      ],
+      "intentional_security_differences": [
+        "Signed frame dimensions and paragraph-relative placement are normalized into bounded passive geometry; raw frame controls never cross into PDF output.",
+        "Exact-height clipping remains passive PDF graphics state and does not create annotations, actions, forms, or embedded payloads."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame vertical anchor \\pvpara interpreted as bounded passive origin"
+      ],
+      "forbidden_pdf_markers": [
+        "absw",
+        "absh",
+        "phpg",
+        "phcol",
+        "pvpg",
+        "pvpara",
+        "posx",
+        "posy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused six-page Word 16.0 probe proves that positive ordinary-frame heights bound surrounding-text exclusion but do not clip overflowing frame text, while negative heights establish an exact passive clip rectangle. Explicit pvpara and the default paragraph anchor float the frame at the current paragraph position without consuming body flow; a width-only frame derives its height from all wrapped lines. Negative absw reduces an ordinary framed paragraph to its first character and advances following body flow by the authored height. Current and Word retain identical visible word order, line grouping, frame/body origins, and clipped-glyph silhouette across all six pages. X origins differ by at most 0.05 points, endpoints by at most 3.44 points under bundled Arial-compatible metrics, and y boxes retain the established 0.73-0.95-point residual. Current preserves the complete source string as searchable text behind the exact passive clip, whereas Word splits extraction at clipped glyph contours; this does not affect visible output or expose raw RTF metadata. Both PDFs contain no drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

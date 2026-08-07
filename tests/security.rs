@@ -75750,6 +75750,67 @@ fn ordinary_paragraph_frames_remain_passive_grouped_geometry() {
 }
 
 #[test]
+fn ordinary_frame_exact_height_and_in_flow_recovery_remain_passive() {
+    let input = include_bytes!("../fixtures/paragraph-frame-height-flow-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    assert!(parsed.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("paragraph frame dimensions interpreted through bounded passive flow layout")
+    }));
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("paragraph-frame-height-flow-passive.rtf");
+    let output_path = dir.path().join("paragraph-frame-height-flow-passive.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 6);
+    let page_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<Vec<_>>();
+    for visible in [
+        "Before positive short frame",
+        "After positive short frame",
+        "Before negative short frame",
+        "After negative short frame",
+        "Explicit paragraph frame",
+        "Default anchor frame",
+        "Width only default frame",
+        "Before negative width ordinary frame",
+        "After negative width ordinary frame",
+    ] {
+        assert!(page_text.iter().any(|text| text.contains(visible)));
+    }
+    assert!(page_text[5].contains('N'));
+    assert!(!page_text[5].contains("Negative width ordinary alpha"));
+    for forbidden in [
+        "absw", "absh", "phpg", "phcol", "pvpg", "pvpara", "posx", "posy",
+    ] {
+        assert!(!page_text.iter().any(|text| text.contains(forbidden)));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

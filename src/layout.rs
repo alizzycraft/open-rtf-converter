@@ -140,6 +140,13 @@ pub enum LayoutItem {
         stroke_percent: u8,
         item: Box<LayoutItem>,
     },
+    ClipRect {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        item: Box<LayoutItem>,
+    },
     Ellipse {
         x: f32,
         y: f32,
@@ -4151,11 +4158,27 @@ fn layout_item_vertical_bounds(item: &LayoutItem) -> Option<VerticalBounds> {
                 match current {
                     LayoutItem::Drawing(nested) => current = nested.item.as_ref(),
                     LayoutItem::Opacity { item, .. } => current = item.as_ref(),
+                    LayoutItem::ClipRect {
+                        y, height, item, ..
+                    } => {
+                        let bounds = layout_item_vertical_bounds(item)?;
+                        let top = bounds.top.min(*y + *height);
+                        let bottom = bounds.bottom.max(*y);
+                        return (top >= bottom).then_some(VerticalBounds { top, bottom });
+                    }
                     leaf => return layout_item_vertical_bounds(leaf),
                 }
             }
         }
         LayoutItem::Opacity { item, .. } => layout_item_vertical_bounds(item),
+        LayoutItem::ClipRect {
+            y, height, item, ..
+        } => {
+            let bounds = layout_item_vertical_bounds(item)?;
+            let top = bounds.top.min(*y + *height);
+            let bottom = bounds.bottom.max(*y);
+            (top >= bottom).then_some(VerticalBounds { top, bottom })
+        }
     }
 }
 
@@ -4193,6 +4216,11 @@ fn translate_layout_item_y(item: &mut LayoutItem, delta_y: f32) {
                 continue;
             }
             LayoutItem::Opacity { item, .. } => {
+                current = item.as_mut();
+                continue;
+            }
+            LayoutItem::ClipRect { y, item, .. } => {
+                *y += delta_y;
                 current = item.as_mut();
                 continue;
             }
@@ -8006,9 +8034,19 @@ fn layout_framed_paragraph_group(
     if paragraph.style.frame_width_twips.is_none() && paragraph.style.frame_height_twips.is_none() {
         return false;
     }
+    let negative_width_frame = paragraph
+        .style
+        .frame_width_twips
+        .is_some_and(|width| width < 0);
     let passive_frame_paragraphs = paragraphs
         .iter()
-        .map(|paragraph| passive_frame_content_paragraph(paragraph))
+        .map(|paragraph| {
+            if negative_width_frame && paragraph.style.drop_cap_lines <= 1 {
+                passive_negative_width_frame_paragraph(paragraph)
+            } else {
+                passive_frame_content_paragraph(paragraph)
+            }
+        })
         .collect::<Vec<_>>();
     let markers = current_marker_context(pages, document_stats);
     let natural_width = passive_frame_paragraphs
@@ -8058,10 +8096,6 @@ fn layout_framed_paragraph_group(
             1.0,
             (geometry.height - geometry.margin_top - geometry.margin_bottom).max(1.0),
         );
-    let negative_width_frame = paragraph
-        .style
-        .frame_width_twips
-        .is_some_and(|width| width < 0);
     if negative_width_frame && paragraph.style.frame_height_twips.is_none() {
         return true;
     }
@@ -8212,6 +8246,19 @@ fn layout_framed_paragraph_group(
         let frame_x_shift = frame_left - geometry.body_left(*current_column);
         for item in page.items.iter_mut().skip(frame_item_start) {
             shift_layout_item_x(item, frame_x_shift);
+            if paragraph
+                .style
+                .frame_height_twips
+                .is_some_and(|height| height < 0)
+            {
+                *item = LayoutItem::ClipRect {
+                    x: frame_left,
+                    y: frame_top_y - frame_height,
+                    width: frame_width,
+                    height: frame_height,
+                    item: Box::new(item.clone()),
+                };
+            }
         }
         if absolute_frame_preview.is_none() {
             page.flow_exclusions.push(frame_exclusion);
@@ -8242,6 +8289,23 @@ fn passive_frame_content_paragraph(paragraph: &Paragraph) -> Paragraph {
         passive.style.space_before_twips = 0;
         passive.style.space_after_twips = 0;
     }
+    passive
+}
+
+fn passive_negative_width_frame_paragraph(paragraph: &Paragraph) -> Paragraph {
+    let mut passive = passive_frame_content_paragraph(paragraph);
+    let first_visible = passive.runs.iter().find_map(|run| {
+        run.text
+            .chars()
+            .find(|ch| !ch.is_control() && !ch.is_whitespace())
+            .map(|ch| (ch, run.style.clone()))
+    });
+    passive.runs = first_visible.map_or_else(Vec::new, |(ch, style)| {
+        vec![Run {
+            text: ch.to_string(),
+            style,
+        }]
+    });
     passive
 }
 
@@ -8287,8 +8351,11 @@ fn absolute_paragraph_frame_group<'a>(
     if first.style.drop_cap_lines > 1 {
         return has_frame_dimensions.then_some(first).into_iter().collect();
     }
-    if !is_complete_absolute_paragraph_frame(first) {
+    if !has_frame_dimensions || first.style.two_in_one {
         return Vec::new();
+    }
+    if first.style.frame_width_twips.is_some_and(|width| width < 0) {
+        return vec![first];
     }
     if block_index.checked_sub(1).is_some_and(|previous_index| {
         matches!(
@@ -12212,10 +12279,12 @@ fn starts_new_text_line(item: &LayoutItem, geometry: LateMarkerGeometry) -> bool
             loop {
                 match current {
                     LayoutItem::Drawing(nested) => current = nested.item.as_ref(),
+                    LayoutItem::ClipRect { item, .. } => current = item.as_ref(),
                     leaf => return starts_new_text_line(leaf, geometry),
                 }
             }
         }
+        LayoutItem::ClipRect { item, .. } => starts_new_text_line(item, geometry),
         _ => false,
     }
 }
@@ -12234,6 +12303,11 @@ fn shift_layout_item_x(item: &mut LayoutItem, delta: f32) {
                 current = drawing.item.as_mut();
                 continue;
             }
+            LayoutItem::ClipRect { x, item, .. } => {
+                *x += delta;
+                current = item.as_mut();
+                continue;
+            }
             _ => {}
         }
         break;
@@ -12246,6 +12320,7 @@ fn layout_item_text_fragment(item: &LayoutItem) -> Option<&TextFragment> {
         match current {
             LayoutItem::Text(fragment) => return Some(fragment),
             LayoutItem::Drawing(drawing) => current = drawing.item.as_ref(),
+            LayoutItem::ClipRect { item, .. } => current = item.as_ref(),
             _ => return None,
         }
     }
@@ -12257,6 +12332,7 @@ fn layout_item_text_fragment_mut(item: &mut LayoutItem) -> Option<&mut TextFragm
         match current {
             LayoutItem::Text(fragment) => return Some(fragment),
             LayoutItem::Drawing(drawing) => current = drawing.item.as_mut(),
+            LayoutItem::ClipRect { item, .. } => current = item.as_mut(),
             _ => return None,
         }
     }
@@ -23728,10 +23804,7 @@ mod tests {
             layout.pages[page_index]
                 .items
                 .iter()
-                .filter_map(|item| match item {
-                    LayoutItem::Text(fragment) => Some(fragment),
-                    _ => None,
-                })
+                .filter_map(layout_item_text_fragment)
                 .collect::<Vec<_>>()
         };
         let exact = |page_index: usize, text: &str| {
@@ -23906,6 +23979,88 @@ mod tests {
         assert!((exclusions[0][0].height - 72.0).abs() < 0.01);
         assert!((exclusions[1][0].height - 90.0).abs() < 0.01);
         assert!((exclusions[2][0].height - 55.195).abs() < 0.01);
+    }
+
+    #[test]
+    fn ordinary_frame_height_sign_and_paragraph_anchor_match_word_flow() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/paragraph-frame-height-flow-passive.rtf"
+        ))
+        .expect("paragraph-frame height/flow fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 6);
+
+        let fragments = |page_index: usize| {
+            layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(layout_item_text_fragment)
+                .collect::<Vec<_>>()
+        };
+        let containing = |page_index: usize, text: &str| {
+            fragments(page_index)
+                .into_iter()
+                .find(|fragment| fragment.text.contains(text))
+                .unwrap_or_else(|| panic!("missing page {} text {text:?}", page_index + 1))
+        };
+
+        assert!(
+            fragments(0)
+                .iter()
+                .any(|fragment| fragment.text.contains("zeta."))
+        );
+        let clips = layout.pages[1]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::ClipRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    item,
+                } => Some((*x, *y, *width, *height, item.as_ref())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!clips.is_empty());
+        assert!(clips.iter().all(|(x, y, width, height, _)| {
+            (*x - 36.0).abs() < 0.01
+                && (*y - 414.0).abs() < 0.01
+                && (*width - 72.0).abs() < 0.01
+                && (*height - 18.0).abs() < 0.01
+        }));
+        assert!(clips.iter().any(|(_, _, _, _, item)| {
+            layout_item_text_fragment(item).is_some_and(|fragment| fragment.text == "Negative ")
+        }));
+
+        for page_index in 2..=4 {
+            assert!((containing(page_index, "After ").x - 108.0).abs() < 0.01);
+            assert_eq!(layout.pages[page_index].flow_exclusions.len(), 1);
+            assert_eq!(
+                layout.pages[page_index].flow_exclusions[0].wrap_side,
+                StaticImageWrapSide::Right
+            );
+        }
+        assert_eq!(
+            layout
+                .pages
+                .iter()
+                .map(|page| page.flow_exclusions.len())
+                .collect::<Vec<_>>(),
+            vec![1, 1, 1, 1, 1, 0]
+        );
+        assert_eq!(containing(5, "N").text, "N");
+        assert!(
+            fragments(5)
+                .iter()
+                .all(|fragment| !fragment.text.contains("Negative width ordinary alpha"))
+        );
+        assert!(
+            ((containing(5, "N").baseline_y - containing(5, "After ").baseline_y) - 36.0).abs()
+                < 0.01
+        );
     }
 
     #[test]

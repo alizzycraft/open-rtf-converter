@@ -58133,6 +58133,53 @@ After\par}"#;
     }
 
     #[test]
+    fn ordinary_paragraph_frame_height_and_width_signs_remain_bounded() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/paragraph-frame-height-flow-passive.rtf"
+        ))
+        .expect("paragraph-frame height/flow fixture should parse");
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph)
+                    if paragraph.style.frame_width_twips.is_some()
+                        || paragraph.style.frame_height_twips.is_some() =>
+                {
+                    Some(paragraph)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(frames.len(), 6);
+        assert_eq!(frames[0].style.frame_height_twips, Some(360));
+        assert_eq!(frames[1].style.frame_height_twips, Some(-360));
+        assert_eq!(
+            frames[2].style.frame_vertical_anchor,
+            StaticShapeVerticalAnchor::Paragraph
+        );
+        assert_eq!(
+            frames[3].style.frame_vertical_anchor,
+            StaticShapeVerticalAnchor::Paragraph
+        );
+        assert_eq!(frames[4].style.frame_height_twips, None);
+        assert_eq!(frames[5].style.frame_width_twips, Some(-1_440));
+        assert_eq!(frames[5].style.frame_height_twips, Some(720));
+        assert!(
+            frames
+                .iter()
+                .all(|paragraph| paragraph.style.drop_cap_lines == 0)
+        );
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("unsupported RTF control"))
+        );
+    }
+
+    #[test]
     fn word_compatible_mode_retains_bounded_horizontal_frame_text_distance() {
         let output = parse_rtf(include_str!(
             "../../fixtures/framed-drop-cap-wrap-distance-passive.rtf"
