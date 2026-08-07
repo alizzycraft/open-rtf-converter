@@ -24499,6 +24499,15 @@ mod tests {
                 "missing line {expected:?}"
             );
         }
+        let continuation = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "content" => Some(fragment),
+                _ => None,
+            })
+            .expect("late-declared second-cell continuation");
+        assert!((continuation.x - 95.4).abs() < 0.01);
         let visible = layout_text(&layout.pages[0]);
         assert!(visible.contains("Cell Alpha"));
         assert!(!visible.contains("After passive no wrap."));

@@ -4017,7 +4017,7 @@
     {
       "id": "no-wrap-passive-line-breaking",
       "input": "fixtures/no-wrap-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/no-wrap-passive.pdf",
       "word_reference_pages": [],
@@ -4052,7 +4052,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word treats parameterized nowwrap0 as the same parameterless no-wrap flag and reserves a bounded 144-twip emergency right inset. WordCompatiblePassive now reproduces both behaviors, so the two direct paragraphs have identical six-line character-boundary grouping and matching baselines within 0.11 points; StrictSpec retains boolean-reset semantics. The converter also matches Word's bounded terminal authored-height row recovery, physical-page clipping, and later-body suppression. The fixture's malformed late-declared second cell boundary retains a 5.33-point continuation-line x-origin residual; raw no-wrap and table metadata remain stripped."
+        "Word treats parameterized nowwrap0 as the same parameterless no-wrap flag and reserves a bounded 144-twip emergency right inset. WordCompatiblePassive reproduces both behaviors, so the two direct paragraphs have identical six-line character-boundary grouping and matching baselines within 0.11 points; StrictSpec retains boolean-reset semantics. Word's malformed late-declared second cell boundary applies a 108-twip continuation inset with an equal first-line hanging indent; current continuation x differs by 0.07 points. The converter also matches Word's bounded terminal authored-height row recovery, physical-page clipping, and later-body suppression. The final clipped line's extractor-only origin differs below the physical page edge but has no visible output. Raw no-wrap and table metadata remain stripped."
       ]
     },
     {

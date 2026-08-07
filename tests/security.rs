@@ -72358,6 +72358,25 @@ fn no_wrap_controls_render_passively_without_control_leakage() {
     assert!(paragraphs[3].style.no_wrap);
     assert_eq!(paragraphs[2].style.no_wrap_emergency_right_inset_twips, 144);
     assert_eq!(paragraphs[3].style.no_wrap_emergency_right_inset_twips, 144);
+    let table = parsed
+        .document
+        .blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("bounded no-wrap table");
+    assert_eq!(
+        table.rows[0].cells[1].paragraphs[0].style.left_indent_twips,
+        108
+    );
+    assert_eq!(
+        table.rows[0].cells[1].paragraphs[0]
+            .style
+            .first_line_indent_twips,
+        -108
+    );
     assert!(
         parsed
             .diagnostics

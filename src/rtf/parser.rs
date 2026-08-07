@@ -700,6 +700,7 @@ impl TableBuilder {
 struct TableRowBuilder {
     cells: Vec<TableCell>,
     cell_right_edges_twips: Vec<i32>,
+    cell_boundaries_after_content: Vec<bool>,
     has_authored_cell_boundaries: bool,
     cell_shading_color_indices: Vec<Option<usize>>,
     cell_shading_basis_points: Vec<i32>,
@@ -12917,6 +12918,7 @@ impl Parser {
         TableRowBuilder {
             cells: Vec::new(),
             cell_right_edges_twips: Vec::new(),
+            cell_boundaries_after_content: Vec::new(),
             has_authored_cell_boundaries: false,
             cell_shading_color_indices: Vec::new(),
             cell_shading_basis_points: Vec::new(),
@@ -14131,6 +14133,8 @@ impl Parser {
         let max_width_twips = self.limits().max_page_dimension_twips;
         if let Some(row) = self.current_table_row.as_mut() {
             row.has_authored_cell_boundaries = true;
+            row.cell_boundaries_after_content
+                .push(!row.cells.is_empty());
             let preferred_width_twips = normalized_preferred_table_width_twips(
                 row.current_cell_preferred_width,
                 page_content_width_twips,
@@ -15331,6 +15335,27 @@ impl Parser {
         if no_wrap {
             for paragraph in &mut paragraphs {
                 paragraph.style.no_wrap = true;
+            }
+        }
+        let late_declared_boundary = row
+            .cell_boundaries_after_content
+            .get(cell_index)
+            .copied()
+            .unwrap_or(false);
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+            && late_declared_boundary
+        {
+            for paragraph in &mut paragraphs {
+                paragraph.style.left_indent_twips = paragraph
+                    .style
+                    .left_indent_twips
+                    .saturating_add(108)
+                    .clamp(-1_000_000, 1_000_000);
+                paragraph.style.first_line_indent_twips = paragraph
+                    .style
+                    .first_line_indent_twips
+                    .saturating_sub(108)
+                    .clamp(-1_000_000, 1_000_000);
             }
         }
         let fit_text = row
@@ -58243,6 +58268,20 @@ After\par}"#;
                 .style
                 .no_wrap_emergency_right_inset_twips,
             0
+        );
+        assert_eq!(
+            table.rows[0].cells[0].paragraphs[0].style.left_indent_twips,
+            0
+        );
+        assert_eq!(
+            table.rows[0].cells[1].paragraphs[0].style.left_indent_twips,
+            108
+        );
+        assert_eq!(
+            table.rows[0].cells[1].paragraphs[0]
+                .style
+                .first_line_indent_twips,
+            -108
         );
         assert!(
             output
