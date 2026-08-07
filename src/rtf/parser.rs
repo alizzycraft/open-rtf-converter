@@ -5515,29 +5515,17 @@ impl Parser {
                     control.parameter.unwrap_or(0),
                     offset,
                 ),
-            "posx" => self.set_paragraph_frame_horizontal_offset(control.parameter, false, offset),
+            "posx" => self.set_paragraph_frame_horizontal_offset(control.parameter, offset),
             "tposnegx" => self.add_current_table_row_horizontal_position_offset(
-                control
-                    .parameter
-                    .unwrap_or(0)
-                    .checked_abs()
-                    .and_then(|value| value.checked_neg())
-                    .unwrap_or(i32::MIN),
+                control.parameter.unwrap_or(0),
                 offset,
             ),
             "posnegx" if self.current_table_row.is_some() => self
                 .add_current_table_row_horizontal_position_offset(
-                    control
-                        .parameter
-                        .unwrap_or(0)
-                        .checked_abs()
-                        .and_then(|value| value.checked_neg())
-                        .unwrap_or(i32::MIN),
+                    control.parameter.unwrap_or(0),
                     offset,
                 ),
-            "posnegx" => {
-                self.set_paragraph_frame_horizontal_offset(control.parameter, true, offset)
-            }
+            "posnegx" => self.set_paragraph_frame_horizontal_offset(control.parameter, offset),
             "tposxl" => self.set_current_table_row_floating_alignment(
                 TableRowAlignment::Left,
                 control.name.as_str(),
@@ -5675,27 +5663,17 @@ impl Parser {
                     control.parameter.unwrap_or(0),
                     offset,
                 ),
-            "posy" => self.set_paragraph_frame_vertical_offset(control.parameter, false, offset),
+            "posy" => self.set_paragraph_frame_vertical_offset(control.parameter, offset),
             "tposnegy" => self.add_current_table_row_vertical_position_offset(
-                control
-                    .parameter
-                    .unwrap_or(0)
-                    .checked_abs()
-                    .and_then(|value| value.checked_neg())
-                    .unwrap_or(i32::MIN),
+                control.parameter.unwrap_or(0),
                 offset,
             ),
             "posnegy" if self.current_table_row.is_some() => self
                 .add_current_table_row_vertical_position_offset(
-                    control
-                        .parameter
-                        .unwrap_or(0)
-                        .checked_abs()
-                        .and_then(|value| value.checked_neg())
-                        .unwrap_or(i32::MIN),
+                    control.parameter.unwrap_or(0),
                     offset,
                 ),
-            "posnegy" => self.set_paragraph_frame_vertical_offset(control.parameter, true, offset),
+            "posnegy" => self.set_paragraph_frame_vertical_offset(control.parameter, offset),
             "tpvpara" => self.set_current_table_row_vertical_anchor(
                 TableRowVerticalAnchor::Paragraph,
                 control.name.as_str(),
@@ -8011,14 +7989,8 @@ impl Parser {
         ));
     }
 
-    fn set_paragraph_frame_horizontal_offset(
-        &mut self,
-        value: Option<i32>,
-        force_negative: bool,
-        offset: usize,
-    ) {
-        let value = i64::from(value.unwrap_or(0));
-        let requested = if force_negative { -value.abs() } else { value };
+    fn set_paragraph_frame_horizontal_offset(&mut self, value: Option<i32>, offset: usize) {
+        let requested = i64::from(value.unwrap_or(0));
         let limit = i64::from(self.limits().max_shape_offset_twips.max(0));
         let clamped = requested.clamp(-limit, limit) as i32;
         if i64::from(clamped) != requested {
@@ -8067,14 +8039,8 @@ impl Parser {
         ));
     }
 
-    fn set_paragraph_frame_vertical_offset(
-        &mut self,
-        value: Option<i32>,
-        force_negative: bool,
-        offset: usize,
-    ) {
-        let value = i64::from(value.unwrap_or(0));
-        let requested = if force_negative { -value.abs() } else { value };
+    fn set_paragraph_frame_vertical_offset(&mut self, value: Option<i32>, offset: usize) {
+        let requested = i64::from(value.unwrap_or(0));
         let limit = i64::from(self.limits().max_shape_offset_twips.max(0));
         let clamped = requested.clamp(-limit, limit) as i32;
         if i64::from(clamped) != requested {
@@ -48417,15 +48383,18 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_negative_floating_table_horizontal_position() {
-        let output =
-            parse_rtf(r"{\rtf1\trowd\trleft360\tposnegx720\cellx2000 Offset\cell\row}").unwrap();
+    fn normalizes_signed_floating_table_horizontal_position() {
+        let output = parse_rtf(
+            r"{\rtf1\trowd\trleft360\tposnegx720\cellx2000 Positive\cell\row\trowd\trleft360\tposnegx-720\cellx2000 Negative\cell\row}",
+        )
+        .unwrap();
         let table = match &output.document.blocks[0] {
             Block::Table(table) => table,
             _ => panic!("expected table block"),
         };
 
-        assert_eq!(table.rows[0].left_offset_twips, -360);
+        assert_eq!(table.rows[0].left_offset_twips, 1080);
+        assert_eq!(table.rows[1].left_offset_twips, -360);
     }
 
     #[test]
@@ -48479,9 +48448,9 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_floating_table_vertical_position_as_bounded_row_offset() {
+    fn normalizes_signed_floating_table_vertical_position_as_bounded_row_offset() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\tposy360\cellx2000 Down\cell\row\trowd\tposnegy240\cellx2000 Up\cell\row}",
+            r"{\rtf1\trowd\tposy360\cellx2000 Down\cell\row\trowd\tposnegy240\cellx2000 Signed down\cell\row\trowd\tposnegy-240\cellx2000 Signed up\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {
@@ -48490,7 +48459,8 @@ mod tests {
         };
 
         assert_eq!(table.rows[0].vertical_offset_twips, 360);
-        assert_eq!(table.rows[1].vertical_offset_twips, -240);
+        assert_eq!(table.rows[1].vertical_offset_twips, 240);
+        assert_eq!(table.rows[2].vertical_offset_twips, -240);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains(
                 "floating table vertical position interpreted as bounded passive row offset",
@@ -58203,6 +58173,36 @@ After\par}"#;
     }
 
     #[test]
+    fn word_compatible_mode_retains_signed_drop_cap_frame_offsets() {
+        let output = parse_rtf(include_str!(
+            "../../fixtures/framed-drop-cap-negative-positioning-passive.rtf"
+        ))
+        .unwrap();
+        let frames = output
+            .document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1 => {
+                    Some(paragraph)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(frames.len(), 8);
+        assert_eq!(frames[0].style.frame_horizontal_offset_twips, 360);
+        assert_eq!(frames[1].style.frame_horizontal_offset_twips, 360);
+        assert_eq!(frames[2].style.frame_horizontal_offset_twips, 720);
+        assert_eq!(frames[3].style.frame_vertical_offset_twips, 360);
+        assert_eq!(frames[4].style.frame_vertical_offset_twips, 720);
+        assert_eq!(frames[5].style.frame_horizontal_offset_twips, 360);
+        assert_eq!(frames[5].style.frame_vertical_offset_twips, 360);
+        assert_eq!(frames[6].style.frame_horizontal_offset_twips, -360);
+        assert_eq!(frames[7].style.frame_vertical_offset_twips, -360);
+    }
+
+    #[test]
     fn paragraph_frame_position_offsets_clamp_malformed_values() {
         let options = RtfParseOptions {
             limits: RtfLimits {
@@ -58212,7 +58212,7 @@ After\par}"#;
             ..RtfParseOptions::default()
         };
         let output = parse_rtf_bytes_with_options(
-            br"{\rtf1\posx9999\absw720\dropcapli3\dropcapt1 X\par\pard\posnegy9999\absw720\dropcapli3\dropcapt1 Y\par}",
+            br"{\rtf1\posx9999\absw720\dropcapli3\dropcapt1 X\par\pard\posnegy9999\absw720\dropcapli3\dropcapt1 Y\par\pard\posnegy-9999\absw720\dropcapli3\dropcapt1 Z\par}",
             &options,
         )
         .unwrap();
@@ -58227,7 +58227,8 @@ After\par}"#;
             .collect::<Vec<_>>();
 
         assert_eq!(paragraphs[0].style.frame_horizontal_offset_twips, 480);
-        assert_eq!(paragraphs[1].style.frame_vertical_offset_twips, -480);
+        assert_eq!(paragraphs[1].style.frame_vertical_offset_twips, 480);
+        assert_eq!(paragraphs[2].style.frame_vertical_offset_twips, -480);
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message

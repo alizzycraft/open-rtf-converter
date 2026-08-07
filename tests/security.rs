@@ -75430,6 +75430,81 @@ fn facing_absolute_frame_alignment_remains_passive_page_geometry() {
 }
 
 #[test]
+fn signed_absolute_frame_offsets_remain_bounded_passive_geometry() {
+    let input = include_bytes!("../fixtures/framed-drop-cap-negative-positioning-passive.rtf");
+    let parsed = parse_rtf_bytes(input).unwrap();
+    let frames = parsed
+        .document
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(paragraph) if paragraph.style.drop_cap_lines > 1 => Some(paragraph),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 8);
+    assert_eq!(frames[0].style.frame_horizontal_offset_twips, 360);
+    assert_eq!(frames[5].style.frame_vertical_offset_twips, 360);
+    assert_eq!(frames[6].style.frame_horizontal_offset_twips, -360);
+    assert_eq!(frames[7].style.frame_vertical_offset_twips, -360);
+
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("framed-drop-cap-signed-positioning.rtf");
+    let output_path = dir.path().join("framed-drop-cap-signed-positioning.pdf");
+    fs::write(&input_path, input).unwrap();
+    convert_rtf_file_to_pdf(&input_path, &output_path, &ConvertOptions::default()).unwrap();
+    let pdf = fs::read(&output_path).unwrap();
+    let parsed_pdf = PdfDocument::load_mem(&pdf).unwrap();
+    assert_eq!(parsed_pdf.get_pages().len(), 4);
+    let rendered_text = parsed_pdf
+        .get_pages()
+        .values()
+        .map(|page_id| {
+            let content = parsed_pdf.get_and_decode_page_content(*page_id).unwrap();
+            decoded_pdf_text(&content)
+        })
+        .collect::<String>();
+    for visible in [
+        "Signed positive x",
+        "Last signed x",
+        "Last positive x",
+        "Signed positive y",
+        "Page signed positive",
+        "Signed negative x",
+        "Signed negative y",
+    ] {
+        assert!(rendered_text.contains(visible), "missing {visible:?}");
+    }
+    for forbidden in [
+        "dropcapli",
+        "dropcapt",
+        "phmrg",
+        "phpg",
+        "pvmrg",
+        "pvpg",
+        "posx",
+        "posy",
+        "posnegx",
+        "posnegy",
+    ] {
+        assert!(!rendered_text.contains(forbidden));
+    }
+    for forbidden in [
+        b"/JavaScript".as_slice(),
+        b"/EmbeddedFile",
+        b"/Launch",
+        b"/OpenAction",
+        b"/AcroForm",
+        b"/Annots",
+    ] {
+        assert!(
+            !pdf.windows(forbidden.len())
+                .any(|window| window == forbidden)
+        );
+    }
+}
+
+#[test]
 fn page_border_reference_mode_renders_passively_without_control_leakage() {
     let input = rtf(&[
         "{",

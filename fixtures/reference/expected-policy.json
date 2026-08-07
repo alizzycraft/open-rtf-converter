@@ -4916,6 +4916,59 @@
       ]
     },
     {
+      "id": "framed-drop-cap-signed-positioning-passive-layout",
+      "input": "fixtures/framed-drop-cap-negative-positioning-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/framed-drop-cap-negative-positioning-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 4,
+      "must_preserve_text": [
+        "Signed positive x alpha beta gamma",
+        "Last signed x alpha beta",
+        "Last positive x alpha beta",
+        "Signed positive y alpha beta",
+        "Page signed positive alpha beta",
+        "Signed negative x alpha beta",
+        "Signed negative y alpha beta"
+      ],
+      "intentional_security_differences": [
+        "Signed paragraph-frame coordinates become page-bounded passive placement and flow-exclusion geometry; raw frame controls never cross into PDF output."
+      ],
+      "expected_diagnostics": [
+        "paragraph frame dimensions interpreted through bounded passive flow layout",
+        "paragraph frame horizontal anchor \\phmrg interpreted as bounded passive origin",
+        "paragraph frame horizontal position interpreted as bounded passive placement",
+        "paragraph frame vertical anchor \\pvmrg interpreted as bounded passive origin",
+        "paragraph frame vertical position interpreted as bounded passive placement"
+      ],
+      "forbidden_pdf_markers": [
+        "dropcapli",
+        "dropcapt",
+        "absw",
+        "absh",
+        "phmrg",
+        "phpg",
+        "pvmrg",
+        "pvpg",
+        "posx",
+        "posy",
+        "posnegx",
+        "posnegy",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/RichMedia",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves that posnegx/posnegy preserve their signed parameter rather than forcing it negative: positive 360-twip page offsets place F at (18,18), while negative 360-twip margin offsets place G at x=18 and H at y=18. Later posx/posy controls retain last-control precedence. Absolute-frame text is isolated from its own preview exclusion, and segmented wrapping now records left-interval selection even when that interval begins at the body origin. A bounded one-point bottom inset reproduces Word's visible glyph-box intersection at frame edges. Current and Word retain identical body word order and line grouping on all four pages; body x origins/endpoints differ by at most 0.14/0.13 points, frame x origins by at most 0.05 points, and y boxes retain a 0.73-0.98-point bundled Arial-compatible residual. Both PDFs are passive text only without drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "text-effects-passive-state",
       "input": "fixtures/text-effects-passive.rtf",
       "category": "acceptable_approximation",

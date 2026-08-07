@@ -69,7 +69,7 @@ struct FlowExclusion {
     width: f32,
     height: f32,
     wrap_side: StaticImageWrapSide,
-    wrap_bottom_at_line_center: bool,
+    wrap_bottom_inset: f32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -781,6 +781,7 @@ struct Line {
     width: f32,
     natural_height: f32,
     height: f32,
+    segmented_flow: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -3151,7 +3152,7 @@ fn layout_shape(
                 width: (width + left_gap + right_gap).max(1.0),
                 height: (height + top_gap + bottom_gap).max(1.0),
                 wrap_side: shape.wrap_side,
-                wrap_bottom_at_line_center: false,
+                wrap_bottom_inset: 0.0,
             });
         }
         wrap_static_shape_items(
@@ -5695,7 +5696,7 @@ fn push_table_row_flow_exclusion(
         width,
         height,
         wrap_side: StaticImageWrapSide::Both,
-        wrap_bottom_at_line_center: false,
+        wrap_bottom_inset: 0.0,
     });
 }
 
@@ -8051,6 +8052,31 @@ fn layout_framed_drop_cap_paragraph(
         *geometry,
         *current_column,
     );
+    let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
+    let frame_exclusion = FlowExclusion {
+        x: frame_left,
+        y: frame_top_y - frame_height,
+        width: (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0)),
+        height: frame_height,
+        wrap_side: StaticImageWrapSide::Both,
+        wrap_bottom_inset: if paragraph.style.frame_vertical_anchor
+            == StaticShapeVerticalAnchor::Paragraph
+        {
+            0.0
+        } else {
+            1.0
+        },
+    };
+    let removed_preview_exclusion = if reuse_absolute_frame_preview {
+        pages.last_mut().and_then(|page| {
+            page.flow_exclusions
+                .iter()
+                .position(|exclusion| same_flow_exclusion(*exclusion, frame_exclusion))
+                .map(|index| (index, page.flow_exclusions.remove(index)))
+        })
+    } else {
+        None
+    };
     let frame_item_start = pages.last().map(|page| page.items.len()).unwrap_or(0);
     let mut frame_cursor_y = frame_top_y;
     let mut frame_geometry = *geometry;
@@ -8077,18 +8103,11 @@ fn layout_framed_drop_cap_paragraph(
         for item in page.items.iter_mut().skip(frame_item_start) {
             shift_layout_item_x(item, frame_x_shift);
         }
-        let frame_text_distance = twips_to_points(paragraph.style.frame_text_distance_twips.max(0));
-        if !reuse_absolute_frame_preview {
-            page.flow_exclusions.push(FlowExclusion {
-                x: frame_left,
-                y: frame_top_y - frame_height,
-                width: (frame_width + frame_text_distance)
-                    .min((geometry.width - frame_left).max(1.0)),
-                height: frame_height,
-                wrap_side: StaticImageWrapSide::Both,
-                wrap_bottom_at_line_center: paragraph.style.frame_vertical_anchor
-                    != StaticShapeVerticalAnchor::Paragraph,
-            });
+        if let Some((index, exclusion)) = removed_preview_exclusion {
+            page.flow_exclusions
+                .insert(index.min(page.flow_exclusions.len()), exclusion);
+        } else if !reuse_absolute_frame_preview {
+            page.flow_exclusions.push(frame_exclusion);
         }
     }
     true
@@ -8118,7 +8137,7 @@ fn same_flow_exclusion(first: FlowExclusion, second: FlowExclusion) -> bool {
         && (first.width - second.width).abs() < 0.01
         && (first.height - second.height).abs() < 0.01
         && first.wrap_side == second.wrap_side
-        && first.wrap_bottom_at_line_center == second.wrap_bottom_at_line_center
+        && (first.wrap_bottom_inset - second.wrap_bottom_inset).abs() < 0.01
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8282,7 +8301,7 @@ fn resolve_absolute_frame_exclusion(
         width: (frame_width + frame_text_distance).min((geometry.width - frame_left).max(1.0)),
         height: frame_height,
         wrap_side: StaticImageWrapSide::Both,
-        wrap_bottom_at_line_center: true,
+        wrap_bottom_inset: 1.0,
     })
 }
 
@@ -8597,10 +8616,7 @@ fn layout_paragraph_with_auto_footnotes(
         }
         *cursor_y -= top_border_reserve;
 
-        let uses_segmented_flow = line
-            .runs
-            .iter()
-            .any(|run| run.text.is_empty() && run.width > 0.01);
+        let uses_segmented_flow = line.segmented_flow;
         let (line_margin_left, line_content_width) = if uses_segmented_flow {
             (margin_left, content_width)
         } else {
@@ -8907,12 +8923,7 @@ fn wrapped_image_text_intervals_for_line(
     for exclusion in &page.flow_exclusions {
         let excluded_left = exclusion.x.max(margin_left);
         let excluded_right = (exclusion.x + exclusion.width).min(content_right);
-        let excluded_bottom = exclusion.y
-            + if exclusion.wrap_bottom_at_line_center {
-                line_height.max(0.0) / 2.0
-            } else {
-                0.0
-            };
+        let excluded_bottom = exclusion.y + exclusion.wrap_bottom_inset.max(0.0);
         let excluded_top = exclusion.y + exclusion.height;
         free_intervals = subtract_flow_exclusion_from_intervals(
             free_intervals,
@@ -9004,12 +9015,7 @@ fn apply_flow_exclusions_to_text_intervals(
         let exclusion = &planned.exclusion;
         let excluded_left = exclusion.x.max(margin_left);
         let excluded_right = (exclusion.x + exclusion.width).min(content_right);
-        let excluded_bottom = exclusion.y
-            + if exclusion.wrap_bottom_at_line_center {
-                line_height.max(0.0) / 2.0
-            } else {
-                0.0
-            };
+        let excluded_bottom = exclusion.y + exclusion.wrap_bottom_inset.max(0.0);
         let excluded_top = exclusion.y + exclusion.height;
         free_intervals = subtract_flow_exclusion_from_intervals(
             free_intervals,
@@ -9263,6 +9269,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
         width: 0.0,
         natural_height: 14.0,
         height: 14.0,
+        segmented_flow: false,
     };
     let mut is_first_line = true;
     let mut current_line_top_y = first_line_top_y;
@@ -9364,6 +9371,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                 && paragraph.style.first_line_indent_twips == 0
                 && paragraph.style.tab_stops_twips.is_empty()
                 && intervals.len() > 1;
+            current.segmented_flow |= supports_segmented_flow;
             let (line_width, ignore_trailing_space_for_fit) = if supports_segmented_flow {
                 let current_interval = intervals
                     .iter()
@@ -9564,6 +9572,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                     && paragraph.style.tab_stops_twips.is_empty()
                     && next_intervals.len() > 1;
                 if next_supports_segmented_flow {
+                    current.segmented_flow = true;
                     let mut next_width = measure_flow_run(
                         &next_segment,
                         0.0,
@@ -12458,6 +12467,7 @@ fn empty_line() -> Line {
         width: 0.0,
         natural_height: 14.0,
         height: 14.0,
+        segmented_flow: false,
     }
 }
 
@@ -22392,6 +22402,7 @@ mod tests {
                 width: 0.0,
                 natural_height: height,
                 height,
+                segmented_flow: false,
             },
             style,
             paragraph_index,
@@ -22450,6 +22461,7 @@ mod tests {
                 width: 0.0,
                 natural_height: 10.0,
                 height: 10.0,
+                segmented_flow: false,
             },
             style,
             paragraph_index,
@@ -23641,7 +23653,7 @@ mod tests {
 
         for page in &layout.pages {
             assert_eq!(page.flow_exclusions.len(), 1);
-            assert!(page.flow_exclusions[0].wrap_bottom_at_line_center);
+            assert!((page.flow_exclusions[0].wrap_bottom_inset - 1.0).abs() < 0.01);
         }
     }
 
@@ -23714,6 +23726,72 @@ mod tests {
         assert!((odd_caps[1].x - 216.0).abs() < 0.01);
         assert!((even_caps[0].x - 216.0).abs() < 0.01);
         assert!((even_caps[1].x - 36.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn signed_drop_cap_frame_offsets_preserve_word_coordinates() {
+        let parsed = crate::rtf::parse_rtf(include_str!(
+            "../fixtures/framed-drop-cap-negative-positioning-passive.rtf"
+        ))
+        .expect("signed frame-position fixture should parse");
+        let provider = FontProvider::browser_safe_defaults();
+        let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+        assert_eq!(layout.pages.len(), 4);
+        for (page_index, expected) in [
+            vec![("A", 54.0), ("B", 54.0), ("C", 72.0)],
+            vec![("D", 36.0), ("E", 108.0)],
+            vec![("F", 18.0)],
+            vec![("G", 18.0), ("H", 108.0)],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let fragments = layout.pages[page_index]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(fragment) => Some(fragment),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            for (text, expected_x) in expected {
+                let fragment = fragments
+                    .iter()
+                    .find(|fragment| fragment.text == text)
+                    .unwrap_or_else(|| panic!("missing frame text {text:?}"));
+                assert!((fragment.x - expected_x).abs() < 0.01);
+            }
+        }
+        let page_three_fragments = layout.pages[2]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) => Some(fragment),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let page_body = page_three_fragments
+            .iter()
+            .find(|fragment| fragment.text == "Page ")
+            .expect("page-anchored frame body");
+        assert!((page_body.x - 54.0).abs() < 0.01);
+        let page_two_theta = layout.pages[1]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(fragment) if fragment.text == "theta." => Some(fragment),
+                _ => None,
+            })
+            .next()
+            .expect("first page-two theta fragment");
+        assert!((page_two_theta.x - 36.0).abs() < 0.01);
+        assert!(
+            layout
+                .pages
+                .iter()
+                .flat_map(|page| &page.flow_exclusions)
+                .all(|exclusion| (exclusion.wrap_bottom_inset - 1.0).abs() < 0.01)
+        );
     }
 
     #[test]
