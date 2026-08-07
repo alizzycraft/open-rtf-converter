@@ -8136,6 +8136,13 @@ impl Parser {
     }
 
     fn clamp_character_scaling(&mut self, value: i32, offset: usize) -> i32 {
+        let value = if value == 0
+            && self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive
+        {
+            100
+        } else {
+            value
+        };
         let min = self.limits().min_character_scaling_percent.max(1);
         let max = self.limits().max_character_scaling_percent.max(min);
         let clamped = value.clamp(min, max);
@@ -56417,7 +56424,7 @@ After\par}"#;
             ..RtfParseOptions::default()
         };
         let output = parse_rtf_bytes_with_options(
-            br"{\rtf1\charscalex150 wide \charscalex5 narrow \charscalex999 clamped\par}",
+            br"{\rtf1\charscalex150 wide \charscalex5 narrow \charscalex999 clamped \charscalex0 reset\par}",
             &options,
         )
         .unwrap();
@@ -56437,11 +56444,36 @@ After\par}"#;
         assert_eq!(style_for("wide").character_scaling_percent, 150);
         assert_eq!(style_for("narrow").character_scaling_percent, 50);
         assert_eq!(style_for("clamped").character_scaling_percent, 180);
+        assert_eq!(style_for("reset").character_scaling_percent, 100);
         assert!(
             output
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("character scaling clamped"))
+        );
+    }
+
+    #[test]
+    fn strict_spec_clamps_zero_character_scaling_instead_of_word_resetting_it() {
+        let output = parse_rtf_bytes_with_options(
+            br"{\rtf1\charscalex0 bounded\par}",
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        let paragraph = match &output.document.blocks[0] {
+            Block::Paragraph(paragraph) => paragraph,
+            _ => panic!("expected paragraph"),
+        };
+
+        assert_eq!(paragraph.runs[0].style.character_scaling_percent, 25);
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("clamped from 0% to 25%"))
         );
     }
 

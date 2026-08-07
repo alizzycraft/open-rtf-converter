@@ -9003,7 +9003,7 @@ fn character_spacing_boundary_after_run(paragraph: &Paragraph, run_index: usize)
     if !first.is_some_and(is_character_spacing_boundary_char) {
         return 0.0;
     }
-    twips_to_points(run.style.character_spacing_twips) * run.style.horizontal_scale()
+    twips_to_points(run.style.character_spacing_twips)
 }
 
 fn is_character_spacing_boundary_char(ch: char) -> bool {
@@ -13993,8 +13993,8 @@ fn measure_text_with_family(text: &str, style: &CharacterStyle, family: PdfFontF
         .chars()
         .map(|ch| base14_char_width_points(ch, size, family, style))
         .sum::<f32>();
-    (base_width + character_spacing_width(text, style) + passive_kerning_width(text, style, family))
-        * style.horizontal_scale()
+    (base_width + passive_kerning_width(text, style, family)) * style.horizontal_scale()
+        + character_spacing_width(text, style)
 }
 
 fn measure_text_with_document_font(
@@ -14024,7 +14024,7 @@ fn measure_text_with_document_font(
     }
     let kerning_width =
         passive_kerning_width_with_document_font(text, style, family, source_font, font_provider);
-    (width + character_spacing_width(text, style) + kerning_width) * style.horizontal_scale()
+    (width + kerning_width) * style.horizontal_scale() + character_spacing_width(text, style)
 }
 
 pub(crate) fn source_dingbat_advance_points(
@@ -22872,6 +22872,17 @@ mod tests {
             .expect("scaled text");
 
         assert_eq!(fragment.style.character_scaling_percent, 150);
+    }
+
+    #[test]
+    fn character_scaling_does_not_scale_explicit_tracking() {
+        let mut scaled_and_spaced = CharacterStyle::default();
+        scaled_and_spaced.character_scaling_percent = 50;
+        scaled_and_spaced.character_spacing_twips = 20;
+        let plain_width = measure_text("ABC", &CharacterStyle::default());
+        let combined_width = measure_text("ABC", &scaled_and_spaced);
+
+        assert!((combined_width - (plain_width * 0.5) - 2.0).abs() < 0.01);
     }
 
     #[test]

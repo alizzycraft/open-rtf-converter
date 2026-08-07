@@ -3313,6 +3313,50 @@
       ]
     },
     {
+      "id": "character-scaling-spacing-passive-layout",
+      "input": "fixtures/character-scaling-spacing-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/character-scaling-spacing-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Plain: ABCD",
+        "Scale 50: ABCD",
+        "Scale 150: ABCD",
+        "Scale 200: ABCD",
+        "Scale zero: ABCD",
+        "Scale default: ABCD",
+        "Scale reset: ABCDEFGH",
+        "Scale 50 spacing: ABCD",
+        "Scale 150 spacing: ABCD",
+        "Spacing then scale: ABCD",
+        "Scale precedence: ABCD"
+      ],
+      "intentional_security_differences": [
+        "Character scaling and spacing controls become bounded passive PDF text state; raw controls and editable document metadata are not retained."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "charscalex50",
+        "charscalex100",
+        "charscalex150",
+        "charscalex200",
+        "charscalex0",
+        "expndtw20",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe confirms percentage-based charscalex geometry, last-control precedence, and parameterless reset behavior; charscalex0 also resets to 100% rather than collapsing text. Explicit expndtw tracking remains in unscaled page units, adding one point between characters at both 50% and 150% glyph scaling regardless of control order. WordCompatiblePassive now matches that recovery and emits inverse-scaled PDF Tc values so painting agrees with bounded layout measurement; StrictSpec retains configured zero-value clamping. Across all eleven lines, corresponding ABCD/ABCDEFGH glyph origins and endpoints differ by at most 0.18 points under bundled Arial-compatible metrics. Both outputs are one-page text-only PDFs with identical flow and no drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "section-grid-page-number-passive-layout",
       "input": "fixtures/section-grid-page-number-passive.rtf",
       "category": "acceptable_approximation",

@@ -7091,7 +7091,9 @@ fn write_text_fragment(
         content.set_text_rendering_mode(rendering_mode);
     }
     content.set_word_spacing(word_spacing);
-    content.set_char_spacing(twips_to_points(style.character_spacing_twips));
+    content.set_char_spacing(
+        twips_to_points(style.character_spacing_twips) / style.horizontal_scale().max(0.01),
+    );
     content.set_horizontal_scaling(style.character_scaling_percent as f32);
     set_text_position(content, x, baseline_y, rotation);
     if let Some(adjustments) = supplied_kerning_points
@@ -10695,6 +10697,39 @@ endstream
             operation.operator == "Tc"
                 && operation.operands.len() == 1
                 && format!("{:?}", operation.operands[0]).contains('0')
+        }));
+    }
+
+    #[test]
+    fn writes_inverse_scaled_pdf_tracking_for_constant_page_space() {
+        let mut style = CharacterStyle::default();
+        style.character_spacing_twips = 20;
+        style.character_scaling_percent = 50;
+        let mut document = Document::default();
+        document.blocks = vec![Block::Paragraph(Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Tracked".to_string(),
+                style,
+            }],
+        })];
+
+        let layout = LayoutEngine::layout(&document);
+        let pdf = render_pdf(&layout);
+        let parsed = lopdf::Document::load_mem(&pdf).unwrap();
+        let page_id = *parsed.get_pages().values().next().expect("page");
+        let content = parsed.get_and_decode_page_content(page_id).unwrap();
+
+        assert_eq!(content_text(&content), "Tracked");
+        assert!(content.operations.iter().any(|operation| {
+            operation.operator == "Tc"
+                && operation.operands.len() == 1
+                && format!("{:?}", operation.operands[0]).starts_with('2')
+        }));
+        assert!(content.operations.iter().any(|operation| {
+            operation.operator == "Tz"
+                && operation.operands.len() == 1
+                && format!("{:?}", operation.operands[0]).contains("50")
         }));
     }
 
