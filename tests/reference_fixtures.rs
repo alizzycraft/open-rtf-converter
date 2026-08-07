@@ -3478,8 +3478,7 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             expected_pages: 1,
             must_preserve_text: &[
                 "Antidisestablis",
-                "hmentarian",
-                "ism",
+                "hmentarianis",
                 "Characteristic",
                 "ally",
             ],

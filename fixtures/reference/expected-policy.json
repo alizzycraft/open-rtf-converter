@@ -4447,7 +4447,7 @@
     {
       "id": "hyphenation-passive-soft-breaks",
       "input": "fixtures/hyphenation-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/hyphenation-passive.pdf",
       "word_reference_pages": [],
@@ -4460,8 +4460,7 @@
       "expected_pages": 1,
       "must_preserve_text": [
         "Antidisestablis",
-        "hmentarian",
-        "ism",
+        "hmentarianis",
         "Characteristic",
         "ally"
       ],
@@ -4486,7 +4485,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The converter wraps the final `ism` one character earlier than Word because the bounded bundled Arial-compatible font has slightly different metrics; all text, line count, and vertical placement remain close."
+        "Word and the converter now use identical five-line emergency character-boundary wrapping: `Antidisestablis` / `hmentarianis` / `m` and `Characteristic` / `ally`, with no invented hyphen glyphs. Word's trailing paragraph spaces are non-painted extraction artifacts. Line starts differ by 0.024 points, endpoints by at most 0.084 points before those spaces, and baselines by the established 0.91-0.96-point bundled Arial-compatible glyph-box residual."
       ]
     },
     {

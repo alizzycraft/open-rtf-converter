@@ -9807,71 +9807,22 @@ fn push_auto_hyphenated_segment(
     family: PdfFontFamily,
     document: &Document,
     font_provider: Option<&FontProvider>,
-    max_consecutive_hyphenated: Option<usize>,
+    _max_consecutive_hyphenated: Option<usize>,
     consecutive_hyphenated: &mut usize,
 ) {
-    let chars = segment.text.chars().collect::<Vec<_>>();
-    let mut start = 0;
-    while start < chars.len() {
-        if max_consecutive_hyphenated.is_some_and(|max| *consecutive_hyphenated >= max) {
-            push_flow_run(
-                output,
-                &chars[start..].iter().collect::<String>(),
-                &segment.style,
-                segment.soft_hyphen_after,
-            );
-            *consecutive_hyphenated = 0;
-            break;
-        }
-
-        let remaining = chars.len() - start;
-        if remaining <= 6 {
-            push_flow_run(
-                output,
-                &chars[start..].iter().collect::<String>(),
-                &segment.style,
-                segment.soft_hyphen_after,
-            );
-            *consecutive_hyphenated = 0;
-            break;
-        }
-
-        let mut end = chars.len() - 3;
-        while end > start + 3 {
-            let text = chars[start..end].iter().collect::<String>();
-            let text_width = measure_text_with_document_font(
-                &text,
-                &segment.style,
-                family,
-                document,
-                font_provider,
-            );
-            if text_width <= max_line_width {
-                break;
-            }
-            end -= 1;
-        }
-
-        if end <= start + 3 {
-            push_flow_run(
-                output,
-                &chars[start..].iter().collect::<String>(),
-                &segment.style,
-                segment.soft_hyphen_after,
-            );
-            *consecutive_hyphenated = 0;
-            break;
-        }
-
-        push_flow_run(
-            output,
-            &chars[start..end].iter().collect::<String>(),
-            &segment.style,
-            false,
-        );
-        *consecutive_hyphenated = consecutive_hyphenated.saturating_add(1);
-        start = end;
-    }
+    // Without a dictionary, Word's visible recovery is the same bounded
+    // character-boundary emergency wrap used for an ordinary oversized word.
+    // Do not reserve an artificial three-character suffix: Word may leave one
+    // final character when that is the widest fitting split.
+    push_emergency_wrapped_segment(
+        output,
+        segment,
+        max_line_width,
+        family,
+        document,
+        font_provider,
+    );
+    *consecutive_hyphenated = 0;
 }
 
 fn split_run_for_wrapping(run: &Run, markers: &MarkerContext) -> Vec<FlowRun> {
@@ -22253,6 +22204,10 @@ mod tests {
             assert!(lines.iter().all(|line| !line_text(line).contains('-')));
             assert_eq!(lines.iter().map(line_text).collect::<String>(), word);
         }
+        assert_eq!(
+            plain_lines.iter().map(line_text).collect::<Vec<_>>(),
+            hyphenated_lines.iter().map(line_text).collect::<Vec<_>>()
+        );
     }
 
     #[test]
