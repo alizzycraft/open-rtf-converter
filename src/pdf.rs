@@ -2476,6 +2476,7 @@ fn draw_passive_wmf_vector_image(
                 y,
                 height,
                 bold,
+                vertical_scale_percent,
                 text,
                 color,
                 background_color,
@@ -2507,6 +2508,7 @@ fn draw_passive_wmf_vector_image(
                     point,
                     font_size,
                     *bold,
+                    *vertical_scale_percent,
                     text,
                     *color,
                     *background_color,
@@ -3589,6 +3591,7 @@ fn draw_passive_vector_text(
     point: crate::layout::LayoutPoint,
     font_size: f32,
     bold: bool,
+    vertical_scale_percent: u8,
     text: &str,
     color: Option<crate::model::Color>,
     background_color: Option<crate::model::Color>,
@@ -3645,6 +3648,18 @@ fn draw_passive_vector_text(
         }),
     );
     let encoded = encode_pdf_text_for_font(text, PdfFontFamily::Helvetica);
+    let vertical_scale = (f32::from(vertical_scale_percent) / 100.0).clamp(0.5, 1.0);
+    if vertical_scale < 1.0 {
+        content.save_state();
+        content.transform([
+            1.0,
+            0.0,
+            0.0,
+            vertical_scale,
+            0.0,
+            metrics.top_y * (1.0 - vertical_scale),
+        ]);
+    }
     write_text_fragment(
         content,
         text,
@@ -3663,6 +3678,9 @@ fn draw_passive_vector_text(
         &encoded,
         TextRenderingMode::Fill,
     );
+    if vertical_scale < 1.0 {
+        content.restore_state();
+    }
     if clip_rect.is_some() {
         content.restore_state();
     }

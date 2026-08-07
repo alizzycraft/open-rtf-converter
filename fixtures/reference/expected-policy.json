@@ -332,7 +332,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The bounded inline-image model matches Word's 72-by-36-point in-paragraph image slot. Fontless WMF EXTTEXTOUT now recovers Word's stock bold face, 6.52-point scale, opaque background state, and frame-bounded character advance, so both PDFs visibly paint only the clipped `H`. The converter glyph starts within 0.24 points of Word; its Base14 Helvetica-Bold box extends about 1.69 points lower than Word's embedded Arial Bold box. Broader bundled/system text metrics remain a separate line-flow refinement.",
+        "The bounded inline-image model matches Word's 72-by-36-point in-paragraph image slot. Fontless WMF EXTTEXTOUT recovers Word's stock bold face, 6.52-point logical scale, opaque background state, and frame-bounded character advance, so both PDFs visibly paint only the clipped `H`. A bounded 81% stock-font vertical playback scale compensates for Base14 Helvetica-Bold's taller glyph box without changing the logical advance or background frame: current bounds are (147.35,44.65)-(152.04,51.90) points versus Word's (147.58,44.55)-(152.29,51.83). The remaining 0.23-point x offset is shared inline-frame/bundled-font positioning.",
         "The converter intentionally supports only a hardened passive WMF text subset; unsupported WMF text options remain placeholder or stripped."
       ]
     },

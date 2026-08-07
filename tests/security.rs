@@ -139,26 +139,35 @@ fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
             StaticImageVectorCommand::Text {
                 height,
                 bold,
+                vertical_scale_percent,
                 text,
                 background_color,
                 character_extra,
                 ..
-            } => Some((height, bold, text, background_color, character_extra)),
+            } => Some((
+                height,
+                bold,
+                vertical_scale_percent,
+                text,
+                background_color,
+                character_extra,
+            )),
             _ => None,
         })
         .expect("fontless WMF text command");
     assert!((command.0 - (80.0 / 5.52)).abs() < 0.01);
     assert!(*command.1, "Word maps the stock SYSTEM_FONT to bold Arial");
-    assert_eq!(command.2, "Hi");
+    assert_eq!(*command.2, 81);
+    assert_eq!(command.3, "Hi");
     assert_eq!(
-        *command.3,
+        *command.4,
         Some(Color {
             red: 255,
             green: 255,
             blue: 255
         })
     );
-    assert_eq!(*command.4, 160.0);
+    assert_eq!(*command.5, 160.0);
     let paragraph = parsed
         .document
         .blocks

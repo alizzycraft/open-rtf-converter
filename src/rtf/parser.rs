@@ -36646,6 +36646,7 @@ fn push_emf_text_command(
         y: text.y,
         height: normalized_emf_text_height(state.font_height, header, coordinates),
         bold: false,
+        vertical_scale_percent: 100,
         text: text.text,
         color: state.text_color,
         background_color: if text.opaque_bounds.is_none() {
@@ -42487,6 +42488,7 @@ fn parse_wmf_vector_image_data(
                         y,
                         height: normalized_wmf_text_height(state.font_height, window_height),
                         bold: state.font_bold,
+                        vertical_scale_percent: if state.font_height.is_none() { 81 } else { 100 },
                         text,
                         color: state.text_color,
                         background_color: match state.text_background_mode {
@@ -42551,6 +42553,11 @@ fn parse_wmf_vector_image_data(
                                     window_height,
                                 ),
                                 bold: state.font_bold,
+                                vertical_scale_percent: if state.font_height.is_none() {
+                                    81
+                                } else {
+                                    100
+                                },
                                 color: state.text_color,
                                 background_color: if ext_text.opaque_bounds.is_none() {
                                     match state.text_background_mode {
@@ -63438,6 +63445,7 @@ After\par}"#;
                 y: 20.0,
                 height: 6.6666665,
                 bold: false,
+                vertical_scale_percent: 100,
                 text: "Hi\u{2019}".to_string(),
                 color: Some(Color {
                     red: 17,
@@ -63695,6 +63703,7 @@ After\par}"#;
                     y: 20.0,
                     height: 6.6666665,
                     bold: false,
+                    vertical_scale_percent: 100,
                     text: "Hi".to_string(),
                     color: Some(Color::default()),
                     background_color: None,
