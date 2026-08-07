@@ -3272,6 +3272,47 @@
       ]
     },
     {
+      "id": "character-spacing-units-passive-layout",
+      "input": "fixtures/character-spacing-units-passive.rtf",
+      "category": "must_match_closely",
+      "word_reference_status": "available",
+      "word_reference_pdf": "fixtures/reference/word365/character-spacing-units-passive.pdf",
+      "word_reference_pages": [],
+      "expected_pages": 1,
+      "must_preserve_text": [
+        "Plain: ABCD",
+        "Expnd +4: ABCD",
+        "Expnd -4: ABCD",
+        "Twips +20: ABCD",
+        "Twips -20: ABCD",
+        "Expnd then twips: ABCD",
+        "Twips then expnd: ABCD",
+        "Reset: ABCDEFGH"
+      ],
+      "intentional_security_differences": [
+        "Character-spacing controls are converted into bounded passive glyph positioning and are not retained as editable or active PDF state."
+      ],
+      "expected_diagnostics": [],
+      "forbidden_pdf_markers": [
+        "expnd4",
+        "expnd-4",
+        "expndtw20",
+        "expndtw-20",
+        "expndtw10",
+        "expnd0",
+        "/JavaScript",
+        "/EmbeddedFile",
+        "/Launch",
+        "/OpenAction",
+        "/AcroForm",
+        "/Annots"
+      ],
+      "expected_pdf_markers": [],
+      "known_gaps": [
+        "A focused Word 16.0 probe proves that expnd uses quarter-point units: expnd+/-4 exactly matches expndtw+/-20 at 12 points, and the last authored spacing control wins. Word also carries the prior run's spacing across a following style-reset boundary. WordCompatiblePassive now matches those units, precedence, and boundary semantics with bounded twip arithmetic. Across all eight lines, corresponding ABCD/ABCDEFGH glyph origins and endpoints differ by at most 0.22 points under bundled Arial-compatible metrics; the reset-boundary E origin differs by 0.06 points. Both outputs are one-page text-only PDFs with identical line flow and no drawings, images, links, annotations, widgets, or actions."
+      ]
+    },
+    {
       "id": "section-grid-page-number-passive-layout",
       "input": "fixtures/section-grid-page-number-passive.rtf",
       "category": "acceptable_approximation",

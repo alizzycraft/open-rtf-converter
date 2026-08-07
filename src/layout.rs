@@ -8676,6 +8676,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     let mut drop_cap_applied = false;
 
     for (run_index, run) in paragraph.runs.iter().enumerate() {
+        let trailing_character_spacing = character_spacing_boundary_after_run(paragraph, run_index);
         let mut segments = split_run_for_wrapping_with_drop_cap(
             run,
             markers,
@@ -8853,6 +8854,9 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                     fit_width = width;
                 }
             }
+            if segment_index + 1 == segments.len() {
+                fit_width += trailing_character_spacing;
+            }
             let inline_image_body_edge_tolerance = if !supports_segmented_flow
                 && (line_width - content_width).abs() < 0.01
                 && current
@@ -8914,7 +8918,7 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                         font_provider,
                     );
                 }
-                push_segment(
+                push_segment_with_trailing_character_spacing(
                     &mut current,
                     FlowRun {
                         text: trimmed,
@@ -8929,14 +8933,24 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
                     &paragraph.style,
                     document,
                     font_provider,
+                    if segment_index + 1 == segments.len() {
+                        trailing_character_spacing
+                    } else {
+                        0.0
+                    },
                 );
             } else {
-                push_segment(
+                push_segment_with_trailing_character_spacing(
                     &mut current,
                     segment,
                     &paragraph.style,
                     document,
                     font_provider,
+                    if segment_index + 1 == segments.len() {
+                        trailing_character_spacing
+                    } else {
+                        0.0
+                    },
                 );
             }
         }
@@ -8951,6 +8965,49 @@ fn wrap_paragraph_with_font_provider_dynamic_width(
     }
 
     lines
+}
+
+fn character_spacing_boundary_after_run(paragraph: &Paragraph, run_index: usize) -> f32 {
+    let Some(run) = paragraph.runs.get(run_index) else {
+        return 0.0;
+    };
+    let last = run
+        .text
+        .chars()
+        .rev()
+        .find(|ch| !is_zero_width_format_char(*ch));
+    if run.style.hidden
+        || run.style.character_spacing_twips == 0
+        || contains_inline_marker(&run.text)
+        || !last.is_some_and(is_character_spacing_boundary_char)
+    {
+        return 0.0;
+    }
+    let following = paragraph.runs.iter().skip(run_index + 1).find(|following| {
+        !following.style.hidden
+            && following
+                .text
+                .chars()
+                .any(|ch| !is_zero_width_format_char(ch))
+    });
+    let first = following.and_then(|following| {
+        (!contains_inline_marker(&following.text))
+            .then(|| {
+                following
+                    .text
+                    .chars()
+                    .find(|ch| !is_zero_width_format_char(*ch))
+            })
+            .flatten()
+    });
+    if !first.is_some_and(is_character_spacing_boundary_char) {
+        return 0.0;
+    }
+    twips_to_points(run.style.character_spacing_twips) * run.style.horizontal_scale()
+}
+
+fn is_character_spacing_boundary_char(ch: char) -> bool {
+    !is_zero_width_format_char(ch) && !matches!(ch, '\t' | '\r' | '\n') && !ch.is_control()
 }
 
 fn apply_passive_math_operator_spacing(paragraph: &Paragraph) -> Option<Paragraph> {
@@ -11788,6 +11845,24 @@ fn push_segment(
         line.height = line.height.max(segment_height);
     }
     line.runs.push(segment);
+}
+
+fn push_segment_with_trailing_character_spacing(
+    line: &mut Line,
+    segment: FlowRun,
+    paragraph_style: &ParagraphStyle,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+    trailing_character_spacing: f32,
+) {
+    push_segment(line, segment, paragraph_style, document, font_provider);
+    if trailing_character_spacing == 0.0 {
+        return;
+    }
+    if let Some(last) = line.runs.last_mut() {
+        last.width += trailing_character_spacing;
+        line.width += trailing_character_spacing;
+    }
 }
 
 fn push_flow_exclusion_advance(line: &mut Line, width: f32, style: &CharacterStyle) {
@@ -22614,6 +22689,49 @@ mod tests {
             .expect("expanded text");
 
         assert_eq!(fragment.style.character_spacing_twips, 200);
+    }
+
+    #[test]
+    fn character_spacing_from_prior_run_advances_the_following_run_boundary() {
+        let following_x = |spacing_twips| {
+            let mut spaced = CharacterStyle::default();
+            spaced.character_spacing_twips = spacing_twips;
+            let mut document = Document::default();
+            document.blocks = vec![Block::Paragraph(Paragraph {
+                style: Default::default(),
+                runs: vec![
+                    Run {
+                        text: "ABCD".to_string(),
+                        style: spaced,
+                    },
+                    Run {
+                        text: "EFGH".to_string(),
+                        style: Default::default(),
+                    },
+                ],
+            })];
+            let layout = LayoutEngine::layout(&document);
+            layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text == "EFGH" => Some(fragment.x),
+                    _ => None,
+                })
+                .expect("following run")
+        };
+        let plain_width = measure_text("ABCD", &CharacterStyle::default());
+        let mut expanded = CharacterStyle::default();
+        expanded.character_spacing_twips = 20;
+        let expanded_internal_width = measure_text("ABCD", &expanded);
+        let line_origin = 72.0;
+
+        assert!((following_x(0) - line_origin - plain_width).abs() < 0.01);
+        assert!((following_x(20) - line_origin - expanded_internal_width - 1.0).abs() < 0.01);
+        let mut condensed = CharacterStyle::default();
+        condensed.character_spacing_twips = -20;
+        let condensed_internal_width = measure_text("ABCD", &condensed);
+        assert!((following_x(-20) - line_origin - condensed_internal_width + 1.0).abs() < 0.01);
     }
 
     #[test]

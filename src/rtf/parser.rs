@@ -6070,9 +6070,9 @@ impl Parser {
                 }
             }
             "expnd" => {
-                let half_points = control.parameter.unwrap_or(0);
+                let quarter_points = control.parameter.unwrap_or(0);
                 self.state.character.character_spacing_twips =
-                    self.clamp_character_spacing(half_points.saturating_mul(10), offset);
+                    self.clamp_character_spacing(quarter_points.saturating_mul(5), offset);
             }
             "expndtw" => {
                 self.state.character.character_spacing_twips =
@@ -56293,7 +56293,7 @@ After\par}"#;
                 .unwrap_or_else(|| panic!("missing run {text}"))
         };
 
-        assert_eq!(style_for("expanded").character_spacing_twips, 60);
+        assert_eq!(style_for("expanded").character_spacing_twips, 30);
         assert_eq!(style_for("condensed").character_spacing_twips, -80);
         assert_eq!(style_for("clamped").character_spacing_twips, 120);
         assert!(
