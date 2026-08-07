@@ -19122,39 +19122,27 @@ impl Parser {
     }
 
     fn decode_text_hex_byte(&self, byte: u8) -> char {
+        decode_hex_byte(byte, self.current_text_code_page())
+    }
+
+    fn current_text_code_page(&self) -> CodePage {
         let font = self
             .document
             .fonts
             .iter()
             .find(|font| font.index == self.state.character.font_index);
-        let code_page = match font.and_then(|font| font.code_page) {
-            Some(code_page) => {
-                CodePage::from_rtf_code_page(code_page).unwrap_or(CodePage::Unsupported)
-            }
-            None => font
-                .and_then(|font| font.charset)
-                .and_then(CodePage::from_font_charset)
-                .unwrap_or(self.state.code_page),
-        };
-        decode_hex_byte(byte, code_page)
+        if self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
+            && let Some(code_page) = font.and_then(|font| font.code_page)
+        {
+            return CodePage::from_rtf_code_page(code_page).unwrap_or(CodePage::Unsupported);
+        }
+        font.and_then(|font| font.charset)
+            .and_then(CodePage::from_font_charset)
+            .unwrap_or(self.state.code_page)
     }
 
     fn decode_direct_text_bytes(&self, bytes: &[u8]) -> String {
-        let font = self
-            .document
-            .fonts
-            .iter()
-            .find(|font| font.index == self.state.character.font_index);
-        let code_page = match font.and_then(|font| font.code_page) {
-            Some(code_page) => {
-                CodePage::from_rtf_code_page(code_page).unwrap_or(CodePage::Unsupported)
-            }
-            None => font
-                .and_then(|font| font.charset)
-                .and_then(CodePage::from_font_charset)
-                .unwrap_or(self.state.code_page),
-        };
-        decode_raw_bytes(bytes, code_page)
+        decode_raw_bytes(bytes, self.current_text_code_page())
     }
 
     fn push_color_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
@@ -46352,11 +46340,9 @@ mod tests {
     }
 
     #[test]
-    fn font_code_page_overrides_global_hex_escape_decoding() {
-        let output = parse_rtf(
-            r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\cpg437 Terminal;}{\f1\cpg10000 Mac Face;}{\f2 Unsupported;}}\f0 IBM \'b3 \f1 Mac \'d2Hello\'d3 \f2 Win \'93Hello\'94\par}",
-        )
-        .unwrap();
+    fn word_compatible_font_code_page_uses_global_hex_escape_decoding() {
+        const INPUT: &str = r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\cpg437 Terminal;}{\f1\cpg10000 Mac Face;}{\f2 Unsupported;}}\f0 IBM \'b3 \f1 Mac \'d2Hello\'d3 \f2 Win \'93Hello\'94\par}";
+        let output = parse_rtf(INPUT).unwrap();
         let paragraph = match &output.document.blocks[0] {
             Block::Paragraph(paragraph) => paragraph,
             _ => panic!("expected paragraph"),
@@ -46380,10 +46366,44 @@ mod tests {
         assert_eq!(code_page_for("Mac Face"), 10000);
         assert_eq!(
             text,
-            "IBM \u{2502} Mac \u{201c}Hello\u{201d} Win \u{201c}Hello\u{201d}"
+            "IBM \u{00b3} Mac \u{00d2}Hello\u{00d3} Win \u{201c}Hello\u{201d}"
         );
         assert!(!text.contains("cpg"));
         assert!(!text.contains("Terminal"));
+
+        let strict = parse_rtf_bytes_with_options(
+            INPUT.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            document_text(&strict.document),
+            "IBM \u{2502} Mac \u{201c}Hello\u{201d} Win \u{201c}Hello\u{201d}"
+        );
+    }
+
+    #[test]
+    fn word_compatible_font_code_page_uses_global_direct_byte_decoding() {
+        let mut input =
+            br"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\cpg437 Terminal;}}\f0 raw ".to_vec();
+        input.push(0xb3);
+        input.extend_from_slice(br"\par}");
+
+        let output = parse_rtf_bytes(&input).unwrap();
+        assert_eq!(document_text(&output.document), "raw \u{00b3}");
+
+        let strict = parse_rtf_bytes_with_options(
+            &input,
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(document_text(&strict.document), "raw \u{2502}");
     }
 
     #[test]
@@ -46561,29 +46581,45 @@ mod tests {
     }
 
     #[test]
-    fn explicit_font_code_page_overrides_font_charset_fallback() {
-        let output = parse_rtf(
-            r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\fcharset77\cpg437 Mixed Face;}}\f0 Mixed \'b3\par}",
-        )
-        .unwrap();
+    fn explicit_font_code_page_overrides_font_charset_only_in_strict_spec() {
+        const INPUT: &str = r"{\rtf1\ansi\ansicpg1252{\fonttbl{\f0\fcharset77\cpg437 Mixed Face;}}\f0 Mixed \'b3\par}";
+        let output = parse_rtf(INPUT).unwrap();
         let text = document_text(&output.document);
 
-        assert_eq!(text, "Mixed \u{2502}");
+        assert_eq!(text, "Mixed \u{2265}");
+        let strict = parse_rtf_bytes_with_options(
+            INPUT.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(document_text(&strict.document), "Mixed \u{2502}");
     }
 
     #[test]
-    fn unsupported_font_code_page_replaces_non_ascii_hex_escapes() {
-        let output =
-            parse_rtf(r"{\rtf1\ansi{\fonttbl{\f0\cpg932 ShiftJis;}}\f0 high \'82 ascii \'41\par}")
-                .unwrap();
+    fn unsupported_font_code_page_is_ignored_by_word_mode_and_bounded_in_strict_spec() {
+        const INPUT: &str =
+            r"{\rtf1\ansi{\fonttbl{\f0\cpg932 ShiftJis;}}\f0 high \'82 ascii \'41\par}";
+        let output = parse_rtf(INPUT).unwrap();
         let text = document_text(&output.document);
 
-        assert_eq!(text, "high \u{fffd} ascii A");
+        assert_eq!(text, "high \u{201a} ascii A");
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
                 .contains("unsupported RTF font code page 932")
         }));
+        let strict = parse_rtf_bytes_with_options(
+            INPUT.as_bytes(),
+            &RtfParseOptions {
+                compatibility_mode: CompatibilityMode::StrictSpec,
+                ..RtfParseOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(document_text(&strict.document), "high \u{fffd} ascii A");
     }
 
     #[test]

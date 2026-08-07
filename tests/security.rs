@@ -74108,8 +74108,19 @@ fn font_code_page_hex_escapes_render_passively_without_control_leakage() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("cafe \u{00e9}"));
-    assert!(text.contains("quote \u{201c}Hello\u{201d}"));
+    assert!(text.contains("cafe \u{201a}"));
+    assert!(text.contains("quote \u{00d2}Hello\u{00d3}"));
+    let strict = parse_rtf_bytes_with_options(
+        &input,
+        &RtfParseOptions {
+            compatibility_mode: CompatibilityMode::StrictSpec,
+            ..RtfParseOptions::default()
+        },
+    )
+    .unwrap();
+    let strict_text = collect_text(&strict.document);
+    assert!(strict_text.contains("cafe \u{00e9}"));
+    assert!(strict_text.contains("quote \u{201c}Hello\u{201d}"));
     for forbidden in ["cpg", "Terminal", "Mac Face"] {
         assert!(
             !text.contains(forbidden),

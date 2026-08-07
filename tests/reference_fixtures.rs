@@ -4367,8 +4367,8 @@ fn reference_fixtures() -> &'static [ReferenceFixture] {
             expected_pages: 1,
             must_preserve_text: &[
                 "Before font code pages.",
-                "IBM cafe",
-                "Mac quote",
+                "IBM cafe \u{201a} box \u{00b3}",
+                "Mac quote \u{00d2}Hello\u{00d3}",
                 "After font code pages.",
             ],
             must_not_leak: &[

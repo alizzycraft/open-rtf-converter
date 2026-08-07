@@ -5748,12 +5748,12 @@
       "expected_pages": 1,
       "must_preserve_text": [
         "Before font code pages.",
-        "IBM cafe",
-        "Mac quote",
+        "IBM cafe ‚ box ³",
+        "Mac quote ÒHelloÓ",
         "After font code pages."
       ],
       "intentional_security_differences": [
-        "Font-specific code-page metadata guides bounded passive hex-escape decoding for visible text only.",
+        "WordCompatiblePassive follows Word by ignoring explicit per-font cpg metadata during visible text decoding; StrictSpec retains the declared bounded mapping.",
         "Raw font table, global code-page, font-specific code-page, and font-name metadata are stripped before PDF rendering."
       ],
       "expected_diagnostics": [],
@@ -5774,7 +5774,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit shows that Word ignores these explicit per-font cpg437/cpg10000 declarations for the authored hex escapes and visibly treats them as Windows-1252, producing cafe ‚ / box ³ and ÒHelloÓ. The converter intentionally honors the declared IBM437 and MacRoman mappings, producing semantic café / box │ and “Hello” in both rendering and extraction. This deterministic standards-oriented difference retains identical four-line flow and zero drawings while avoiding mojibake; both outputs remain free of images, links, annotations, widgets, and actions."
+        "The focused Word 16.0 audit proves that Word ignores explicit per-font cpg437/cpg10000 declarations for these authored text bytes and instead uses the document Windows-1252 code page, producing cafe ‚ / box ³ and ÒHelloÓ. WordCompatiblePassive now matches that exact visible and extracted text for both hex escapes and direct bytes; StrictSpec continues honoring the declared IBM437/MacRoman mapping. Both outputs retain identical four-line flow and zero drawings. Line starts differ by 0.03 points; bundled font substitution makes current IBM/Mac endpoints 4.64/6.01 points wider and retains a cumulative 2.64-point baseline residual by the final line. Both PDFs remain free of images, links, annotations, widgets, and actions."
       ]
     },
     {
