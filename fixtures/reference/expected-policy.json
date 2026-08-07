@@ -7975,7 +7975,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Bundled Liberation Sans substitutes for Word's Calibri: line starts differ by 0.02 points, endpoints by 0.97-7.49 points, the first baseline by 1.07 points, and cadence is 13.8 rather than 14.64 points; safe text, font category, one-page flow, and passive structure match."
+        "Bundled Liberation Sans supplies safe glyph contours for Word's Calibri, while layout now uses Calibri's bounded 2500/2048-em source line metric. Current and Word have matching one-page flow and 14.648/14.64-point cadence; corresponding baselines differ by 0.42-0.43 points instead of the former 1.07-point first-line and accumulating cadence residual. Line starts differ by 0.02 points and endpoints by 0.97-7.49 points under the remaining bundled glyph-width substitution."
       ]
     },
     {
@@ -8029,7 +8029,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word-compatible mode and Word both leave the fixture's paragraph and linked-character style references visually inert, producing three plain Calibri-category lines at the 72-point origin. Bundled Liberation Sans endpoints differ by 0.18-10.20 points, the first baseline by 1.07 points, and cadence is 13.8 rather than Word's 14.64 points."
+        "Word-compatible mode and Word both leave the fixture's paragraph and linked-character style references visually inert, producing three plain Calibri-category lines at the 72-point origin. Layout uses Calibri's bounded 2500/2048-em source line metric while embedding safe Liberation Sans contours: current and Word cadence is 14.648/14.64 points and baselines differ by 0.42-0.43 points instead of the former 1.07-point first-line and accumulating cadence residual. Bundled glyph-width substitution leaves endpoints 0.18-10.20 points apart. Three-times renders were visually inspected."
       ]
     },
     {

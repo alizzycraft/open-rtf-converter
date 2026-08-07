@@ -13327,6 +13327,16 @@ fn flow_run_line_height(
     let fallback = fallback_flow_run_line_height(run) + border_extra;
     let passive_base14_fallback =
         || passive_base14_fallback_flow_run_line_height(run, document) + border_extra;
+    if let Some(line_height) = source_word_compatible_line_height_points(
+        font_for_style(document, &run.style),
+        run.line_height_points,
+    ) {
+        return line_height.clamp(
+            run.line_height_points.max(1.0),
+            run.line_height_points.max(1.0) * 2.0,
+        ) + run.style.baseline_shift_points().abs()
+            + border_extra;
+    }
     let Some(provider) = font_provider else {
         return fallback;
     };
@@ -13349,6 +13359,17 @@ fn flow_run_line_height(
         run.line_height_points.max(1.0) * 2.0,
     );
     bounded_line_height + run.style.baseline_shift_points().abs() + border_extra
+}
+
+fn source_word_compatible_line_height_points(font: Option<&FontDef>, size: f32) -> Option<f32> {
+    let name = font?.name.trim().to_ascii_lowercase();
+    if name != "calibri" && name != "carlito" {
+        return None;
+    }
+
+    // Calibri and its OFL metric-compatible substitute Carlito share the
+    // bounded hhea metric (1536 - -512 + 452) / 2048 = 1.220703125 em.
+    Some(size * (2_500.0 / 2_048.0))
 }
 
 fn fallback_flow_run_line_height(run: &FlowRun) -> f32 {
@@ -27297,6 +27318,44 @@ mod tests {
             (supplied_line.height - fallback_line.height).abs() > 0.1,
             "provided metrics should visibly differ from fallback line height"
         );
+    }
+
+    #[test]
+    fn calibri_uses_bounded_source_line_metrics_with_bundled_fonts() {
+        let mut document = Document::default();
+        document.fonts = vec![FontDef {
+            index: 0,
+            name: "Calibri".to_string(),
+            alternate_name: None,
+            charset: None,
+            code_page: None,
+            family: FontFamilyHint::Swiss,
+            pitch: FontPitch::Default,
+        }];
+        let paragraph = Paragraph {
+            style: Default::default(),
+            runs: vec![Run {
+                text: "Calibri line".to_string(),
+                style: CharacterStyle {
+                    font_index: 0,
+                    font_size_half_points: 24,
+                    ..Default::default()
+                },
+            }],
+        };
+        let markers = test_markers("1", "1");
+        let line = wrap_paragraph_with_font_provider(
+            &paragraph,
+            500.0,
+            &markers,
+            &document,
+            Some(&FontProvider::default()),
+        )
+        .into_iter()
+        .next()
+        .expect("Calibri line");
+
+        assert!((line.height - 14.648_437_5).abs() < 0.001);
     }
 
     #[test]
