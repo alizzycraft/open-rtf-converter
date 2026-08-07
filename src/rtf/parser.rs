@@ -6455,6 +6455,12 @@ impl Parser {
             }
             "widctlpar" => self.state.paragraph.widow_control = control.parameter.unwrap_or(1) != 0,
             "nowidctlpar" | "nowidowctrl" => self.state.paragraph.widow_control = false,
+            "nowwrap"
+                if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive =>
+            {
+                self.state.paragraph.no_wrap = true;
+                self.state.paragraph.no_wrap_emergency_right_inset_twips = 144;
+            }
             "nowwrap" => self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0,
             "nowrap" if self.options.compatibility_mode == CompatibilityMode::StrictSpec => {
                 self.state.paragraph.no_wrap = control.parameter.unwrap_or(1) != 0
@@ -12894,6 +12900,10 @@ impl Parser {
 
     fn start_table_row(&mut self, offset: usize) -> Result<(), ParseError> {
         self.finish_paragraph(offset)?;
+        if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
+            self.state.paragraph.no_wrap = false;
+            self.state.paragraph.no_wrap_emergency_right_inset_twips = 0;
+        }
         if self.current_table.is_none() {
             let mut table = TableBuilder::default();
             table.preserve_authored_widths = self.preserve_authored_table_widths;
@@ -27321,6 +27331,9 @@ fn inherit_paragraph_style(base: &ParagraphStyle, derived: &ParagraphStyle) -> P
     }
     if output.no_wrap == default.no_wrap {
         output.no_wrap = base.no_wrap;
+    }
+    if output.no_wrap_emergency_right_inset_twips == default.no_wrap_emergency_right_inset_twips {
+        output.no_wrap_emergency_right_inset_twips = base.no_wrap_emergency_right_inset_twips;
     }
     if output.two_in_one == default.two_in_one {
         output.two_in_one = base.two_in_one;
@@ -58220,9 +58233,17 @@ After\par}"#;
         assert!(!first.style.no_wrap);
         assert!(!second.style.no_wrap);
         assert!(third.style.no_wrap);
-        assert!(!fourth.style.no_wrap);
+        assert!(fourth.style.no_wrap);
+        assert_eq!(third.style.no_wrap_emergency_right_inset_twips, 144);
+        assert_eq!(fourth.style.no_wrap_emergency_right_inset_twips, 144);
         assert!(table.rows[0].cells[0].paragraphs[0].style.no_wrap);
         assert!(!table.rows[0].cells[1].paragraphs[0].style.no_wrap);
+        assert_eq!(
+            table.rows[0].cells[0].paragraphs[0]
+                .style
+                .no_wrap_emergency_right_inset_twips,
+            0
+        );
         assert!(
             output
                 .diagnostics
@@ -58251,6 +58272,8 @@ After\par}"#;
         };
         assert!(first.style.no_wrap);
         assert!(!second.style.no_wrap);
+        assert_eq!(first.style.no_wrap_emergency_right_inset_twips, 0);
+        assert_eq!(second.style.no_wrap_emergency_right_inset_twips, 0);
     }
 
     #[test]

@@ -15454,7 +15454,14 @@ fn aligned_x(
 
 fn paragraph_line_width(content_width: f32, style: &ParagraphStyle, is_first_line: bool) -> f32 {
     let line_left_indent = paragraph_line_left_indent_twips(style, is_first_line);
-    (content_width - twips_to_points(line_left_indent + style.right_indent_twips)).max(12.0)
+    let no_wrap_emergency_inset = if style.no_wrap {
+        style.no_wrap_emergency_right_inset_twips.clamp(0, 10_000)
+    } else {
+        0
+    };
+    (content_width
+        - twips_to_points(line_left_indent + style.right_indent_twips + no_wrap_emergency_inset))
+    .max(12.0)
 }
 
 fn paragraph_line_left_indent_twips(style: &ParagraphStyle, is_first_line: bool) -> i32 {
@@ -24463,6 +24470,35 @@ mod tests {
         let layout = LayoutEngine::layout(&parsed.document);
 
         assert_eq!(layout.pages.len(), 1);
+        let mut rendered_lines = Vec::<(f32, String)>::new();
+        for fragment in layout.pages[0].items.iter().filter_map(|item| match item {
+            LayoutItem::Text(fragment) => Some(fragment),
+            _ => None,
+        }) {
+            if let Some((_, text)) = rendered_lines
+                .iter_mut()
+                .find(|(baseline, _)| (*baseline - fragment.baseline_y).abs() < 0.01)
+            {
+                text.push_str(&fragment.text);
+            } else {
+                rendered_lines.push((fragment.baseline_y, fragment.text.clone()));
+            }
+        }
+        let rendered_lines = rendered_lines
+            .iter()
+            .map(|(_, text)| text.trim())
+            .collect::<Vec<_>>();
+        for expected in [
+            "Epsilon Zeta Eta Theta Iota Ka",
+            "ppa",
+            "Direct wrapped paragraph can b",
+            "reak normally across the narrow",
+        ] {
+            assert!(
+                rendered_lines.contains(&expected),
+                "missing line {expected:?}"
+            );
+        }
         let visible = layout_text(&layout.pages[0]);
         assert!(visible.contains("Cell Alpha"));
         assert!(!visible.contains("After passive no wrap."));

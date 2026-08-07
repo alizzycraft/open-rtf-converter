@@ -72355,7 +72355,9 @@ fn no_wrap_controls_render_passively_without_control_leakage() {
     assert!(!paragraphs[0].style.no_wrap);
     assert!(!paragraphs[1].style.no_wrap);
     assert!(paragraphs[2].style.no_wrap);
-    assert!(!paragraphs[3].style.no_wrap);
+    assert!(paragraphs[3].style.no_wrap);
+    assert_eq!(paragraphs[2].style.no_wrap_emergency_right_inset_twips, 144);
+    assert_eq!(paragraphs[3].style.no_wrap_emergency_right_inset_twips, 144);
     assert!(
         parsed
             .diagnostics

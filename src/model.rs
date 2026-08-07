@@ -1025,6 +1025,9 @@ pub struct ParagraphStyle {
     pub keep_with_next: bool,
     pub widow_control: bool,
     pub no_wrap: bool,
+    /// Bounded Word-compatible emergency-break inset for paragraph-level
+    /// `nowwrap`; table-cell no-wrap uses its authored cell width unchanged.
+    pub no_wrap_emergency_right_inset_twips: i32,
     /// Word's bounded two-in-one character layout: visible text is rendered as
     /// two half-size horizontal rows within one ordinary paragraph line slot.
     pub two_in_one: bool,
@@ -1096,6 +1099,7 @@ impl Default for ParagraphStyle {
             keep_with_next: false,
             widow_control: false,
             no_wrap: false,
+            no_wrap_emergency_right_inset_twips: 0,
             two_in_one: false,
             suppress_line_numbers: false,
             auto_hyphenation: false,

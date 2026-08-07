@@ -4052,7 +4052,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The converter matches Word's bounded recovery by starting the terminal authored-height no-wrap row in the remaining page area, clipping it at the physical page boundary, and suppressing later body flow until an explicit page or section boundary."
+        "Word treats parameterized nowwrap0 as the same parameterless no-wrap flag and reserves a bounded 144-twip emergency right inset. WordCompatiblePassive now reproduces both behaviors, so the two direct paragraphs have identical six-line character-boundary grouping and matching baselines within 0.11 points; StrictSpec retains boolean-reset semantics. The converter also matches Word's bounded terminal authored-height row recovery, physical-page clipping, and later-body suppression. The fixture's malformed late-declared second cell boundary retains a 5.33-point continuation-line x-origin residual; raw no-wrap and table metadata remain stripped."
       ]
     },
     {
