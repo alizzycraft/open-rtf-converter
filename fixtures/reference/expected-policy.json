@@ -387,7 +387,7 @@
     {
       "id": "wmf-hatch-brush-passive-lines",
       "input": "fixtures/wmf-hatch-brush-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-hatch-brush-passive.pdf",
       "word_reference_pages": [],
@@ -434,7 +434,7 @@
     {
       "id": "wmf-dashed-pen-passive-stroke",
       "input": "fixtures/wmf-dashed-pen-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-dashed-pen-passive.pdf",
       "word_reference_pages": [],
@@ -572,7 +572,7 @@
     {
       "id": "wmf-polybezierto-passive-current-point",
       "input": "fixtures/wmf-polybezierto-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-polybezierto-passive.pdf",
       "word_reference_pages": [],
@@ -668,7 +668,7 @@
     {
       "id": "wmf-setpixel-passive-rectangle",
       "input": "fixtures/wmf-setpixel-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-setpixel-passive.pdf",
       "word_reference_pages": [],
@@ -1087,7 +1087,7 @@
     {
       "id": "wmf-srccopy-stretchdib-passive-image",
       "input": "fixtures/wmf-srccopy-stretchdib-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-srccopy-stretchdib-passive.pdf",
       "word_reference_pages": [],
@@ -1173,7 +1173,7 @@
     {
       "id": "wmf-srccopy-dib-blits-passive-image",
       "input": "fixtures/wmf-srccopy-dib-blits-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-srccopy-dib-blits-passive.pdf",
       "word_reference_pages": [],
@@ -1219,7 +1219,7 @@
     {
       "id": "wmf-srccopy-cropped-dib-passive-image",
       "input": "fixtures/wmf-srccopy-cropped-dib-passive.rtf",
-      "category": "acceptable_approximation",
+      "category": "must_match_closely",
       "word_reference_status": "available",
       "word_reference_pdf": "fixtures/reference/word365/wmf-srccopy-cropped-dib-passive.pdf",
       "word_reference_pages": [],
