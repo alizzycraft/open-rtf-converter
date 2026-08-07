@@ -16017,8 +16017,8 @@ fn page_number_position_and_section_grid_controls_warn_without_payload_leakage()
         "expected header page number x at 72pt, got {page_number_position:?}"
     );
     assert!(
-        (page_number_position.1 - 745.65).abs() < 0.02,
-        "expected header page number baseline near 745.65pt, got {page_number_position:?}"
+        (page_number_position.1 - 744.82).abs() < 0.03,
+        "expected source-corrected default-Times header baseline near 744.82pt, got {page_number_position:?}"
     );
     for forbidden in [
         b"pgnx".as_slice(),
@@ -23646,6 +23646,31 @@ fn arial_source_baseline_recovery_scales_without_changing_passive_output() {
     assert!(
         (twenty_four_point.1 - 139.40).abs() < 0.03,
         "24-point Arial source baseline should scale linearly: {twenty_four_point:?}"
+    );
+}
+
+#[test]
+fn times_source_baseline_recovery_covers_explicit_and_legacy_defaults() {
+    let position = |input: &[u8], needle: &str| {
+        let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();
+        audit_passive_pdf_bytes(&output.pdf).unwrap();
+        let parsed_pdf = PdfDocument::load_mem(&output.pdf).unwrap();
+        let page_id = *parsed_pdf.get_pages().values().next().expect("page");
+        let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
+        pdf_first_text_position_for_text(&content, needle)
+            .unwrap_or_else(|| panic!("missing PDF text position for {needle:?}"))
+    };
+
+    let legacy_default = position(include_bytes!("../fixtures/table-ish.rtf"), "Name");
+    let explicit_times = position(include_bytes!("../docs/sample.rtf"), "It");
+
+    assert!(
+        (legacy_default.1 - 708.82).abs() < 0.03,
+        "legacy default Times baseline should match Word: {legacy_default:?}"
+    );
+    assert!(
+        (explicit_times.1 - 706.95).abs() < 0.03,
+        "explicit Times New Roman baseline should scale with source size: {explicit_times:?}"
     );
 }
 

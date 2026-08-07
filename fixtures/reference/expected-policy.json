@@ -53,7 +53,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference confirms the two borderless rows, authored 100-point cell boundaries, and zero post-table flow gap when `\\trgaph` is omitted. Corrected text origins differ by at most 0.02 points horizontally and 0.68 points vertically; bundled Times-compatible glyph widths remain up to about 3.0 points shorter than Word's Times New Roman."
+        "The registered Word 16.0 reference confirms the two borderless rows, authored 100-point cell boundaries, and zero post-table flow gap when `\\trgaph` is omitted. Source-corrected text origins differ by at most 0.03 points horizontally and 0.01 points vertically; bundled Times-compatible glyph widths remain up to about 3.0 points shorter than Word's Times New Roman."
       ]
     },
     {
@@ -82,7 +82,7 @@
       ],
       "expected_pdf_markers": [],
     "known_gaps": [
-      "The registered Word 16.0 reference confirms that the ignorable unknown destination is omitted wholesale, the unsupported in-flow `\\madeup123` control itself is consumed, following visible text survives, and escaped braces plus CP1252 hex escapes render normally. Corrected text origins differ by at most 0.02 points horizontally and 0.68 points vertically under bundled Times-compatible metrics."
+      "The registered Word 16.0 reference confirms that the ignorable unknown destination is omitted wholesale, the unsupported in-flow `\\madeup123` control itself is consumed, following visible text survives, and escaped braces plus CP1252 hex escapes render normally. Source-corrected text origins differ by at most 0.03 points horizontally and 0.01 points vertically under bundled Times-compatible metrics."
     ]
     },
     {
@@ -116,7 +116,7 @@
       ],
       "expected_pdf_markers": [],
     "known_gaps": [
-      "The registered Word 16.0 reference confirms that the safe `\\result` fallback occupies one ordinary paragraph between the surrounding paragraphs. Default Placeholder and explicit Strip policies produce the same passive visible output because a safe result exists; text origins differ from Word by at most 0.02 points horizontally and 0.68 points vertically under bundled Times-compatible metrics."
+      "The registered Word 16.0 reference confirms that the safe `\\result` fallback occupies one ordinary paragraph between the surrounding paragraphs. Default Placeholder and explicit Strip policies produce the same passive visible output because a safe result exists; source-corrected text origins differ from Word by at most 0.03 points horizontally and 0.01 points vertically under bundled Times-compatible metrics."
     ]
     },
     {
@@ -2949,7 +2949,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that STYLEREF selects the latest preceding safe paragraph using the named style, so the text result is NUMBERED TITLE rather than the earlier VISIBLE TITLE. The fixture omits mandatory \\levelstartat metadata; Word recovers the marker as 0., and WordCompatiblePassive now does likewise while StrictSpec retains historical one-based recovery. Word's \\n, \\r, and \\w results all omit trailing punctuation and produce 0 for this single-level list. The malformed \\nfoo field remains an intentional difference: Word emits a wrapped bold host-generated error, while the converter emits a deterministic passive placeholder. Both outputs are one-page text-only PDFs with zero drawings, images, links, annotations, or widgets; safe lines share x origins within 0.02 points and the established 0.83-point bundled Times-compatible vertical residual. Multilevel authored-context behavior is covered by a separate registered reference."
+        "The focused Word 16.0 audit confirms that STYLEREF selects the latest preceding safe paragraph using the named style, so the text result is NUMBERED TITLE rather than the earlier VISIBLE TITLE. The fixture omits mandatory \\levelstartat metadata; Word recovers the marker as 0., and WordCompatiblePassive now does likewise while StrictSpec retains historical one-based recovery. Word's \\n, \\r, and \\w results all omit trailing punctuation and produce 0 for this single-level list. The malformed \\nfoo field remains an intentional difference: Word emits a wrapped bold host-generated error, while the converter emits a deterministic passive placeholder. Both outputs are one-page text-only PDFs with zero drawings, images, links, annotations, or widgets; source-corrected safe lines share x origins within 0.03 points and baselines within 0.01 points. Multilevel authored-context behavior is covered by a separate registered reference."
       ]
     },
     {
@@ -4280,7 +4280,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word and converter both produce three exact 612-by-792-point portrait media boxes. Each paragraph starts at the same 72-point margins; origins differ by 0.02 points horizontally and 0.85 points vertically from bundled Times-compatible metrics."
+        "Word and converter both produce three exact 612-by-792-point portrait media boxes. Each paragraph starts at the same 72-point margins; source-corrected origins differ by at most 0.03 points horizontally and 0.01 points vertically."
       ]
     },
     {
@@ -4397,7 +4397,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Bundled Times-compatible font metrics differ slightly from Word's Times New Roman metrics; observed baselines differ by at most about 0.7 points."
+        "Source-corrected Times-compatible baselines differ from Word by at most 0.01 points; bundled glyph-width differences remain."
       ]
     },
     {
@@ -6673,7 +6673,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Greek decoding and PDF extraction for Αα Ππ Ωω. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the Greek endpoint by 3.96 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
+        "The focused Word 16.0 audit confirms exact semantic Greek decoding and PDF extraction for Αα Ππ Ωω. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the Greek endpoint by 3.96 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -6709,7 +6709,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Cyrillic decoding and PDF extraction for Привет. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the Cyrillic endpoint by 3.11 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
+        "The focused Word 16.0 audit confirms exact semantic Cyrillic decoding and PDF extraction for Привет. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the Cyrillic endpoint by 3.11 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -6745,7 +6745,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Central European decoding and PDF extraction for árvíztűrő. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the decoded endpoint by 3.01 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
+        "The focused Word 16.0 audit confirms exact semantic Central European decoding and PDF extraction for árvíztűrő. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the decoded endpoint by 3.01 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -6781,7 +6781,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Turkish decoding and PDF extraction for ĞİŞ ğış. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the decoded endpoint by 3.06 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
+        "The focused Word 16.0 audit confirms exact semantic Turkish decoding and PDF extraction for ĞİŞ ğış. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the decoded endpoint by 3.06 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -6817,7 +6817,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms exact semantic Baltic decoding and PDF extraction for Ąą Čč Ųų Śś Żż. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by 0.02 points, the decoded endpoint by 3.08 points, and baselines by at most 0.95 points from bundled/Base14 metric differences."
+        "The focused Word 16.0 audit confirms exact semantic Baltic decoding and PDF extraction for Ąą Čč Ųų Śś Żż. Both outputs use Times-compatible text with zero drawings and identical three-line flow; current/Word line starts differ by at most 0.03 points, the decoded endpoint by 3.08 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -6941,7 +6941,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word reference and converter both omit all zero-width controls from visible and selectable PDF text without changing adjacent character spacing. Remaining sub-point vertical and width differences are the shared bundled Times-compatible font-metric residual."
+        "The registered Word reference and converter both omit all zero-width controls from visible and selectable PDF text without changing adjacent character spacing. Source-corrected baselines differ by at most 0.01 points; remaining width differences come from bundled Times-compatible glyph metrics."
       ]
     },
     {
@@ -7324,7 +7324,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word 16.0 reference contains no checkbox drawing or glyph for either field; converter print output now matches that blank inline position, with only bundled Times-compatible text metric drift remaining."
+        "The Word 16.0 reference contains no checkbox drawing or glyph for either field; converter print output now matches that blank inline position, with source-corrected text baselines within 0.01 points and only bundled Times-compatible glyph-width drift remaining."
       ]
     },
     {
@@ -7390,7 +7390,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The Word 16.0 reference prints only the stored FORMTEXT result; resultless FORMTEXT defaults, empty text controls, and FORMDROPDOWN selections are blank. Converter output now matches its five-line flow and zero drawings, with only bundled Times-compatible metric drift remaining."
+        "The Word 16.0 reference prints only the stored FORMTEXT result; resultless FORMTEXT defaults, empty text controls, and FORMDROPDOWN selections are blank. Converter output now matches its five-line flow and zero drawings, with source-corrected baselines within 0.01 points and only bundled Times-compatible glyph-width drift remaining."
       ]
     },
     {
@@ -7495,7 +7495,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word 16.0 audit confirms that the first group-contained passwordhash is non-printing metadata, while the malformed second ungrouped passwordhash consumes the remainder of the enclosing document group as protection payload. Word therefore prints only Visible protected body. WordCompatiblePassive now matches that recovery; StrictSpec retains the bounded token-only hash stripping path and preserves subsequent safe body text. Current/Word visible line x origins differ by 0.02 points and baselines by the established 0.83-point bundled Times-compatible residual. Both PDFs are one page with zero drawings, images, links, annotations, widgets, actions, encryption, or permission dictionaries."
+        "The focused Word 16.0 audit confirms that the first group-contained passwordhash is non-printing metadata, while the malformed second ungrouped passwordhash consumes the remainder of the enclosing document group as protection payload. Word therefore prints only Visible protected body. WordCompatiblePassive now matches that recovery; StrictSpec retains the bounded token-only hash stripping path and preserves subsequent safe body text. Current/Word visible line x origins differ by at most 0.03 points and source-corrected baselines by at most 0.01 points. Both PDFs are one page with zero drawings, images, links, annotations, widgets, actions, encryption, or permission dictionaries."
       ]
     },
     {
@@ -7616,7 +7616,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word exposes private/script-like payload text and creates two links, while the converter intentionally strips those active destinations. Both outputs retain five 13.8-point lines with identical safe surrounding order; current/Word line starts differ by 0.02 points and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
+        "Word exposes private/script-like payload text and creates two links, while the converter intentionally strips those active destinations. Both outputs retain five 13.8-point lines with identical safe surrounding order; current/Word line starts differ by at most 0.03 points and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -7675,7 +7675,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word and current output share identical five-line safe text after annotation-boundary recovery: the removed annotation collapses its two boundary spaces to one, bookmark text remains inline, deleted text leaves Word's observed double space, and revised text remains visible. Line starts differ by 0.02 points and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
+        "Word and current output share identical five-line safe text after annotation-boundary recovery: the removed annotation collapses its two boundary spaces to one, bookmark text remains inline, deleted text leaves Word's observed double space, and revised text remains visible. Line starts differ by at most 0.03 points and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -7829,7 +7829,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word visibly prints the authored macro command and script payload, while the converter intentionally strips macro, script, VBA, ActiveX, and metadata payloads. Both outputs retain six 13.8-point lines with identical safe surrounding order; current/Word line starts differ by 0.02 points and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
+        "Word visibly prints the authored macro command and script payload, while the converter intentionally strips macro, script, VBA, ActiveX, and metadata payloads. Both outputs retain six 13.8-point lines with identical safe surrounding order; current/Word line starts differ by at most 0.03 points and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -7886,7 +7886,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word visibly prints the authored script tag and HTML base URL, while the converter intentionally strips them. Both outputs retain three bold 13.8-point lines; the safe XML line preserves Word's double boundary space and font-scaled invisible close-range advance, placing its final visible glyph origin within 0.02 points of Word. Line starts differ by 0.02 points and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
+        "Word visibly prints the authored script tag and HTML base URL, while the converter intentionally strips them. Both outputs retain three bold 13.8-point lines; the safe XML line preserves Word's double boundary space and font-scaled invisible close-range advance, placing its final visible glyph origin within 0.02 points of Word. Line starts differ by at most 0.03 points and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -8127,7 +8127,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "Word's outline-level and character-grid metadata have no visible pagination, indentation, or spacing effect in this fixture. Both outputs are one-page, two-line, text-only PDFs with exact 13.8-point cadence; line starts differ by 0.02 points, endpoints by at most 3.04 points, and baselines by 0.83-0.84 points under bundled Times-compatible metrics."
+        "Word's outline-level and character-grid metadata have no visible pagination, indentation, or spacing effect in this fixture. Both outputs are one-page, two-line, text-only PDFs with exact 13.8-point cadence; line starts differ by at most 0.03 points, endpoints by at most 3.04 points, and source-corrected baselines by at most 0.01 points."
       ]
     },
     {
@@ -8254,7 +8254,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The focused Word audit proves twoinone is the visible control in this sequence: each paragraph splits after its first word into two 6-point rows within one 13.8-point slot. Current/Word row x origins differ by 0.02 points, endpoints by at most 0.11 points, and baselines by 0.35-0.55 points under bundled Tinos metrics. Word also emits a non-painted trailing 12-point paragraph space that the converter normalizes away; remaining compatibility controls are inert for this fixture's visible flow."
+        "The focused Word audit proves twoinone is the visible control in this sequence: each paragraph splits after its first word into two 6-point rows within one 13.8-point slot. Current/Word row x origins differ by at most 0.03 points, endpoints by at most 0.11 points, and source-corrected baselines by at most 0.13 points. Word also emits a non-painted trailing 12-point paragraph space that the converter normalizes away; remaining compatibility controls are inert for this fixture's visible flow."
       ]
     },
     {
@@ -8372,7 +8372,7 @@
       ],
       "expected_pdf_markers": [],
       "known_gaps": [
-        "The registered Word 16.0 reference confirms the authored header and footer distances and 72-point horizontal origin. Converter text boxes sit 0.66 points above Word for the header and body and 0.95 points above for the footer, consistent with the bounded bundled Times-compatible metric-box approximation."
+        "The registered Word 16.0 reference confirms the authored header and footer distances and 72-point horizontal origin. Source-corrected header, body, and footer baselines differ from Word by at most 0.08 points, with line starts within 0.03 points."
       ]
     },
     {

@@ -45,6 +45,7 @@ const PASSIVE_MATH_FRACTION_RULE_WIDTH_POINTS: f32 = 0.84;
 const PASSIVE_MATH_FRACTION_RULE_BASELINE_OFFSET_POINTS: f32 = 3.42;
 const PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER: f32 = 1.47;
 const WORD_ARIAL_BASELINE_INSET_EM: f32 = 19.0 / 240.0;
+const WORD_TIMES_BASELINE_INSET_EM: f32 = 5.0 / 72.0;
 const WORD_CAMBRIA_MATH_NARY_BASELINE_RISE_EM: f32 = 0.04;
 const MAX_ABSOLUTE_FRAME_LAYOUT_REFINEMENTS: usize = 4;
 const WORD_PARAGRAPH_FRAME_PAGE_EDGE_INSET_POINTS: f32 = 18.0;
@@ -14013,7 +14014,7 @@ fn push_line_with_rotation(
 }
 
 fn word_compatible_source_line_baseline_delta_points(line: &Line, document: &Document) -> f32 {
-    let arial_size = line
+    let source_inset = line
         .runs
         .iter()
         .filter(|run| {
@@ -14022,15 +14023,29 @@ fn word_compatible_source_line_baseline_delta_points(line: &Line, document: &Doc
                 && inline_image_marker_index(&run.text).is_none()
         })
         .filter_map(|run| {
-            let name = font_for_style(document, &run.style)?
-                .name
-                .trim()
-                .to_ascii_lowercase();
-            matches!(name.as_str(), "arial" | "liberation sans")
-                .then(|| run.style.font_size_points())
+            let inset_em = match font_for_style(document, &run.style) {
+                Some(font) => {
+                    let name = font.name.trim().to_ascii_lowercase();
+                    if matches!(name.as_str(), "arial" | "liberation sans") {
+                        WORD_ARIAL_BASELINE_INSET_EM
+                    } else if name == "tinos"
+                        || name == "times new roman"
+                        || name.starts_with("times new roman ")
+                    {
+                        WORD_TIMES_BASELINE_INSET_EM
+                    } else {
+                        return None;
+                    }
+                }
+                None if font_family_for_style(document, &run.style) == PdfFontFamily::Times => {
+                    WORD_TIMES_BASELINE_INSET_EM
+                }
+                None => return None,
+            };
+            Some(run.style.font_size_points() * inset_em)
         })
         .reduce(f32::max);
-    arial_size.map_or(0.0, |size| -(size * WORD_ARIAL_BASELINE_INSET_EM))
+    -source_inset.unwrap_or(0.0)
 }
 
 fn word_compatible_source_run_baseline_delta_points(
@@ -28128,6 +28143,32 @@ mod tests {
 
         assert!((twelve_point_page_height - twelve_point_baseline - 47.30).abs() < 0.03);
         assert!((twenty_four_point_page_height - twenty_four_point_baseline - 40.60).abs() < 0.03);
+    }
+
+    #[test]
+    fn times_lines_use_word_source_baselines_for_explicit_and_legacy_defaults() {
+        let provider = FontProvider::browser_safe_defaults();
+        let first_fragment = |rtf: &str, needle: &str| {
+            let parsed = parse_rtf(rtf).unwrap();
+            let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
+            let fragment = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::Text(fragment) if fragment.text.contains(needle) => Some(fragment),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing text fragment containing {needle:?}"));
+            (layout.pages[0].height, fragment.baseline_y)
+        };
+
+        let (legacy_page_height, legacy_baseline) =
+            first_fragment(include_str!("../fixtures/table-ish.rtf"), "Name");
+        let (explicit_page_height, explicit_baseline) =
+            first_fragment(include_str!("../docs/sample.rtf"), "It");
+
+        assert!((legacy_page_height - legacy_baseline - 83.18).abs() < 0.03);
+        assert!((explicit_page_height - explicit_baseline - 85.05).abs() < 0.03);
     }
 
     #[test]
