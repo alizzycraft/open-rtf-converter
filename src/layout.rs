@@ -15414,9 +15414,7 @@ pub(crate) fn source_word_compatible_advance_points(
         .or_else(|| source_aptos_advance_points(font, style, ch, size, font_provider))
         .or_else(|| source_dingbat_advance_points(font, ch, size))
         .or_else(|| {
-            style
-                .passive_math_nary_id
-                .is_some()
+            (style.passive_math && style.passive_math_fraction_id.is_none())
                 .then(|| source_cambria_math_advance_points(font, ch, size))
                 .flatten()
         })
@@ -28103,7 +28101,7 @@ mod tests {
         };
         let size = 12.0;
         let mut style = CharacterStyle::default();
-        style.passive_math_nary_id = Some(1);
+        style.passive_math = true;
         let expected = [
             ('\u{2211}', 1451.0 / 2048.0),
             ('\u{220f}', 1663.0 / 2048.0),
@@ -28124,6 +28122,17 @@ mod tests {
             None
         );
         style.passive_math_nary_id = None;
+        assert!(
+            source_word_compatible_advance_points(Some(&font), &style, 'm', size, None).is_some()
+        );
+        style.passive_math_fraction_id = Some(1);
+        assert_eq!(
+            source_word_compatible_advance_points(Some(&font), &style, '+', size, None),
+            None,
+            "stacked fractions retain their independently calibrated bounded width model"
+        );
+        style.passive_math_fraction_id = None;
+        style.passive_math = false;
         assert_eq!(
             source_word_compatible_advance_points(Some(&font), &style, 'm', size, None),
             None
