@@ -9,7 +9,7 @@ use crate::config::RtfParseOptions;
 use crate::diagnostics::Diagnostic;
 use crate::fonts::{FontCoverage, FontProvider, FontProviderError};
 use crate::layout::{
-    ImageFragment, LayoutDocument, LayoutEngine, LayoutItem, PdfFontFamily, TextFragment,
+    LayoutDocument, LayoutEngine, LayoutItem, PdfFontFamily, TextFragment,
     passive_pdf_font_family_for_font,
 };
 use crate::model::{Document, FontDef, ImageFormat, StaticImageVectorCommand};
@@ -221,7 +221,7 @@ fn passive_font_substitution_diagnostics(
 
 fn collect_visible_font_indexes(layout: &LayoutDocument) -> HashSet<i32> {
     let mut indexes = HashSet::new();
-    for_each_layout_text_fragment(layout, &mut |fragment| {
+    layout.for_each_text_fragment(&mut |fragment| {
         if !fragment.text.is_empty() {
             indexes.insert(fragment.style.font_index);
         }
@@ -242,7 +242,7 @@ fn unsupported_passive_glyph_diagnostics(
         .map(|font| (font.index, font))
         .collect::<HashMap<_, _>>();
 
-    for_each_layout_text_fragment(layout, &mut |fragment| {
+    layout.for_each_text_fragment(&mut |fragment| {
         collect_unsupported_glyph_diagnostic_from_fragment(
             fragment,
             &fonts_by_index,
@@ -330,7 +330,7 @@ fn collect_unsupported_glyph_diagnostics_from_vector_images(
     seen: &mut HashSet<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for_each_layout_image_fragment(layout, &mut |fragment| {
+    layout.for_each_image_fragment(&mut |fragment| {
         if fragment.image.format != ImageFormat::WmfVector {
             return;
         }
@@ -354,90 +354,6 @@ fn collect_unsupported_glyph_diagnostics_from_vector_images(
             ));
         }
     });
-}
-
-fn for_each_layout_text_fragment<F>(layout: &LayoutDocument, callback: &mut F)
-where
-    F: FnMut(&TextFragment),
-{
-    for page in &layout.pages {
-        for item in &page.items {
-            for_each_layout_item_text_fragment(item, callback);
-        }
-    }
-}
-
-fn for_each_layout_image_fragment<F>(layout: &LayoutDocument, callback: &mut F)
-where
-    F: FnMut(&ImageFragment),
-{
-    for page in &layout.pages {
-        for item in &page.items {
-            for_each_layout_item_image_fragment(item, callback);
-        }
-    }
-}
-
-fn for_each_layout_item_text_fragment<F>(item: &LayoutItem, callback: &mut F)
-where
-    F: FnMut(&TextFragment),
-{
-    let mut item = item;
-    loop {
-        match item {
-            LayoutItem::Text(fragment) => {
-                callback(fragment);
-                return;
-            }
-            LayoutItem::Drawing(fragment) => {
-                item = &fragment.item;
-            }
-            LayoutItem::Opacity { item: nested, .. }
-            | LayoutItem::ClipRect { item: nested, .. } => {
-                item = nested;
-            }
-            LayoutItem::Highlight { .. }
-            | LayoutItem::Underline { .. }
-            | LayoutItem::Line { .. }
-            | LayoutItem::CappedLine { .. }
-            | LayoutItem::JoinedPolyline { .. }
-            | LayoutItem::Ellipse { .. }
-            | LayoutItem::RoundedRectangle { .. }
-            | LayoutItem::Polygon { .. }
-            | LayoutItem::Image(_) => return,
-        }
-    }
-}
-
-fn for_each_layout_item_image_fragment<F>(item: &LayoutItem, callback: &mut F)
-where
-    F: FnMut(&ImageFragment),
-{
-    let mut item = item;
-    loop {
-        match item {
-            LayoutItem::Image(fragment) => {
-                callback(fragment);
-                return;
-            }
-            LayoutItem::Drawing(fragment) => {
-                item = &fragment.item;
-            }
-            LayoutItem::Opacity { item: nested, .. }
-            | LayoutItem::ClipRect { item: nested, .. } => {
-                item = nested;
-            }
-            LayoutItem::Text(_)
-            | LayoutItem::Highlight { .. }
-            | LayoutItem::Underline { .. }
-            | LayoutItem::Line { .. }
-            | LayoutItem::CappedLine { .. }
-            | LayoutItem::JoinedPolyline { .. }
-            | LayoutItem::Ellipse { .. }
-            | LayoutItem::RoundedRectangle { .. }
-            | LayoutItem::Polygon { .. } => return,
-        }
-    }
 }
 
 fn font_provider_has_asset_for_font(font_provider: &FontProvider, font: &FontDef) -> bool {

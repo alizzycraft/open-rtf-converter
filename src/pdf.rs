@@ -735,7 +735,7 @@ pub fn render_pdf_with_font_provider(
     for (page_idx, page) in layout.pages.iter().enumerate() {
         let page_images = image_refs.get(page_idx).map(Vec::as_slice).unwrap_or(&[]);
         let mut image_ref_cursor = 0usize;
-        for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+        page.for_each_image_fragment(&mut |fragment| {
             if !image_format_uses_xobject(fragment.image.format) {
                 if fragment.image.format == ImageFormat::WmfVector {
                     for command in &fragment.image.vector_commands {
@@ -1417,7 +1417,7 @@ fn collect_used_font_indexes_for_page(
     font_provider: Option<&FontProvider>,
 ) -> Vec<usize> {
     let mut used = [false; 14];
-    for_each_layout_text_fragment_on_page(page, &mut |fragment| {
+    page.for_each_text_fragment(&mut |fragment| {
         if text_fragment_renders_as_passive_vector_only(fragment) {
             return;
         }
@@ -1432,7 +1432,7 @@ fn collect_used_font_indexes_for_page(
             font_resource_for_style(fragment.font_family, &fragment.style),
         );
     });
-    for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+    page.for_each_image_fragment(&mut |fragment| {
         if fragment.image.format == ImageFormat::Placeholder
             && fragment.width >= 96.0
             && fragment.height >= 24.0
@@ -1453,86 +1453,6 @@ fn collect_used_font_indexes_for_page(
         }
     });
     used_font_index_list(&used)
-}
-
-fn for_each_layout_text_fragment_on_page<F>(page: &crate::layout::LayoutPage, callback: &mut F)
-where
-    F: FnMut(&TextFragment),
-{
-    for item in &page.items {
-        for_each_layout_item_text_fragment(item, callback);
-    }
-}
-
-fn for_each_layout_item_text_fragment<F>(item: &LayoutItem, callback: &mut F)
-where
-    F: FnMut(&TextFragment),
-{
-    let mut item = item;
-    loop {
-        match item {
-            LayoutItem::Text(fragment) => {
-                callback(fragment);
-                return;
-            }
-            LayoutItem::Drawing(fragment) => {
-                item = &fragment.item;
-            }
-            LayoutItem::Opacity { item: nested, .. }
-            | LayoutItem::ClipRect { item: nested, .. } => {
-                item = nested;
-            }
-            LayoutItem::Highlight { .. }
-            | LayoutItem::Underline { .. }
-            | LayoutItem::Line { .. }
-            | LayoutItem::CappedLine { .. }
-            | LayoutItem::JoinedPolyline { .. }
-            | LayoutItem::Ellipse { .. }
-            | LayoutItem::RoundedRectangle { .. }
-            | LayoutItem::Polygon { .. }
-            | LayoutItem::Image(_) => return,
-        }
-    }
-}
-
-fn for_each_layout_image_fragment_on_page<F>(page: &crate::layout::LayoutPage, callback: &mut F)
-where
-    F: FnMut(&crate::layout::ImageFragment),
-{
-    for item in &page.items {
-        for_each_layout_item_image_fragment(item, callback);
-    }
-}
-
-fn for_each_layout_item_image_fragment<F>(item: &LayoutItem, callback: &mut F)
-where
-    F: FnMut(&crate::layout::ImageFragment),
-{
-    let mut item = item;
-    loop {
-        match item {
-            LayoutItem::Image(fragment) => {
-                callback(fragment);
-                return;
-            }
-            LayoutItem::Drawing(fragment) => {
-                item = &fragment.item;
-            }
-            LayoutItem::Opacity { item: nested, .. }
-            | LayoutItem::ClipRect { item: nested, .. } => {
-                item = nested;
-            }
-            LayoutItem::Text(_)
-            | LayoutItem::Highlight { .. }
-            | LayoutItem::Underline { .. }
-            | LayoutItem::Line { .. }
-            | LayoutItem::CappedLine { .. }
-            | LayoutItem::JoinedPolyline { .. }
-            | LayoutItem::Ellipse { .. }
-            | LayoutItem::RoundedRectangle { .. }
-            | LayoutItem::Polygon { .. } => return,
-        }
-    }
 }
 
 fn collect_page_opacity_pairs(page: &crate::layout::LayoutPage) -> Vec<(u8, u8)> {
@@ -1581,7 +1501,7 @@ fn collect_supplied_pdf_fonts(
     };
     let mut fonts = Vec::<SuppliedPdfFont>::new();
     for page in &layout.pages {
-        for_each_layout_text_fragment_on_page(page, &mut |fragment| {
+        page.for_each_text_fragment(&mut |fragment| {
             let Some((asset_index, glyphs, _encoded)) =
                 supplied_text_encoding_parts(fragment, layout, font_provider)
             else {
@@ -1630,7 +1550,7 @@ fn collect_used_supplied_font_asset_indexes(
     };
     let mut indexes = Vec::<usize>::new();
     for page in &layout.pages {
-        for_each_layout_text_fragment_on_page(page, &mut |fragment| {
+        page.for_each_text_fragment(&mut |fragment| {
             let Some((asset_index, _glyphs, _encoded)) =
                 supplied_text_encoding_parts(fragment, layout, font_provider)
             else {
@@ -1654,7 +1574,7 @@ fn collect_page_supplied_font_indexes(
         .iter()
         .map(|page| {
             let mut indexes = Vec::new();
-            for_each_layout_text_fragment_on_page(page, &mut |fragment| {
+            page.for_each_text_fragment(&mut |fragment| {
                 let Some(encoding) =
                     encode_supplied_text_fragment(fragment, layout, font_provider, supplied_fonts)
                 else {
@@ -1676,7 +1596,7 @@ fn collect_extended_latin_font_usage(
     let mut usage: [ExtendedLatinUsage; 14] =
         std::array::from_fn(|_| ExtendedLatinUsage::default());
     for page in &layout.pages {
-        for_each_layout_text_fragment_on_page(page, &mut |fragment| {
+        page.for_each_text_fragment(&mut |fragment| {
             if text_fragment_renders_as_passive_vector_only(fragment) {
                 return;
             }
@@ -2113,7 +2033,7 @@ fn collect_image_refs(layout: &LayoutDocument, first_image_id: i32) -> Vec<Vec<P
         .iter()
         .map(|page| {
             let mut refs = Vec::new();
-            for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+            page.for_each_image_fragment(&mut |fragment| {
                 if image_format_uses_xobject(fragment.image.format) {
                     let id = Ref::new(next_id);
                     let name = format!("Im{}", next_id - first_image_id + 1).into_bytes();
@@ -2186,7 +2106,7 @@ fn image_format_uses_passive_jpeg_luminosity_blend(format: ImageFormat) -> bool 
 
 fn page_uses_passive_jpeg_luminosity_blend(page: &crate::layout::LayoutPage) -> bool {
     let mut uses_blend = false;
-    for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+    page.for_each_image_fragment(&mut |fragment| {
         uses_blend |= image_format_uses_passive_jpeg_luminosity_blend(fragment.image.format);
     });
     uses_blend
@@ -2198,7 +2118,7 @@ fn count_image_xobjects(layout: &LayoutDocument) -> usize {
         .iter()
         .map(|page| {
             let mut count = 0usize;
-            for_each_layout_image_fragment_on_page(page, &mut |fragment| {
+            page.for_each_image_fragment(&mut |fragment| {
                 if image_format_uses_xobject(fragment.image.format) {
                     count = count
                         .saturating_add(1)

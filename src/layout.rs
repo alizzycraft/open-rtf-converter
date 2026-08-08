@@ -274,6 +274,86 @@ pub struct DrawingFragment {
     pub item: Box<LayoutItem>,
 }
 
+impl LayoutDocument {
+    pub(crate) fn for_each_text_fragment(&self, callback: &mut impl FnMut(&TextFragment)) {
+        for page in &self.pages {
+            page.for_each_text_fragment(callback);
+        }
+    }
+
+    pub(crate) fn for_each_image_fragment(&self, callback: &mut impl FnMut(&ImageFragment)) {
+        for page in &self.pages {
+            page.for_each_image_fragment(callback);
+        }
+    }
+}
+
+impl LayoutPage {
+    pub(crate) fn for_each_text_fragment(&self, callback: &mut impl FnMut(&TextFragment)) {
+        for item in &self.items {
+            item.for_each_text_fragment(callback);
+        }
+    }
+
+    pub(crate) fn for_each_image_fragment(&self, callback: &mut impl FnMut(&ImageFragment)) {
+        for item in &self.items {
+            item.for_each_image_fragment(callback);
+        }
+    }
+}
+
+impl LayoutItem {
+    fn for_each_text_fragment(&self, callback: &mut impl FnMut(&TextFragment)) {
+        let mut item = self;
+        loop {
+            match item {
+                Self::Text(fragment) => {
+                    callback(fragment);
+                    return;
+                }
+                Self::Drawing(fragment) => item = &fragment.item,
+                Self::Opacity { item: nested, .. } | Self::ClipRect { item: nested, .. } => {
+                    item = nested;
+                }
+                Self::Highlight { .. }
+                | Self::Underline { .. }
+                | Self::Line { .. }
+                | Self::CappedLine { .. }
+                | Self::JoinedPolyline { .. }
+                | Self::Ellipse { .. }
+                | Self::RoundedRectangle { .. }
+                | Self::Polygon { .. }
+                | Self::Image(_) => return,
+            }
+        }
+    }
+
+    fn for_each_image_fragment(&self, callback: &mut impl FnMut(&ImageFragment)) {
+        let mut item = self;
+        loop {
+            match item {
+                Self::Image(fragment) => {
+                    callback(fragment);
+                    return;
+                }
+                Self::Drawing(fragment) => item = &fragment.item,
+                Self::Opacity { item: nested, .. } | Self::ClipRect { item: nested, .. } => {
+                    item = nested;
+                }
+                Self::Text(_)
+                | Self::Highlight { .. }
+                | Self::Underline { .. }
+                | Self::Line { .. }
+                | Self::CappedLine { .. }
+                | Self::JoinedPolyline { .. }
+                | Self::Ellipse { .. }
+                | Self::RoundedRectangle { .. }
+                | Self::Polygon { .. } => return,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct PdfColor {
     pub red: f32,
@@ -16380,6 +16460,32 @@ mod tests {
             word_spacing: 0.0,
             style: CharacterStyle::default(),
         })
+    }
+
+    #[test]
+    fn centralized_fragment_traversal_reaches_deep_wrapped_leaf_once() {
+        let item = deep_drawing_wrapped_item(
+            LayoutItem::Opacity {
+                fill_percent: 80,
+                stroke_percent: 70,
+                item: Box::new(LayoutItem::ClipRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 20.0,
+                    item: Box::new(passive_text_item("deep leaf", 0.0, 12.0)),
+                }),
+            },
+            128,
+        );
+
+        let mut text = Vec::new();
+        item.for_each_text_fragment(&mut |fragment| text.push(fragment.text.clone()));
+        let mut image_count = 0;
+        item.for_each_image_fragment(&mut |_| image_count += 1);
+
+        assert_eq!(text, ["deep leaf"]);
+        assert_eq!(image_count, 0);
     }
 
     #[test]
