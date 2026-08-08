@@ -281,7 +281,7 @@ pub struct PdfColor {
     pub blue: f32,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum PdfFontFamily {
     Helvetica,
     Courier,
@@ -1849,7 +1849,7 @@ fn layout_footnote_paragraph(
     let mut footnote_column = 0;
     let mut continuation_hook =
         |pages: &mut Vec<LayoutPage>, cursor_y: &mut f32, geometry: &PageGeometry| {
-            let mut separator_geometry = geometry.clone();
+            let mut separator_geometry = *geometry;
             push_note_separator(
                 pages,
                 cursor_y,
@@ -2320,7 +2320,7 @@ fn layout_endnote_paragraph(
     let mut endnote_column = 0;
     let mut continuation_hook =
         |pages: &mut Vec<LayoutPage>, cursor_y: &mut f32, geometry: &PageGeometry| {
-            let mut separator_geometry = geometry.clone();
+            let mut separator_geometry = *geometry;
             push_note_separator(
                 pages,
                 cursor_y,

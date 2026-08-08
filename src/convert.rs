@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
 use std::path::Path;
 
@@ -190,7 +192,7 @@ fn passive_font_substitution_diagnostics(
     font_provider: &FontProvider,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let mut seen = Vec::<(String, PdfFontFamily)>::new();
+    let mut seen = HashSet::<(String, PdfFontFamily)>::new();
     let used_font_indexes = collect_visible_font_indexes(layout);
     for font in &document.fonts {
         if !used_font_indexes.contains(&font.index) {
@@ -201,10 +203,9 @@ fn passive_font_substitution_diagnostics(
             continue;
         }
         let key = (font.name.to_ascii_lowercase(), family);
-        if seen.contains(&key) {
+        if !seen.insert(key) {
             continue;
         }
-        seen.push(key);
         if font_name_matches_exact_pdf_base_font(&font.name, family) {
             continue;
         }
@@ -218,20 +219,14 @@ fn passive_font_substitution_diagnostics(
     diagnostics
 }
 
-fn collect_visible_font_indexes(layout: &LayoutDocument) -> Vec<i32> {
-    let mut indexes = Vec::new();
+fn collect_visible_font_indexes(layout: &LayoutDocument) -> HashSet<i32> {
+    let mut indexes = HashSet::new();
     for_each_layout_text_fragment(layout, &mut |fragment| {
         if !fragment.text.is_empty() {
-            push_visible_font_index(&mut indexes, fragment.style.font_index);
+            indexes.insert(fragment.style.font_index);
         }
     });
     indexes
-}
-
-fn push_visible_font_index(indexes: &mut Vec<i32>, index: i32) {
-    if !indexes.contains(&index) {
-        indexes.push(index);
-    }
 }
 
 fn unsupported_passive_glyph_diagnostics(
@@ -240,12 +235,17 @@ fn unsupported_passive_glyph_diagnostics(
     font_provider: &FontProvider,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let mut seen = Vec::<(i32, &'static str)>::new();
+    let mut seen = HashSet::<(i32, &'static str)>::new();
+    let fonts_by_index = document
+        .fonts
+        .iter()
+        .map(|font| (font.index, font))
+        .collect::<HashMap<_, _>>();
 
     for_each_layout_text_fragment(layout, &mut |fragment| {
         collect_unsupported_glyph_diagnostic_from_fragment(
             fragment,
-            document,
+            &fonts_by_index,
             font_provider,
             &mut seen,
             &mut diagnostics,
@@ -258,24 +258,19 @@ fn unsupported_passive_glyph_diagnostics(
 
 fn collect_unsupported_glyph_diagnostic_from_fragment(
     fragment: &TextFragment,
-    document: &Document,
+    fonts_by_index: &HashMap<i32, &FontDef>,
     font_provider: &FontProvider,
-    seen: &mut Vec<(i32, &'static str)>,
+    seen: &mut HashSet<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some((script, sample_char)) = unsupported_passive_glyph_script(&fragment.text) else {
         return;
     };
     let key = (fragment.style.font_index, script);
-    if seen.contains(&key) {
+    if !seen.insert(key) {
         return;
     }
-    seen.push(key);
-    let Some(font) = document
-        .fonts
-        .iter()
-        .find(|font| font.index == fragment.style.font_index)
-    else {
+    let Some(font) = fonts_by_index.get(&fragment.style.font_index).copied() else {
         diagnostics.push(Diagnostic::warning(
             format!(
                 "{} characters for font 'unknown' need passive font asset support; current PDF base-font fallback may render replacement glyphs",
@@ -332,7 +327,7 @@ fn fragment_latin_extended_is_covered_by_passive_base14(fragment: &TextFragment)
 
 fn collect_unsupported_glyph_diagnostics_from_vector_images(
     layout: &LayoutDocument,
-    seen: &mut Vec<(i32, &'static str)>,
+    seen: &mut HashSet<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for_each_layout_image_fragment(layout, &mut |fragment| {
@@ -347,10 +342,9 @@ fn collect_unsupported_glyph_diagnostics_from_vector_images(
                 continue;
             };
             let key = (i32::MIN, script);
-            if seen.contains(&key) {
+            if !seen.insert(key) {
                 continue;
             }
-            seen.push(key);
             diagnostics.push(Diagnostic::warning(
                 format!(
                     "{} characters in passive WMF vector text need passive vector font support; current PDF base-font fallback may render replacement or mismatched glyphs",

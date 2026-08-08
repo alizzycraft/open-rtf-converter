@@ -29,19 +29,10 @@ const BUNDLED_BROWSER_SAFE_MONO_ITALIC_FONT: &[u8] =
 const BUNDLED_BROWSER_SAFE_MONO_BOLD_ITALIC_FONT: &[u8] =
     include_bytes!("../fixtures/fonts/Cousine-BoldItalic.ttf");
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FontProvider {
     pub assets: Vec<FontAsset>,
     pub limits: FontProviderLimits,
-}
-
-impl Default for FontProvider {
-    fn default() -> Self {
-        Self {
-            assets: Vec::new(),
-            limits: FontProviderLimits::default(),
-        }
-    }
 }
 
 impl FontProvider {
@@ -132,7 +123,7 @@ impl FontProvider {
     }
 
     pub fn has_asset_for_family(&self, family_name: &str) -> bool {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         if family_name.is_empty() {
             return false;
         }
@@ -142,7 +133,7 @@ impl FontProvider {
     }
 
     pub(crate) fn has_exact_asset_for_family(&self, family_name: &str) -> bool {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         !family_name.is_empty()
             && self
                 .assets
@@ -151,7 +142,7 @@ impl FontProvider {
     }
 
     pub fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         if family_name.is_empty() {
             return FontCoverage::NoAsset;
         }
@@ -184,12 +175,12 @@ impl FontProvider {
         style: FontAssetStyle,
         ch: char,
     ) -> Option<FontGlyphMetrics> {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         if family_name.is_empty() {
             return None;
         }
-        let asset = self.best_metric_asset_for_family_style_char(&family_name, style, ch)?;
-        glyph_metrics_for_asset(asset, ch)
+        self.best_metric_asset_for_family_style_char(family_name, style, ch)
+            .map(|(_, metrics)| metrics)
     }
 
     pub(crate) fn exact_glyph_metrics_for_char_with_style(
@@ -198,17 +189,14 @@ impl FontProvider {
         style: FontAssetStyle,
         ch: char,
     ) -> Option<FontGlyphMetrics> {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         if family_name.is_empty() {
             return None;
         }
-        let asset = self
-            .assets
-            .iter()
-            .filter(|asset| asset.family_match_priority(&family_name) == Some(0))
-            .filter(|asset| glyph_metrics_for_asset(asset, ch).is_some())
-            .min_by_key(|asset| supplied_font_style_mismatch_score(asset.style, style))?;
-        glyph_metrics_for_asset(asset, ch)
+        self.best_asset_value_for_family_style(family_name, style, true, |asset| {
+            glyph_metrics_for_asset(asset, ch)
+        })
+        .map(|(_, metrics)| metrics)
     }
 
     pub(crate) fn pair_kerning_points_for_chars_with_style(
@@ -219,22 +207,14 @@ impl FontProvider {
         right: char,
         font_size_points: f32,
     ) -> Option<f32> {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         if family_name.is_empty() {
             return None;
         }
-        let asset = self
-            .assets
-            .iter()
-            .filter(|asset| asset.matches_family(&family_name))
-            .filter(|asset| font_asset_supports_pair(asset, left, right))
-            .min_by_key(|asset| {
-                (
-                    asset.family_match_priority(&family_name).unwrap_or(u8::MAX),
-                    supplied_font_style_mismatch_score(asset.style, style),
-                )
-            })?;
-        font_asset_pair_kerning_points(asset, left, right, font_size_points)
+        self.best_asset_value_for_family_style(family_name, style, false, |asset| {
+            font_asset_pair_kerning_points(asset, left, right, font_size_points)
+        })
+        .map(|(_, points)| points)
     }
 
     pub(crate) fn exact_pair_kerning_points_for_chars_with_style(
@@ -245,17 +225,14 @@ impl FontProvider {
         right: char,
         font_size_points: f32,
     ) -> Option<f32> {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         if family_name.is_empty() {
             return None;
         }
-        let asset = self
-            .assets
-            .iter()
-            .filter(|asset| asset.family_match_priority(&family_name) == Some(0))
-            .filter(|asset| font_asset_supports_pair(asset, left, right))
-            .min_by_key(|asset| supplied_font_style_mismatch_score(asset.style, style))?;
-        font_asset_pair_kerning_points(asset, left, right, font_size_points)
+        self.best_asset_value_for_family_style(family_name, style, true, |asset| {
+            font_asset_pair_kerning_points(asset, left, right, font_size_points)
+        })
+        .map(|(_, points)| points)
     }
 
     fn best_metric_asset_for_family_style_char(
@@ -263,17 +240,45 @@ impl FontProvider {
         family_name: &str,
         style: FontAssetStyle,
         ch: char,
-    ) -> Option<&FontAsset> {
-        self.assets
-            .iter()
-            .filter(|asset| asset.matches_family(family_name))
-            .filter(|asset| glyph_metrics_for_asset(asset, ch).is_some())
-            .min_by_key(|asset| {
-                (
-                    asset.family_match_priority(family_name).unwrap_or(u8::MAX),
-                    supplied_font_style_mismatch_score(asset.style, style),
-                )
-            })
+    ) -> Option<(&FontAsset, FontGlyphMetrics)> {
+        self.best_asset_value_for_family_style(family_name, style, false, |asset| {
+            glyph_metrics_for_asset(asset, ch)
+        })
+    }
+
+    fn best_asset_value_for_family_style<T>(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        exact_only: bool,
+        mut value_for_asset: impl FnMut(&FontAsset) -> Option<T>,
+    ) -> Option<(&FontAsset, T)> {
+        let mut best = None;
+        let mut best_key = (u8::MAX, u8::MAX);
+        for asset in &self.assets {
+            let Some(family_priority) = asset.family_match_priority(family_name) else {
+                continue;
+            };
+            if exact_only && family_priority != 0 {
+                continue;
+            }
+            let key = (
+                family_priority,
+                supplied_font_style_mismatch_score(asset.style, style),
+            );
+            if key >= best_key {
+                continue;
+            }
+            let Some(value) = value_for_asset(asset) else {
+                continue;
+            };
+            best_key = key;
+            best = Some((asset, value));
+            if key == (0, 0) {
+                break;
+            }
+        }
+        best
     }
 }
 
@@ -419,7 +424,7 @@ pub struct FontAsset {
 
 impl FontAsset {
     pub(crate) fn matches_family(&self, family_name: &str) -> bool {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         !family_name.is_empty()
             && self
                 .family_names
@@ -428,16 +433,16 @@ impl FontAsset {
     }
 
     pub(crate) fn family_match_priority(&self, family_name: &str) -> Option<u8> {
-        let family_name = normalized_family_name(family_name);
+        let family_name = family_name.trim();
         if family_name.is_empty() {
             return None;
         }
         let mut wildcard = false;
         for candidate in &self.family_names {
-            let candidate = normalized_family_name(candidate);
-            if is_wildcard_font_family_alias(&candidate) {
+            let candidate = candidate.trim();
+            if is_wildcard_font_family_alias(candidate) {
                 wildcard = true;
-            } else if font_family_names_match(&candidate, &family_name) {
+            } else if font_family_names_match(candidate, family_name) {
                 return Some(0);
             }
         }
@@ -500,12 +505,6 @@ fn glyph_metrics_for_asset(asset: &FontAsset, ch: char) -> Option<FontGlyphMetri
         descender_units: face.descender(),
         line_gap_units: face.line_gap(),
     })
-}
-
-fn font_asset_supports_pair(asset: &FontAsset, left: char, right: char) -> bool {
-    Face::parse(&asset.bytes, 0)
-        .ok()
-        .is_some_and(|face| face.glyph_index(left).is_some() && face.glyph_index(right).is_some())
 }
 
 pub(crate) fn font_asset_pair_kerning_points(
@@ -673,32 +672,35 @@ impl fmt::Display for FontProviderError {
 
 impl Error for FontProviderError {}
 
-fn normalized_family_name(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
-}
-
-fn canonical_word_charset_family_name(value: &str) -> String {
-    let normalized = normalized_family_name(value);
+fn canonical_word_charset_family_name(value: &str) -> &str {
+    let normalized = value.trim();
     for suffix in [" ce", " cyr", " greek", " tur", " baltic"] {
-        if let Some(base) = normalized.strip_suffix(suffix)
+        let Some(suffix_start) = normalized.len().checked_sub(suffix.len()) else {
+            continue;
+        };
+        let Some(candidate_suffix) = normalized.get(suffix_start..) else {
+            continue;
+        };
+        if candidate_suffix.eq_ignore_ascii_case(suffix)
+            && let Some(base) = normalized.get(..suffix_start)
             && !base.trim().is_empty()
         {
-            return base.trim().to_string();
+            return base.trim();
         }
     }
     normalized
 }
 
 fn font_family_names_match(left: &str, right: &str) -> bool {
-    let left = normalized_family_name(left);
-    let right = normalized_family_name(right);
+    let left = left.trim();
+    let right = right.trim();
     !left.is_empty()
         && !right.is_empty()
-        && (is_wildcard_font_family_alias(&left)
-            || is_wildcard_font_family_alias(&right)
-            || left == right
-            || canonical_word_charset_family_name(&left)
-                == canonical_word_charset_family_name(&right))
+        && (is_wildcard_font_family_alias(left)
+            || is_wildcard_font_family_alias(right)
+            || left.eq_ignore_ascii_case(right)
+            || canonical_word_charset_family_name(left)
+                .eq_ignore_ascii_case(canonical_word_charset_family_name(right)))
 }
 
 fn is_wildcard_font_family_alias(value: &str) -> bool {
@@ -746,6 +748,11 @@ mod tests {
                 "{family}"
             );
         }
+        assert!(provider.has_asset_for_family("  times new roman cYr  "));
+        assert_eq!(
+            provider.coverage_for_char("  TIMES NEW ROMAN greek  ", 'A'),
+            FontCoverage::Covered
+        );
     }
 
     #[test]
@@ -822,7 +829,7 @@ mod tests {
                 'A',
             )
             .expect("exact Times asset");
-        assert_eq!(selected.family_names, vec!["Times New Roman".to_string()]);
+        assert_eq!(selected.0.family_names, vec!["Times New Roman".to_string()]);
     }
 
     #[test]
@@ -955,7 +962,7 @@ mod tests {
             .expect("style-matched asset");
 
         assert_eq!(
-            selected.style,
+            selected.0.style,
             FontAssetStyle {
                 bold: true,
                 italic: true,
@@ -1007,7 +1014,7 @@ mod tests {
             .expect("closest style asset");
 
         assert_eq!(
-            selected.style,
+            selected.0.style,
             FontAssetStyle {
                 bold: true,
                 italic: false,
