@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CompatibilityMode {
     StrictSpec,
@@ -91,6 +93,21 @@ pub struct RtfLimits {
     pub max_pdf_output_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum LimitValidationError {
+    #[error("{field} must be non-negative, got {value}")]
+    Negative { field: &'static str, value: i64 },
+    #[error("{field} must be positive, got {value}")]
+    NonPositive { field: &'static str, value: i64 },
+    #[error("{min_field} ({min}) must not exceed {max_field} ({max})")]
+    InvertedRange {
+        min_field: &'static str,
+        min: i64,
+        max_field: &'static str,
+        max: i64,
+    },
+}
+
 impl Default for RtfLimits {
     fn default() -> Self {
         Self {
@@ -168,7 +185,7 @@ impl Default for RtfLimits {
 }
 
 impl RtfLimits {
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), LimitValidationError> {
         for (value, name) in [
             (self.max_image_crop_twips, "max_image_crop_twips"),
             (
@@ -215,7 +232,10 @@ impl RtfLimits {
             ),
         ] {
             if value < 0 {
-                return Err(name);
+                return Err(LimitValidationError::Negative {
+                    field: name,
+                    value: i64::from(value),
+                });
             }
         }
 
@@ -237,20 +257,36 @@ impl RtfLimits {
             ),
         ] {
             if value <= 0 {
-                return Err(name);
+                return Err(LimitValidationError::NonPositive {
+                    field: name,
+                    value: i64::from(value),
+                });
             }
         }
 
         if self.min_image_scaling_percent > self.max_image_scaling_percent {
-            return Err("min_image_scaling_percent must not exceed max_image_scaling_percent");
+            return Err(LimitValidationError::InvertedRange {
+                min_field: "min_image_scaling_percent",
+                min: i64::from(self.min_image_scaling_percent),
+                max_field: "max_image_scaling_percent",
+                max: i64::from(self.max_image_scaling_percent),
+            });
         }
         if self.min_page_dimension_twips > self.max_page_dimension_twips {
-            return Err("min_page_dimension_twips must not exceed max_page_dimension_twips");
+            return Err(LimitValidationError::InvertedRange {
+                min_field: "min_page_dimension_twips",
+                min: i64::from(self.min_page_dimension_twips),
+                max_field: "max_page_dimension_twips",
+                max: i64::from(self.max_page_dimension_twips),
+            });
         }
         if self.min_character_scaling_percent > self.max_character_scaling_percent {
-            return Err(
-                "min_character_scaling_percent must not exceed max_character_scaling_percent",
-            );
+            return Err(LimitValidationError::InvertedRange {
+                min_field: "min_character_scaling_percent",
+                min: i64::from(self.min_character_scaling_percent),
+                max_field: "max_character_scaling_percent",
+                max: i64::from(self.max_character_scaling_percent),
+            });
         }
         Ok(())
     }
@@ -328,5 +364,61 @@ impl RtfParseOptions {
             pdf_link_policy: PdfLinkPolicy::RenderVisibleTextOnly,
             limits: RtfLimits::browser_defaults(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_limit_sets_validate() {
+        assert_eq!(RtfLimits::default().validate(), Ok(()));
+        assert_eq!(RtfLimits::browser_defaults().validate(), Ok(()));
+    }
+
+    #[test]
+    fn validation_reports_negative_field_and_value() {
+        let mut limits = RtfLimits::default();
+        limits.max_table_row_offset_twips = -1;
+
+        assert_eq!(
+            limits.validate(),
+            Err(LimitValidationError::Negative {
+                field: "max_table_row_offset_twips",
+                value: -1,
+            })
+        );
+    }
+
+    #[test]
+    fn validation_reports_non_positive_field_and_value() {
+        let mut limits = RtfLimits::default();
+        limits.min_page_dimension_twips = 0;
+
+        assert_eq!(
+            limits.validate(),
+            Err(LimitValidationError::NonPositive {
+                field: "min_page_dimension_twips",
+                value: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn validation_reports_inverted_range_fields_and_values() {
+        let mut limits = RtfLimits::default();
+        limits.min_page_dimension_twips = 2_000;
+        limits.max_page_dimension_twips = 1_000;
+
+        assert_eq!(
+            limits.validate(),
+            Err(LimitValidationError::InvertedRange {
+                min_field: "min_page_dimension_twips",
+                min: 2_000,
+                max_field: "max_page_dimension_twips",
+                max: 1_000,
+            })
+        );
     }
 }

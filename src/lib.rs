@@ -8,7 +8,8 @@ pub mod pdf;
 pub mod rtf;
 
 pub use config::{
-    ActiveContentPolicy, CompatibilityMode, PdfLinkPolicy, RtfLimits, RtfParseOptions,
+    ActiveContentPolicy, CompatibilityMode, LimitValidationError, PdfLinkPolicy, RtfLimits,
+    RtfParseOptions,
 };
 #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
 pub use convert::convert_rtf_file_to_pdf;

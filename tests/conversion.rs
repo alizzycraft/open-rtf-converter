@@ -10,7 +10,7 @@ use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::rtf::ParseError;
 use open_rtf_converter::{
     ConvertError, ConvertOptions, FontAsset, FontAssetStyle, FontProvider, FontProviderLimits,
-    RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
+    LimitValidationError, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
 };
 use tempfile::tempdir;
 
@@ -27,6 +27,20 @@ fn convert_rtf_file_to_pdf(
         diagnostics: converted.diagnostics,
         pages: converted.pages,
     })
+}
+
+#[test]
+fn validates_limits_through_the_public_api() {
+    let mut limits = RtfLimits::default();
+    limits.max_font_size_half_points = 0;
+
+    assert_eq!(
+        limits.validate(),
+        Err(LimitValidationError::NonPositive {
+            field: "max_font_size_half_points",
+            value: 0,
+        })
+    );
 }
 
 #[test]

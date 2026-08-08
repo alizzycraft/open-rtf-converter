@@ -1,7 +1,9 @@
 use jpeg_decoder::{Decoder as JpegDecoder, PixelFormat as JpegPixelFormat};
 use thiserror::Error;
 
-use crate::config::{ActiveContentPolicy, CompatibilityMode, RtfLimits, RtfParseOptions};
+use crate::config::{
+    ActiveContentPolicy, CompatibilityMode, LimitValidationError, RtfLimits, RtfParseOptions,
+};
 use crate::diagnostics::Diagnostic;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
@@ -70,8 +72,8 @@ pub enum ParseError {
     MalformedInput { reason: String, offset: usize },
     #[error("active content rejected: {feature} at byte {offset}")]
     ActiveContentRejected { feature: String, offset: usize },
-    #[error("invalid RTF limits: {reason}")]
-    InvalidLimits { reason: &'static str },
+    #[error("invalid RTF limits: {0}")]
+    InvalidLimits(#[from] LimitValidationError),
 }
 
 #[derive(Debug, Clone)]
@@ -1972,10 +1974,7 @@ pub fn parse_rtf_bytes_with_options(
     input: &[u8],
     options: &RtfParseOptions,
 ) -> Result<ParseOutput, ParseError> {
-    options
-        .limits
-        .validate()
-        .map_err(|reason| ParseError::InvalidLimits { reason })?;
+    options.limits.validate()?;
     let tokens = Lexer::new(input, options.limits.clone()).tokenize()?;
     Parser::new(tokens, options.clone()).parse()
 }
@@ -46807,9 +46806,10 @@ mod tests {
         options.limits.max_table_row_offset_twips = -1;
         assert!(matches!(
             parse_rtf_bytes_with_options(br"{\rtf1\trowd\trleft10\cellx100 A\cell\row}", &options),
-            Err(ParseError::InvalidLimits {
-                reason: "max_table_row_offset_twips"
-            })
+            Err(ParseError::InvalidLimits(LimitValidationError::Negative {
+                field: "max_table_row_offset_twips",
+                value: -1,
+            }))
         ));
 
         let mut options = RtfParseOptions::default();
@@ -46817,9 +46817,14 @@ mod tests {
         options.limits.max_page_dimension_twips = 1_000;
         assert!(matches!(
             parse_rtf_bytes_with_options(br"{\rtf1\paperw1500 Text}", &options),
-            Err(ParseError::InvalidLimits {
-                reason: "min_page_dimension_twips must not exceed max_page_dimension_twips"
-            })
+            Err(ParseError::InvalidLimits(
+                LimitValidationError::InvertedRange {
+                    min_field: "min_page_dimension_twips",
+                    min: 2_000,
+                    max_field: "max_page_dimension_twips",
+                    max: 1_000,
+                }
+            ))
         ));
 
         let mut options = RtfParseOptions::default();
@@ -46827,9 +46832,14 @@ mod tests {
         options.limits.max_image_scaling_percent = 100;
         assert!(matches!(
             parse_rtf_bytes_with_options(br"{\rtf1{\pict\picscalex150 00}}", &options),
-            Err(ParseError::InvalidLimits {
-                reason: "min_image_scaling_percent must not exceed max_image_scaling_percent"
-            })
+            Err(ParseError::InvalidLimits(
+                LimitValidationError::InvertedRange {
+                    min_field: "min_image_scaling_percent",
+                    min: 200,
+                    max_field: "max_image_scaling_percent",
+                    max: 100,
+                }
+            ))
         ));
     }
 
