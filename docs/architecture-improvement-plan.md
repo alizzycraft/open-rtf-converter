@@ -1135,7 +1135,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | BASE-02 | Add CI format, check, Clippy, test, security, reference, and WASM jobs | BASE-01 | All five hosted-job command sets passed locally on 2026-08-09; hosted execution starts on push |
 | [x] | BASE-03 | Record deterministic fixture hashes/counts and benchmark procedure | BASE-02 | Five-fixture baseline, 2,402-test inventory, and repeatable harness recorded on 2026-08-09 |
 | [x] | CFG-01 | Add `LimitValidationError` and public `RtfLimits::validate` | BASE-02 | Negative, non-positive, inverted-range, parser propagation, and public API tests passed on 2026-08-09 |
-| [ ] | CFG-02 | Add `RtfParseOptions::validate` and `ConvertOptions::validate` | CFG-01 | Invalid configuration fails before parsing |
+| [x] | CFG-02 | Add `RtfParseOptions::validate` and `ConvertOptions::validate` | CFG-01 | Typed limit/font composition and pre-lexing rejection tests passed on 2026-08-09 |
 | [ ] | API-01 | Add crate docs and declare the supported root façade | BASE-02 | Doctest and downstream compile test pass |
 | [ ] | API-02 | Add bounded `inspect_rtf` font-family projection | CFG-02, API-01 | Inspection tests cover primary/alternate/deduplicated names |
 | [ ] | API-03 | Migrate CLI font discovery to `inspect_rtf` | API-02 | `src/main.rs` has no raw parser/model import |

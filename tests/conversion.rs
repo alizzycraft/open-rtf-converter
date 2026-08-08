@@ -9,8 +9,8 @@ use open_rtf_converter::ConvertReport;
 use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::rtf::ParseError;
 use open_rtf_converter::{
-    ConvertError, ConvertOptions, FontAsset, FontAssetStyle, FontProvider, FontProviderLimits,
-    LimitValidationError, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
+    ConvertError, ConvertOptions, ConvertOptionsError, FontAsset, FontAssetStyle, FontProvider,
+    FontProviderLimits, LimitValidationError, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
 };
 use tempfile::tempdir;
 
@@ -41,6 +41,53 @@ fn validates_limits_through_the_public_api() {
             value: 0,
         })
     );
+}
+
+#[test]
+fn validates_conversion_options_through_the_public_api() {
+    let mut options = ConvertOptions::default();
+    options.parse_options.limits.max_shape_dimension_twips = 0;
+
+    assert_eq!(
+        options.validate(),
+        Err(ConvertOptionsError::Limits(
+            LimitValidationError::NonPositive {
+                field: "max_shape_dimension_twips",
+                value: 0,
+            }
+        ))
+    );
+}
+
+#[test]
+fn conversion_validates_limits_before_lexing_input() {
+    let mut options = ConvertOptions::default();
+    options.parse_options.limits.max_shape_dimension_twips = 0;
+
+    let error = convert_rtf_to_pdf(b"}", &options).unwrap_err();
+    assert!(matches!(
+        error,
+        ConvertError::Parse(ParseError::InvalidLimits(
+            LimitValidationError::NonPositive {
+                field: "max_shape_dimension_twips",
+                value: 0,
+            }
+        ))
+    ));
+}
+
+#[test]
+fn conversion_validates_fonts_before_lexing_input() {
+    let mut options = ConvertOptions::default();
+    options.font_provider.assets[0].bytes.clear();
+
+    let error = convert_rtf_to_pdf(b"}", &options).unwrap_err();
+    assert!(matches!(
+        error,
+        ConvertError::FontProvider(open_rtf_converter::FontProviderError::EmptyAsset {
+            asset_index: 0
+        })
+    ));
 }
 
 #[test]

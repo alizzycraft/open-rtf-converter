@@ -357,6 +357,10 @@ impl Default for RtfParseOptions {
 }
 
 impl RtfParseOptions {
+    pub fn validate(&self) -> Result<(), LimitValidationError> {
+        self.limits.validate()
+    }
+
     pub fn browser_safe_defaults() -> Self {
         Self {
             compatibility_mode: CompatibilityMode::WordCompatiblePassive,
@@ -375,6 +379,8 @@ mod tests {
     fn default_limit_sets_validate() {
         assert_eq!(RtfLimits::default().validate(), Ok(()));
         assert_eq!(RtfLimits::browser_defaults().validate(), Ok(()));
+        assert_eq!(RtfParseOptions::default().validate(), Ok(()));
+        assert_eq!(RtfParseOptions::browser_safe_defaults().validate(), Ok(()));
     }
 
     #[test]
@@ -418,6 +424,20 @@ mod tests {
                 min: 2_000,
                 max_field: "max_page_dimension_twips",
                 max: 1_000,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_options_delegate_to_limit_validation() {
+        let mut options = RtfParseOptions::default();
+        options.limits.max_shape_dimension_twips = 0;
+
+        assert_eq!(
+            options.validate(),
+            Err(LimitValidationError::NonPositive {
+                field: "max_shape_dimension_twips",
+                value: 0,
             })
         );
     }

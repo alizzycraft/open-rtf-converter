@@ -5,7 +5,7 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::config::RtfParseOptions;
+use crate::config::{LimitValidationError, RtfParseOptions};
 use crate::diagnostics::Diagnostic;
 use crate::fonts::{FontCoverage, FontProvider, FontProviderError};
 use crate::layout::{
@@ -36,7 +36,21 @@ impl Default for ConvertOptions {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ConvertOptionsError {
+    #[error(transparent)]
+    Limits(#[from] LimitValidationError),
+    #[error(transparent)]
+    Fonts(#[from] FontProviderError),
+}
+
 impl ConvertOptions {
+    pub fn validate(&self) -> Result<(), ConvertOptionsError> {
+        self.parse_options.validate()?;
+        self.font_provider.validate()?;
+        Ok(())
+    }
+
     pub fn browser_safe_defaults() -> Self {
         Self {
             diagnostics: false,
@@ -85,11 +99,20 @@ pub enum ConvertError {
     Parse(#[from] ParseError),
 }
 
+impl From<ConvertOptionsError> for ConvertError {
+    fn from(error: ConvertOptionsError) -> Self {
+        match error {
+            ConvertOptionsError::Limits(error) => Self::Parse(ParseError::InvalidLimits(error)),
+            ConvertOptionsError::Fonts(error) => Self::FontProvider(error),
+        }
+    }
+}
+
 pub fn convert_rtf_to_pdf(
     input: &[u8],
     options: &ConvertOptions,
 ) -> Result<ConversionOutput, ConvertError> {
-    options.font_provider.validate()?;
+    options.validate()?;
     let parsed = parse_rtf_bytes_with_options(input, &options.parse_options)?;
     let mut diagnostics = if options.diagnostics {
         parsed.diagnostics.clone()
@@ -486,6 +509,41 @@ mod tests {
     use super::*;
     use crate::layout::DrawingFragment;
     use crate::model::{Block, Document, Paragraph, Run};
+
+    #[test]
+    fn default_option_sets_validate() {
+        assert_eq!(ConvertOptions::default().validate(), Ok(()));
+        assert_eq!(ConvertOptions::browser_safe_defaults().validate(), Ok(()));
+    }
+
+    #[test]
+    fn option_validation_composes_limit_errors() {
+        let mut options = ConvertOptions::default();
+        options.parse_options.limits.max_font_size_half_points = 0;
+
+        assert_eq!(
+            options.validate(),
+            Err(ConvertOptionsError::Limits(
+                LimitValidationError::NonPositive {
+                    field: "max_font_size_half_points",
+                    value: 0,
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn option_validation_composes_font_errors() {
+        let mut options = ConvertOptions::default();
+        options.font_provider.assets[0].bytes.clear();
+
+        assert_eq!(
+            options.validate(),
+            Err(ConvertOptionsError::Fonts(FontProviderError::EmptyAsset {
+                asset_index: 0
+            }))
+        );
+    }
 
     #[test]
     fn layout_item_limit_count_recurses_through_drawing_wrappers() {
