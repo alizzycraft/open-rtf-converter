@@ -1131,7 +1131,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 
 | Status | ID | Deliverable | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| [ ] | BASE-01 | Add pinned toolchain and package `rust-version` | None | Native and WASM checks use the declared toolchain |
+| [x] | BASE-01 | Add pinned toolchain and package `rust-version` | None | Verified with native and WASM checks on 2026-08-09 |
 | [ ] | BASE-02 | Add CI format, check, Clippy, test, security, reference, and WASM jobs | BASE-01 | Required workflow is green on `main` |
 | [ ] | BASE-03 | Record deterministic fixture hashes/counts and benchmark procedure | BASE-02 | Baseline artifact or documented command is committed |
 | [ ] | CFG-01 | Add `LimitValidationError` and public `RtfLimits::validate` | BASE-02 | Current validation branches have typed tests |
