@@ -168,6 +168,93 @@ impl Default for RtfLimits {
 }
 
 impl RtfLimits {
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        for (value, name) in [
+            (self.max_image_crop_twips, "max_image_crop_twips"),
+            (
+                self.max_table_row_offset_twips,
+                "max_table_row_offset_twips",
+            ),
+            (self.max_table_cell_gap_twips, "max_table_cell_gap_twips"),
+            (
+                self.max_table_border_width_twips,
+                "max_table_border_width_twips",
+            ),
+            (self.max_page_margin_twips, "max_page_margin_twips"),
+            (self.max_page_gutter_twips, "max_page_gutter_twips"),
+            (
+                self.max_header_footer_distance_twips,
+                "max_header_footer_distance_twips",
+            ),
+            (self.max_column_gap_twips, "max_column_gap_twips"),
+            (
+                self.max_page_border_spacing_twips,
+                "max_page_border_spacing_twips",
+            ),
+            (self.max_shape_offset_twips, "max_shape_offset_twips"),
+            (
+                self.max_shape_stroke_width_twips,
+                "max_shape_stroke_width_twips",
+            ),
+            (
+                self.max_paragraph_indent_twips,
+                "max_paragraph_indent_twips",
+            ),
+            (
+                self.max_paragraph_spacing_twips,
+                "max_paragraph_spacing_twips",
+            ),
+            (self.max_line_spacing_twips, "max_line_spacing_twips"),
+            (
+                self.max_hyphenation_zone_twips,
+                "max_hyphenation_zone_twips",
+            ),
+            (
+                self.max_character_spacing_twips,
+                "max_character_spacing_twips",
+            ),
+        ] {
+            if value < 0 {
+                return Err(name);
+            }
+        }
+
+        for (value, name) in [
+            (self.max_image_display_twips, "max_image_display_twips"),
+            (self.min_image_scaling_percent, "min_image_scaling_percent"),
+            (self.max_tab_stop_twips, "max_tab_stop_twips"),
+            (
+                self.max_table_row_height_twips,
+                "max_table_row_height_twips",
+            ),
+            (self.min_page_dimension_twips, "min_page_dimension_twips"),
+            (self.max_page_dimension_twips, "max_page_dimension_twips"),
+            (self.max_shape_dimension_twips, "max_shape_dimension_twips"),
+            (self.max_font_size_half_points, "max_font_size_half_points"),
+            (
+                self.min_character_scaling_percent,
+                "min_character_scaling_percent",
+            ),
+        ] {
+            if value <= 0 {
+                return Err(name);
+            }
+        }
+
+        if self.min_image_scaling_percent > self.max_image_scaling_percent {
+            return Err("min_image_scaling_percent must not exceed max_image_scaling_percent");
+        }
+        if self.min_page_dimension_twips > self.max_page_dimension_twips {
+            return Err("min_page_dimension_twips must not exceed max_page_dimension_twips");
+        }
+        if self.min_character_scaling_percent > self.max_character_scaling_percent {
+            return Err(
+                "min_character_scaling_percent must not exceed max_character_scaling_percent",
+            );
+        }
+        Ok(())
+    }
+
     pub fn browser_defaults() -> Self {
         Self {
             max_file_size: 10 * 1024 * 1024,

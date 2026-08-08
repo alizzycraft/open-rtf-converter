@@ -70,6 +70,8 @@ pub enum ParseError {
     MalformedInput { reason: String, offset: usize },
     #[error("active content rejected: {feature} at byte {offset}")]
     ActiveContentRejected { feature: String, offset: usize },
+    #[error("invalid RTF limits: {reason}")]
+    InvalidLimits { reason: &'static str },
 }
 
 #[derive(Debug, Clone)]
@@ -1970,6 +1972,10 @@ pub fn parse_rtf_bytes_with_options(
     input: &[u8],
     options: &RtfParseOptions,
 ) -> Result<ParseOutput, ParseError> {
+    options
+        .limits
+        .validate()
+        .map_err(|reason| ParseError::InvalidLimits { reason })?;
     let tokens = Lexer::new(input, options.limits.clone()).tokenize()?;
     Parser::new(tokens, options.clone()).parse()
 }
@@ -13038,10 +13044,7 @@ impl Parser {
         if self.state.table_nesting_level > 2 {
             match control.name.as_str() {
                 "itap" => {
-                    self.set_table_nesting_level(
-                        control.parameter.unwrap_or(2).max(2).min(2),
-                        offset,
-                    )?;
+                    self.set_table_nesting_level(2, offset)?;
                     return Ok(true);
                 }
                 "nestrow" | "row" => {
@@ -46799,6 +46802,38 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_signed_limits_without_panicking() {
+        let mut options = RtfParseOptions::default();
+        options.limits.max_table_row_offset_twips = -1;
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1\trowd\trleft10\cellx100 A\cell\row}", &options),
+            Err(ParseError::InvalidLimits {
+                reason: "max_table_row_offset_twips"
+            })
+        ));
+
+        let mut options = RtfParseOptions::default();
+        options.limits.min_page_dimension_twips = 2_000;
+        options.limits.max_page_dimension_twips = 1_000;
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1\paperw1500 Text}", &options),
+            Err(ParseError::InvalidLimits {
+                reason: "min_page_dimension_twips must not exceed max_page_dimension_twips"
+            })
+        ));
+
+        let mut options = RtfParseOptions::default();
+        options.limits.min_image_scaling_percent = 200;
+        options.limits.max_image_scaling_percent = 100;
+        assert!(matches!(
+            parse_rtf_bytes_with_options(br"{\rtf1{\pict\picscalex150 00}}", &options),
+            Err(ParseError::InvalidLimits {
+                reason: "min_image_scaling_percent must not exceed max_image_scaling_percent"
+            })
+        ));
+    }
+
+    #[test]
     fn prefers_unicode_alternate_destination_over_ansi_fallback() {
         let output =
             parse_rtf(r"{\rtf1 Before {\upr{fallback-ascii}{\*\ud{\u937?}}} After\par}").unwrap();
@@ -48549,7 +48584,7 @@ mod tests {
     #[test]
     fn deeper_nested_table_structure_stays_passive_in_containing_cell() {
         let output = parse_rtf(
-            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cellx3000 A {\trowd\itap3\cellx1500 Deep\nestcell\cellx3000 Deep2\nestrow} After\nestcell\cellx6000 B\nestrow}\cell\row}",
+            r"{\rtf1\trowd\cellx6000 Outer {\trowd\itap2\cellx3000 A {\trowd\itap16\cellx1500 Deep\nestcell\cellx3000 Deep2\nestrow} After\nestcell\cellx6000 B\nestrow}\cell\row}",
         )
         .unwrap();
         let table = match &output.document.blocks[0] {

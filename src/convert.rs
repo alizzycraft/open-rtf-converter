@@ -205,21 +205,14 @@ fn passive_font_substitution_diagnostics(
             continue;
         }
         seen.push(key);
-        let message = if font_name_matches_exact_pdf_base_font(&font.name, family) {
+        if font_name_matches_exact_pdf_base_font(&font.name, family) {
             continue;
-        } else if font_name_matches_pdf_family(&font.name, family) {
-            format!(
-                "font '{}' rendered through bounded passive PDF base font {}; provide a passive font asset for closer Word-compatible metrics",
-                font.name,
-                passive_pdf_font_family_label(family)
-            )
-        } else {
-            format!(
-                "font '{}' rendered through bounded passive PDF base font {}; provide a passive font asset for closer Word-compatible metrics",
-                font.name,
-                passive_pdf_font_family_label(family)
-            )
-        };
+        }
+        let message = format!(
+            "font '{}' rendered through bounded passive PDF base font {}; provide a passive font asset for closer Word-compatible metrics",
+            font.name,
+            passive_pdf_font_family_label(family)
+        );
         diagnostics.push(Diagnostic::warning(message, None));
     }
     diagnostics
@@ -512,40 +505,6 @@ fn is_latin_extended_char(ch: char) -> bool {
 
 fn is_greek_char(ch: char) -> bool {
     matches!(ch, '\u{0370}'..='\u{03ff}' | '\u{1f00}'..='\u{1fff}')
-}
-
-fn font_name_matches_pdf_family(name: &str, family: PdfFontFamily) -> bool {
-    let normalized = direct_base14_alias_name(name);
-    match family {
-        PdfFontFamily::Helvetica => {
-            matches!(
-                normalized.as_str(),
-                "helvetica" | "arial" | "ms sans serif" | "microsoft sans serif"
-            ) || normalized.starts_with("helvetica ")
-        }
-        PdfFontFamily::Courier => {
-            matches!(normalized.as_str(), "courier" | "courier new")
-                || normalized.starts_with("courier ")
-        }
-        PdfFontFamily::Times => matches!(
-            normalized.as_str(),
-            "times-roman" | "times roman" | "times new roman" | "ms serif"
-        ),
-        PdfFontFamily::Symbol => matches!(normalized.as_str(), "symbol" | "symbol mt" | "symbolmt"),
-        PdfFontFamily::ZapfDingbats => {
-            matches!(
-                normalized.as_str(),
-                "zapfdingbats"
-                    | "zapf dingbats"
-                    | "wingdings"
-                    | "wingdings 2"
-                    | "wingdings2"
-                    | "wingdings 3"
-                    | "wingdings3"
-                    | "webdings"
-            )
-        }
-    }
 }
 
 fn font_name_matches_exact_pdf_base_font(name: &str, family: PdfFontFamily) -> bool {
