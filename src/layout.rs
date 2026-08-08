@@ -22449,7 +22449,7 @@ mod tests {
             "expected at least one non-final justified line to add word spacing: {word_spacings:?}"
         );
         assert!(
-            word_spacings.iter().any(|spacing| *spacing == 0.0),
+            word_spacings.contains(&0.0),
             "expected final justified line to remain unstretched: {word_spacings:?}"
         );
     }

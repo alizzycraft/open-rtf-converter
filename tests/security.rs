@@ -76396,22 +76396,9 @@ fn paragraph_frame_text_direction_remains_passive_rotated_text() {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    assert!(
-        rotations[2]
-            .iter()
-            .any(|rotation| *rotation == open_rtf_converter::layout::TextRotation::Clockwise90)
-    );
-    assert!(
-        rotations[3]
-            .iter()
-            .any(|rotation| *rotation
-                == open_rtf_converter::layout::TextRotation::CounterClockwise90)
-    );
-    assert!(
-        rotations[5]
-            .iter()
-            .any(|rotation| *rotation == open_rtf_converter::layout::TextRotation::Clockwise90)
-    );
+    assert!(rotations[2].contains(&open_rtf_converter::layout::TextRotation::Clockwise90));
+    assert!(rotations[3].contains(&open_rtf_converter::layout::TextRotation::CounterClockwise90));
+    assert!(rotations[5].contains(&open_rtf_converter::layout::TextRotation::Clockwise90));
 
     let dir = tempdir().unwrap();
     let input_path = dir

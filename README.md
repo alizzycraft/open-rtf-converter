@@ -21,3 +21,23 @@ Supported output format in this first version is PDF.
 - Emits diagnostics for intentional security differences and layout approximations.
 
 Remaining fidelity work is tracked incrementally against `docs/project_plan.md`; Word-exported reference PDFs/PNGs are still needed before claiming full visual coverage.
+
+## Quality Gates
+
+The repository pins its Rust toolchain in `rust-toolchain.toml`. Run the same logical gates as CI from the repository root before committing:
+
+```powershell
+cargo fmt --all -- --check
+cargo check --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D clippy::correctness -D clippy::suspicious -D clippy::perf
+cargo test --lib
+cargo test --bin open-rtf-converter
+cargo test --test conversion
+cargo test --test security
+cargo test --test reference_fixtures
+cargo test --test fuzz_regression
+cargo test --test wasm_dependency_policy
+cargo check --no-default-features --target wasm32-unknown-unknown
+```
+
+CI keeps the large security and reference/regression suites in separate jobs so a failure identifies the affected policy area without weakening coverage.

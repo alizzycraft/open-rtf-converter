@@ -30591,7 +30591,7 @@ fn parse_simple_numeric_picture(picture: &str) -> Option<SimpleNumericPicture> {
     let last_digit = picture
         .char_indices()
         .filter_map(|(index, ch)| matches!(ch, '0' | '#').then_some(index))
-        .last()?;
+        .next_back()?;
     let suffix_start = last_digit + picture[last_digit..].chars().next()?.len_utf8();
     let prefix = picture[..first_digit].to_string();
     let suffix = picture[suffix_start..].to_string();
@@ -64152,9 +64152,7 @@ After\par}"#;
                 StaticImageVectorPathSegment::LineTo(0.0, 80.0),
                 StaticImageVectorPathSegment::LineTo(0.0, 0.0),
                 StaticImageVectorPathSegment::MoveTo(20.0, 20.0),
-            ]) && segments
-                .iter()
-                .any(|segment| *segment == StaticImageVectorPathSegment::LineTo(50.0, 60.0))
+            ]) && segments.contains(&StaticImageVectorPathSegment::LineTo(50.0, 60.0))
         ));
         assert!(matches!(
             image.vector_commands[1],
@@ -64335,9 +64333,7 @@ After\par}"#;
                 StaticImageVectorPathSegment::LineTo(0.0, 80.0),
                 StaticImageVectorPathSegment::LineTo(0.0, 0.0),
                 StaticImageVectorPathSegment::MoveTo(20.0, 20.0),
-            ]) && segments
-                .iter()
-                .any(|segment| *segment == StaticImageVectorPathSegment::LineTo(50.0, 60.0))
+            ]) && segments.contains(&StaticImageVectorPathSegment::LineTo(50.0, 60.0))
         ));
         assert!(matches!(
             image.vector_commands[1],
@@ -64409,9 +64405,7 @@ After\par}"#;
                 StaticImageVectorPathSegment::LineTo(10.0, 70.0),
                 StaticImageVectorPathSegment::LineTo(10.0, 10.0),
                 StaticImageVectorPathSegment::MoveTo(40.0, 20.0),
-            ]) && segments
-                .iter()
-                .any(|segment| *segment == StaticImageVectorPathSegment::LineTo(50.0, 60.0))
+            ]) && segments.contains(&StaticImageVectorPathSegment::LineTo(50.0, 60.0))
         ));
         assert!(matches!(
             image.vector_commands[1],

@@ -386,6 +386,9 @@ pub struct Color {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+// Boxing a variant would break the currently public normalized-model API. The
+// architecture plan privatizes model construction before changing this shape.
+#[allow(clippy::large_enum_variant)]
 pub enum Block {
     Paragraph(Paragraph),
     Table(Table),

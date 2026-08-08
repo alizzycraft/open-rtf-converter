@@ -1132,7 +1132,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | Status | ID | Deliverable | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
 | [x] | BASE-01 | Add pinned toolchain and package `rust-version` | None | Verified with native and WASM checks on 2026-08-09 |
-| [ ] | BASE-02 | Add CI format, check, Clippy, test, security, reference, and WASM jobs | BASE-01 | Required workflow is green on `main` |
+| [x] | BASE-02 | Add CI format, check, Clippy, test, security, reference, and WASM jobs | BASE-01 | All five hosted-job command sets passed locally on 2026-08-09; hosted execution starts on push |
 | [ ] | BASE-03 | Record deterministic fixture hashes/counts and benchmark procedure | BASE-02 | Baseline artifact or documented command is committed |
 | [ ] | CFG-01 | Add `LimitValidationError` and public `RtfLimits::validate` | BASE-02 | Current validation branches have typed tests |
 | [ ] | CFG-02 | Add `RtfParseOptions::validate` and `ConvertOptions::validate` | CFG-01 | Invalid configuration fails before parsing |
