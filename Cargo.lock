@@ -405,6 +405,7 @@ dependencies = [
  "lopdf",
  "miniz_oxide",
  "pdf-writer",
+ "sha2",
  "tempfile",
  "thiserror",
  "ttf-parser",

@@ -41,3 +41,5 @@ cargo check --no-default-features --target wasm32-unknown-unknown
 ```
 
 CI keeps the large security and reference/regression suites in separate jobs so a failure identifies the affected policy area without weakening coverage.
+
+The repeatable release-mode performance and deterministic-output procedure is documented in `docs/performance-baseline.md`.

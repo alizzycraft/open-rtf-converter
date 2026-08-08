@@ -25,6 +25,7 @@ jpeg-decoder = { version = "0.3.2", default-features = false, features = ["platf
 
 [dev-dependencies]
 lopdf = { version = "0.38.0", default-features = false }
+sha2 = "0.10.9"
 tempfile = "3.24.0"
 
 [[bin]]
