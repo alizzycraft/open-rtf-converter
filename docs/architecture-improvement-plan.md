@@ -1137,7 +1137,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | CFG-01 | Add `LimitValidationError` and public `RtfLimits::validate` | BASE-02 | Negative, non-positive, inverted-range, parser propagation, and public API tests passed on 2026-08-09 |
 | [x] | CFG-02 | Add `RtfParseOptions::validate` and `ConvertOptions::validate` | CFG-01 | Typed limit/font composition and pre-lexing rejection tests passed on 2026-08-09 |
 | [x] | API-01 | Add crate docs and declare the supported root façade | BASE-02 | Doctest, root-only integration test, generated-doc visibility, CI wiring, and WASM checks passed on 2026-08-09 |
-| [ ] | API-02 | Add bounded `inspect_rtf` font-family projection | CFG-02, API-01 | Inspection tests cover primary/alternate/deduplicated names |
+| [x] | API-02 | Add bounded `inspect_rtf` font-family projection | CFG-02, API-01 | Primary/alternate/order/deduplication, Unicode, typed configuration/lexical/resource errors, public facade, full regression, Clippy, and WASM gates passed on 2026-08-09 |
 | [ ] | API-03 | Migrate CLI font discovery to `inspect_rtf` | API-02 | `src/main.rs` has no raw parser/model import |
 | [ ] | DEC-01 | Split integration/unit test files into domain modules without changing assertions | BASE-02 | Baseline test inventory is preserved |
 | [ ] | DEC-02 | Extract PDF audit module | BASE-03 | Public audit and all audit/security tests pass |

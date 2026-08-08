@@ -25,6 +25,8 @@ assert!(output.pdf.starts_with(b"%PDF-"));
 
 The conversion façade validates options and fonts, performs bounded parsing and layout, checks PDF page/item/object/byte limits, and audits the completed PDF for forbidden active features. Raw parser, model, layout, and renderer modules are implementation details and do not independently provide that complete security boundary.
 
+Use `inspect_rtf` with `RtfParseOptions` when a caller needs only the bounded, deterministic list of primary and alternate font-family names before conversion.
+
 Supported output format in this first version is PDF.
 
 ## Current Scope

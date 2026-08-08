@@ -2,8 +2,9 @@ use std::error::Error;
 
 use open_rtf_converter::{
     ActiveContentPolicy, CompatibilityMode, ConvertError, ConvertOptions, ConvertOptionsError,
-    LimitValidationError, ParseError, PassivePdfError, PdfLinkPolicy, RtfLimits, RtfParseOptions,
-    audit_passive_pdf_bytes, convert_rtf_bytes_to_pdf, convert_rtf_to_pdf,
+    InspectError, LimitValidationError, ParseError, PassivePdfError, PdfLinkPolicy, RtfInspection,
+    RtfLimits, RtfParseOptions, audit_passive_pdf_bytes, convert_rtf_bytes_to_pdf,
+    convert_rtf_to_pdf, inspect_rtf,
 };
 
 fn assert_public_error<E: Error>() {}
@@ -27,6 +28,7 @@ fn supported_root_facade_converts_and_audits_passive_pdf() {
 fn supported_root_facade_exposes_configuration_and_error_types() {
     assert_public_error::<ConvertError>();
     assert_public_error::<ConvertOptionsError>();
+    assert_public_error::<InspectError>();
     assert_public_error::<LimitValidationError>();
     assert_public_error::<ParseError>();
     assert_public_error::<PassivePdfError>();
@@ -38,4 +40,20 @@ fn supported_root_facade_exposes_configuration_and_error_types() {
         limits: RtfLimits::browser_defaults(),
     };
     assert_eq!(options.validate(), Ok(()));
+}
+
+#[test]
+fn supported_root_facade_inspects_requested_font_families() {
+    let inspection = inspect_rtf(
+        br"{\rtf1{\fonttbl{\f0 Primary{\*\falt Alternate;};}}Body\par}",
+        &RtfParseOptions::browser_safe_defaults(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        inspection,
+        RtfInspection {
+            requested_font_families: vec!["Primary".to_string(), "Alternate".to_string()],
+        }
+    );
 }
