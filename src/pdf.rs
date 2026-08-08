@@ -1826,32 +1826,30 @@ fn supplied_text_encoding_parts_for_text(
         .fonts
         .iter()
         .find(|font| font.index == fragment.style.font_index)?;
-    font_provider
-        .assets
-        .iter()
-        .enumerate()
-        .filter(|(_, asset)| supplied_font_asset_matches_font(asset, source_font))
-        .filter_map(|(asset_index, asset)| {
-            let (glyphs, encoded) = encode_text_with_font_asset(text, asset)?;
-            let family_priority = supplied_font_asset_match_priority(asset, source_font)?;
-            (!glyphs.is_empty()).then(|| {
-                (
-                    family_priority,
-                    supplied_font_style_mismatch_score(asset.style, &fragment.style),
-                    asset_index,
-                    glyphs,
-                    encoded,
-                )
-            })
-        })
-        .min_by_key(|(family_priority, score, asset_index, _, _)| {
-            (*family_priority, *score, *asset_index)
-        })
-        .map(|(_, _, asset_index, glyphs, encoded)| (asset_index, glyphs, encoded))
-}
-
-fn supplied_font_asset_matches_font(asset: &FontAsset, font: &crate::model::FontDef) -> bool {
-    supplied_font_asset_match_priority(asset, font).is_some()
+    let mut best = None;
+    let mut best_key = (u8::MAX, u8::MAX, usize::MAX);
+    for (asset_index, asset) in font_provider.assets.iter().enumerate() {
+        let Some(family_priority) = supplied_font_asset_match_priority(asset, source_font) else {
+            continue;
+        };
+        let style_score = supplied_font_style_mismatch_score(asset.style, &fragment.style);
+        let key = (family_priority, style_score, asset_index);
+        if key >= best_key {
+            continue;
+        }
+        let Some((glyphs, encoded)) = encode_text_with_font_asset(text, asset) else {
+            continue;
+        };
+        if glyphs.is_empty() {
+            continue;
+        }
+        best_key = key;
+        best = Some((asset_index, glyphs, encoded));
+        if (family_priority, style_score) == (0, 0) {
+            break;
+        }
+    }
+    best
 }
 
 fn supplied_font_asset_match_priority(
