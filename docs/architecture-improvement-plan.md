@@ -1139,7 +1139,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | API-01 | Add crate docs and declare the supported root façade | BASE-02 | Doctest, root-only integration test, generated-doc visibility, CI wiring, and WASM checks passed on 2026-08-09 |
 | [x] | API-02 | Add bounded `inspect_rtf` font-family projection | CFG-02, API-01 | Primary/alternate/order/deduplication, Unicode, typed configuration/lexical/resource errors, public facade, full regression, Clippy, and WASM gates passed on 2026-08-09 |
 | [x] | API-03 | Migrate CLI font discovery to `inspect_rtf` | API-02 | All 35 CLI tests, raw-dependency source policy, parser-error compatibility, native check, Clippy policy, and WASM check passed on 2026-08-09 |
-| [ ] | DEC-01 | Split integration/unit test files into domain modules without changing assertions | BASE-02 | Baseline test inventory is preserved |
+| [x] | DEC-01 | Split integration/unit test files into domain modules without changing assertions | BASE-02 | 2,425 source tests/2,428 harness tests preserved across 45 domain files; inventory guard, full native/security/reference/fuzz, Clippy, WASM, and unchanged sample hash passed on 2026-08-09 |
 | [ ] | DEC-02 | Extract PDF audit module | BASE-03 | Public audit and all audit/security tests pass |
 | [ ] | DEC-03 | Extract parser JPEG, PNG, and DIB modules | BASE-03, DEC-01 | Raster fixtures remain byte-identical |
 | [ ] | DEC-04 | Extract parser EMF and WMF modules | DEC-03 | Vector recovery/security fixtures remain stable |
@@ -1286,6 +1286,7 @@ cargo test --lib
 cargo test --bin open-rtf-converter
 cargo test --test conversion
 cargo test --test public_api
+cargo test --test test_structure
 cargo test --test security
 cargo test --test reference_fixtures
 cargo test --test fuzz_regression

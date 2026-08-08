@@ -63,6 +63,9 @@ jobs:
       - name: Run supported public API tests
         run: cargo test --test public_api
 
+      - name: Verify decomposed test inventory
+        run: cargo test --test test_structure
+
   security-tests:
     name: Security tests
     runs-on: ubuntu-latest
