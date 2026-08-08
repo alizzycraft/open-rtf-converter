@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, ValueEnum};
 use open_rtf_converter::{
     ActiveContentPolicy, CompatibilityMode, ConvertOptions, FontAsset, FontAssetStyle,
-    FontProvider, FontProviderError, PdfLinkPolicy, RtfParseOptions, convert_rtf_file_to_pdf,
-    rtf::{ParseError, parse_rtf_bytes_with_options},
+    FontProvider, FontProviderError, InspectError, ParseError, PdfLinkPolicy, RtfParseOptions,
+    convert_rtf_file_to_pdf, inspect_rtf,
 };
 use ttf_parser::{Face, name_id};
 
@@ -299,16 +299,11 @@ fn requested_font_families_for_font_dirs(
         path: cli.input.clone(),
         source,
     })?;
-    let parsed = parse_rtf_bytes_with_options(&input, &build_parse_options(cli))
-        .map_err(CliInputFontError::Parse)?;
-    let mut families = Vec::new();
-    for font in parsed.document.fonts {
-        push_unique_font_family_name(&mut families, font.name);
-        if let Some(alternate) = font.alternate_name {
-            push_unique_font_family_name(&mut families, alternate);
-        }
-    }
-    Ok(families)
+    inspect_rtf(&input, &build_parse_options(cli))
+        .map(|inspection| inspection.requested_font_families)
+        .map_err(|error| match error {
+            InspectError::Parse(error) => CliInputFontError::Parse(error),
+        })
 }
 
 fn load_cli_font_provider(
@@ -1018,6 +1013,62 @@ impl std::error::Error for CliInputFontError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_font_discovery_uses_the_supported_inspection_projection() {
+        let directory = tempfile::tempdir().unwrap();
+        let input_path = directory.path().join("font-inspection.rtf");
+        std::fs::write(
+            &input_path,
+            br"{\rtf1{\fonttbl{\f0 Arial{\*\falt Helvetica;};}{\f1 Courier New;}}Body\par}",
+        )
+        .unwrap();
+        let cli =
+            Cli::try_parse_from(["open-rtf-converter", input_path.to_str().unwrap()]).unwrap();
+
+        let families =
+            requested_font_families_for_font_dirs(&cli, &[directory.path().to_path_buf()]).unwrap();
+
+        assert_eq!(families, ["Arial", "Helvetica", "Courier New"]);
+    }
+
+    #[test]
+    fn cli_font_discovery_preserves_parser_error_classification() {
+        let directory = tempfile::tempdir().unwrap();
+        let input_path = directory.path().join("malformed.rtf");
+        std::fs::write(&input_path, br"{\rtf1").unwrap();
+        let cli =
+            Cli::try_parse_from(["open-rtf-converter", input_path.to_str().unwrap()]).unwrap();
+
+        let error = requested_font_families_for_font_dirs(&cli, &[directory.path().to_path_buf()])
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CliInputFontError::Parse(ParseError::Lex(_))
+        ));
+    }
+
+    #[test]
+    fn cli_source_has_no_raw_parser_or_model_dependency() {
+        let source = include_str!("main.rs");
+        let forbidden = [
+            ["open_rtf_converter", "::", "rtf"].concat(),
+            ["open_rtf_converter", "::", "model"].concat(),
+            ["open_rtf_converter", "::", "layout"].concat(),
+            ["open_rtf_converter", "::", "pdf"].concat(),
+            ["parse_rtf_bytes", "_with_options"].concat(),
+            ["parsed", ".document.fonts"].concat(),
+        ];
+
+        assert!(source.contains("inspect_rtf(&input"));
+        for pattern in forbidden {
+            assert!(
+                !source.contains(&pattern),
+                "CLI source must not depend on raw implementation path {pattern}"
+            );
+        }
+    }
 
     #[test]
     fn parses_font_spec_with_spaced_family_name() {
