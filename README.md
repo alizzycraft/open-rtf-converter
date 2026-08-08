@@ -10,6 +10,21 @@ The implementation owns the RTF tokenization/parsing, normalized document model,
 cargo run -- fixtures/simple.rtf target/simple.pdf --diagnostics
 ```
 
+### Library API
+
+Use the root bytes-to-bytes façade for application and browser/WASM integration:
+
+```rust
+use open_rtf_converter::{ConvertOptions, convert_rtf_to_pdf};
+
+let input = br"{\rtf1\ansi Passive conversion\par}";
+let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults())
+    .expect("valid passive RTF should convert");
+assert!(output.pdf.starts_with(b"%PDF-"));
+```
+
+The conversion façade validates options and fonts, performs bounded parsing and layout, checks PDF page/item/object/byte limits, and audits the completed PDF for forbidden active features. Raw parser, model, layout, and renderer modules are implementation details and do not independently provide that complete security boundary.
+
 Supported output format in this first version is PDF.
 
 ## Current Scope
@@ -33,6 +48,7 @@ cargo clippy --all-targets --all-features -- -D clippy::correctness -D clippy::s
 cargo test --lib
 cargo test --bin open-rtf-converter
 cargo test --test conversion
+cargo test --test public_api
 cargo test --test security
 cargo test --test reference_fixtures
 cargo test --test fuzz_regression

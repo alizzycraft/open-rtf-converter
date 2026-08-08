@@ -377,6 +377,11 @@ impl fmt::Display for PassivePdfError {
 
 impl Error for PassivePdfError {}
 
+/// Checks PDF syntax emitted by this converter for forbidden active-feature
+/// names and malformed stream boundaries.
+///
+/// This is a defense-in-depth check for the converter's passive-output policy,
+/// not a general malware or safety verdict for arbitrary third-party PDFs.
 pub fn audit_passive_pdf_bytes(pdf: &[u8]) -> Result<(), PassivePdfError> {
     let mut issues = Vec::new();
     let mut offset = 0;

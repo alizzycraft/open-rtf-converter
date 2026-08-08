@@ -1136,7 +1136,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | BASE-03 | Record deterministic fixture hashes/counts and benchmark procedure | BASE-02 | Five-fixture baseline, 2,402-test inventory, and repeatable harness recorded on 2026-08-09 |
 | [x] | CFG-01 | Add `LimitValidationError` and public `RtfLimits::validate` | BASE-02 | Negative, non-positive, inverted-range, parser propagation, and public API tests passed on 2026-08-09 |
 | [x] | CFG-02 | Add `RtfParseOptions::validate` and `ConvertOptions::validate` | CFG-01 | Typed limit/font composition and pre-lexing rejection tests passed on 2026-08-09 |
-| [ ] | API-01 | Add crate docs and declare the supported root façade | BASE-02 | Doctest and downstream compile test pass |
+| [x] | API-01 | Add crate docs and declare the supported root façade | BASE-02 | Doctest, root-only integration test, generated-doc visibility, CI wiring, and WASM checks passed on 2026-08-09 |
 | [ ] | API-02 | Add bounded `inspect_rtf` font-family projection | CFG-02, API-01 | Inspection tests cover primary/alternate/deduplicated names |
 | [ ] | API-03 | Migrate CLI font discovery to `inspect_rtf` | API-02 | `src/main.rs` has no raw parser/model import |
 | [ ] | DEC-01 | Split integration/unit test files into domain modules without changing assertions | BASE-02 | Baseline test inventory is preserved |
@@ -1285,6 +1285,7 @@ cargo clippy --all-targets --all-features -- -D clippy::correctness -D clippy::s
 cargo test --lib
 cargo test --bin open-rtf-converter
 cargo test --test conversion
+cargo test --test public_api
 cargo test --test security
 cargo test --test reference_fixtures
 cargo test --test fuzz_regression

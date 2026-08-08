@@ -60,6 +60,9 @@ jobs:
       - name: Run conversion tests
         run: cargo test --test conversion
 
+      - name: Run supported public API tests
+        run: cargo test --test public_api
+
   security-tests:
     name: Security tests
     runs-on: ubuntu-latest
