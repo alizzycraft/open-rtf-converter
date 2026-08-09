@@ -29,14 +29,10 @@ pub enum ModelInvariantError {
     UnknownFontIndex { index: i32, path: String },
     #[error("document font index {index} occurs more than once")]
     DuplicateFontIndex { index: i32 },
-    #[error("malformed {kind} marker at {path}: {reason}")]
-    MalformedMarker {
-        kind: &'static str,
-        path: String,
-        reason: &'static str,
-    },
-    #[error("dynamic field at {path} must not also carry text")]
-    DynamicFieldWithText { path: String },
+    #[error("semantic inline node at {path} must not also carry text")]
+    InlineKindWithText { path: String },
+    #[error("pending note reference at {path} survived parser normalization")]
+    PendingNoteReference { path: String },
     #[error("nested table depth {depth} at {path} exceeds the transitional bound {limit}")]
     NestedTableDepthExceeded {
         depth: usize,
@@ -687,10 +683,12 @@ fn validate_paragraph(
     for (run_index, run) in paragraph.runs.iter().enumerate() {
         let run_path = format!("{path}.runs[{run_index}]");
         validate_character_style(&run.style, &run_path, context)?;
-        if run.dynamic_field.is_some() && !run.text.is_empty() {
-            return Err(ModelInvariantError::DynamicFieldWithText { path: run_path });
+        if let Some(kind) = run.dynamic_field {
+            if !run.text.is_empty() {
+                return Err(ModelInvariantError::InlineKindWithText { path: run_path });
+            }
+            validate_inline_kind(kind, &run_path, context)?;
         }
-        validate_marker_text(&run.text, &run_path, context)?;
     }
     Ok(())
 }
@@ -760,150 +758,39 @@ fn validate_color_index(
     Ok(())
 }
 
-fn validate_marker_text(
-    text: &str,
+fn validate_inline_kind(
+    kind: InlineKind,
     path: &str,
     context: &ValidationContext<'_>,
 ) -> Result<(), ModelInvariantError> {
-    validate_delimited_markers(
-        text,
-        FOOTNOTE_REFERENCE_MARKER,
-        FOOTNOTE_REFERENCE_MARKER_END,
-        "footnote reference",
-        Some(context.footnote_count),
-        true,
-        path,
-    )?;
-    validate_delimited_markers(
-        text,
-        ENDNOTE_REFERENCE_MARKER,
-        ENDNOTE_REFERENCE_MARKER_END,
-        "endnote reference",
-        Some(context.endnote_count),
-        true,
-        path,
-    )?;
-    validate_delimited_markers(
-        text,
-        BOOKMARK_PAGE_ANCHOR_MARKER,
-        BOOKMARK_PAGE_MARKER_END,
-        "bookmark page anchor",
-        None,
-        false,
-        path,
-    )?;
-    validate_delimited_markers(
-        text,
-        BOOKMARK_PAGE_REF_MARKER,
-        BOOKMARK_PAGE_MARKER_END,
-        "bookmark page reference",
-        None,
-        false,
-        path,
-    )?;
-
-    for ch in text.chars() {
-        let code = u32::from(ch);
-        if (INLINE_IMAGE_MARKER_BASE..=0xFFFFD).contains(&code) {
-            let index = usize::try_from(code - INLINE_IMAGE_MARKER_BASE).unwrap_or(usize::MAX);
-            validate_index(
-                "inline image",
-                index,
-                context.inline_image_count,
-                path.to_owned(),
-            )?;
-        } else if (0xF0000..INLINE_IMAGE_MARKER_BASE).contains(&code)
-            && !is_known_non_inline_marker(ch)
-        {
-            return Err(ModelInvariantError::MalformedMarker {
-                kind: "semantic",
-                path: path.to_owned(),
-                reason: "unknown reserved private-use marker",
-            });
-        }
+    match kind {
+        InlineKind::InlineImage(id) => validate_index(
+            "inline image",
+            id.get(),
+            context.inline_image_count,
+            path.to_owned(),
+        ),
+        InlineKind::FootnoteReference(id) => validate_index(
+            "footnote reference",
+            id.get(),
+            context.footnote_count,
+            path.to_owned(),
+        ),
+        InlineKind::EndnoteReference(id) => validate_index(
+            "endnote reference",
+            id.get(),
+            context.endnote_count,
+            path.to_owned(),
+        ),
+        InlineKind::PendingNoteReference => Err(ModelInvariantError::PendingNoteReference {
+            path: path.to_owned(),
+        }),
+        InlineKind::DynamicField(_)
+        | InlineKind::BookmarkPageAnchor(_)
+        | InlineKind::BookmarkPageReference(_)
+        | InlineKind::LayoutAdvance(_)
+        | InlineKind::NestedTableAnchor => Ok(()),
     }
-    Ok(())
-}
-
-fn is_known_non_inline_marker(ch: char) -> bool {
-    [
-        BOOKMARK_PAGE_ANCHOR_MARKER,
-        BOOKMARK_PAGE_REF_MARKER,
-        BOOKMARK_PAGE_MARKER_END,
-        PASSIVE_ADVANCE_MARKER,
-        PASSIVE_MATH_FRACTION_RULE_MARKER,
-        PASSIVE_MATH_STACK_ANCHOR_MARKER,
-        PASSIVE_MATH_INLINE_LEAD_MARKER,
-        NESTED_TABLE_ANCHOR_MARKER,
-        FOOTNOTE_REFERENCE_MARKER,
-        FOOTNOTE_REFERENCE_MARKER_END,
-        ENDNOTE_REFERENCE_MARKER,
-        ENDNOTE_REFERENCE_MARKER_END,
-    ]
-    .iter()
-    .any(|marker| marker.starts_with(ch))
-}
-
-fn validate_delimited_markers(
-    text: &str,
-    start: &str,
-    end: &str,
-    kind: &'static str,
-    referenced_len: Option<usize>,
-    reject_stray_end: bool,
-    path: &str,
-) -> Result<(), ModelInvariantError> {
-    let mut cursor = 0usize;
-    while cursor < text.len() {
-        let next_start = text[cursor..].find(start).map(|index| cursor + index);
-        let next_end = text[cursor..].find(end).map(|index| cursor + index);
-        match (next_start, next_end) {
-            (None, None) => break,
-            (None, Some(_)) if reject_stray_end => {
-                return Err(ModelInvariantError::MalformedMarker {
-                    kind,
-                    path: path.to_owned(),
-                    reason: "marker terminator has no matching start",
-                });
-            }
-            (Some(marker_start), Some(marker_end))
-                if reject_stray_end && marker_end < marker_start =>
-            {
-                return Err(ModelInvariantError::MalformedMarker {
-                    kind,
-                    path: path.to_owned(),
-                    reason: "marker terminator has no matching start",
-                });
-            }
-            (None, Some(_)) => break,
-            (Some(marker_start), Some(marker_end)) if marker_end < marker_start => {
-                cursor = marker_end + end.len();
-            }
-            (Some(marker_start), _) => {
-                let id_start = marker_start + start.len();
-                let Some(relative_end) = text[id_start..].find(end) else {
-                    return Err(ModelInvariantError::MalformedMarker {
-                        kind,
-                        path: path.to_owned(),
-                        reason: "marker has no terminator",
-                    });
-                };
-                let marker_end = id_start + relative_end;
-                let id = text[id_start..marker_end].parse::<usize>().map_err(|_| {
-                    ModelInvariantError::MalformedMarker {
-                        kind,
-                        path: path.to_owned(),
-                        reason: "marker identifier is not an unsigned integer",
-                    }
-                })?;
-                if let Some(len) = referenced_len {
-                    validate_index(kind, id, len, path.to_owned())?;
-                }
-                cursor = marker_end + end.len();
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -933,13 +820,12 @@ mod tests {
     #[test]
     fn rejects_invalid_inline_image_identifier() {
         let mut document = Document::default();
-        let marker = inline_image_marker(3).expect("bounded marker");
         let Block::Paragraph(paragraph) = &mut document.blocks[0] else {
             panic!("default block must be a paragraph");
         };
         paragraph.runs.push(Run {
-            dynamic_field: None,
-            text: marker.to_string(),
+            dynamic_field: Some(InlineKind::InlineImage(InlineImageId::new(3))),
+            text: String::new(),
             style: CharacterStyle::default(),
         });
         assert!(matches!(
@@ -991,22 +877,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_note_marker() {
+    fn rejects_pending_note_reference() {
         let mut document = Document::default();
         let Block::Paragraph(paragraph) = &mut document.blocks[0] else {
             panic!("default block must be a paragraph");
         };
         paragraph.runs.push(Run {
-            dynamic_field: None,
-            text: format!("{FOOTNOTE_REFERENCE_MARKER}not-a-number{FOOTNOTE_REFERENCE_MARKER_END}"),
+            dynamic_field: Some(InlineKind::PendingNoteReference),
+            text: String::new(),
             style: CharacterStyle::default(),
         });
         assert!(matches!(
             validate_document_invariants(&document),
-            Err(ModelInvariantError::MalformedMarker {
-                kind: "footnote reference",
-                ..
-            })
+            Err(ModelInvariantError::PendingNoteReference { .. })
         ));
     }
 }

@@ -152,6 +152,18 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                 document,
                 font_provider,
             );
+            if segment_index + 1 == segments.len() && !segment.text.ends_with(char::is_whitespace) {
+                fit_width = inline_image_cross_run_cluster_width(
+                    paragraph,
+                    run_index,
+                    width,
+                    inline_image_id(segment.dynamic_field).is_some(),
+                    current.width,
+                    markers,
+                    document,
+                    font_provider,
+                );
+            }
             if is_passive_math_fraction_rule_marker(&segment.text) {
                 fit_width = passive_math_fraction_width_points(&segment.style);
             }
@@ -302,7 +314,7 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                 && current
                     .runs
                     .iter()
-                    .any(|run| inline_image_marker_index(&run.text).is_some())
+                    .any(|run| inline_image_id(run.dynamic_field).is_some())
             {
                 WORD_INLINE_IMAGE_BODY_EDGE_TOLERANCE_POINTS
             } else {
@@ -315,7 +327,7 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                 && current
                     .runs
                     .iter()
-                    .any(|run| inline_image_marker_index(&run.text).is_some())
+                    .any(|run| inline_image_id(run.dynamic_field).is_some())
             {
                 let mut paragraph_mark = segment.clone();
                 paragraph_mark.text = " ".to_string();
@@ -366,11 +378,11 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                 } else {
                     segment.text.trim_start().to_string()
                 };
-                if trimmed.is_empty() {
+                if trimmed.is_empty() && segment.dynamic_field.is_none() {
                     continue;
                 }
                 let next_segment = FlowRun {
-                    dynamic_field: None,
+                    dynamic_field: segment.dynamic_field,
                     text: trimmed,
                     style: segment.style,
                     width: 0.0,
@@ -462,11 +474,55 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
         inline_image_baseline_context |= line
             .runs
             .iter()
-            .any(|run| inline_image_marker_index(&run.text).is_some());
+            .any(|run| inline_image_id(run.dynamic_field).is_some());
         line.inline_image_baseline_context = inline_image_baseline_context;
     }
 
     lines
+}
+
+pub(in crate::layout) fn inline_image_cross_run_cluster_width(
+    paragraph: &Paragraph,
+    run_index: usize,
+    first_width: f32,
+    mut contains_inline_image: bool,
+    current_line_width: f32,
+    markers: &MarkerContext,
+    document: &Document,
+    font_provider: Option<&FontProvider>,
+) -> f32 {
+    let mut width = first_width;
+    for run in paragraph.runs.iter().skip(run_index.saturating_add(1)) {
+        for segment in split_run_for_wrapping(run, markers) {
+            if segment.text.chars().next().is_some_and(char::is_whitespace) {
+                return if contains_inline_image {
+                    width
+                } else {
+                    first_width
+                };
+            }
+            contains_inline_image |= inline_image_id(segment.dynamic_field).is_some();
+            width += measure_flow_run(
+                &segment,
+                current_line_width + width,
+                &paragraph.style,
+                document,
+                font_provider,
+            );
+            if segment.text.chars().last().is_some_and(char::is_whitespace) {
+                return if contains_inline_image {
+                    width
+                } else {
+                    first_width
+                };
+            }
+        }
+    }
+    if contains_inline_image {
+        width
+    } else {
+        first_width
+    }
 }
 
 pub(in crate::layout) fn character_spacing_boundary_after_run(
@@ -983,7 +1039,7 @@ pub(in crate::layout) fn stack_passive_math_equation_arrays(
                 .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
                 as i32;
             for mut run in row {
-                if !is_passive_advance_marker(&run.text)
+                if layout_advance(run.dynamic_field).is_none()
                     && !is_passive_math_inline_lead_marker(&run.text)
                     && !is_passive_math_stack_anchor_marker(&run.text)
                 {
@@ -1038,10 +1094,12 @@ pub(in crate::layout) fn push_passive_math_advance(
     }
     let mut style = base_style.clone();
     style.baseline_shift_half_points = 0;
-    style.character_spacing_twips = points_to_bounded_twips(width);
     runs.push(Run {
-        dynamic_field: None,
-        text: PASSIVE_ADVANCE_MARKER.to_string(),
+        dynamic_field: Some(InlineKind::LayoutAdvance(LayoutAdvance {
+            horizontal_twips: points_to_bounded_twips(width),
+            vertical_twips: 0,
+        })),
+        text: String::new(),
         style,
     });
 }
@@ -1372,7 +1430,8 @@ pub(in crate::layout) fn take_trailing_whitespace(
 ) -> Vec<FlowRun> {
     let mut carried = Vec::new();
     while line.runs.last().is_some_and(|run| {
-        run.tab_stop_position.is_none()
+        run.dynamic_field.is_none()
+            && run.tab_stop_position.is_none()
             && run.text != "\t"
             && run.text.chars().all(char::is_whitespace)
     }) {
@@ -1398,8 +1457,8 @@ pub(in crate::layout) fn natural_line_height_for_runs(
         return runs
             .iter()
             .filter(|run| {
-                inline_image_marker_index(&run.text).is_none()
-                    && !is_passive_advance_marker(&run.text)
+                inline_image_id(run.dynamic_field).is_none()
+                    && layout_advance(run.dynamic_field).is_none()
                     && !is_passive_math_inline_lead_marker(&run.text)
             })
             .map(|run| {
@@ -1505,23 +1564,31 @@ pub(in crate::layout) fn split_run_for_wrapping(
     if run.style.hidden {
         return output;
     }
-    if let Some(field) = run.dynamic_field {
-        let text = dynamic_field_layout_text(field, markers);
-        let first = output.len();
-        push_display_text_segment(&mut output, text, &run.style, false);
-        for segment in &mut output[first..] {
-            segment.dynamic_field = Some(field);
+    if let Some(kind) = run.dynamic_field {
+        if let InlineKind::DynamicField(field) = kind {
+            let text = dynamic_field_layout_text(field, markers);
+            let first = output.len();
+            push_display_text_segment(&mut output, text, &run.style, false);
+            for segment in &mut output[first..] {
+                segment.dynamic_field = Some(kind);
+            }
+        } else {
+            output.push(FlowRun {
+                dynamic_field: Some(kind),
+                text: String::new(),
+                style: run.style.clone(),
+                width: 0.0,
+                line_height_points: 0.0,
+                tab_leader: TabLeader::None,
+                tab_alignment: TabAlignment::Left,
+                tab_stop_position: None,
+                soft_hyphen_after: false,
+            });
         }
         return output;
     }
     let mut start = 0;
-    let resolved_text;
-    let text = if contains_inline_marker(&run.text) {
-        resolved_text = run.text.replace(NESTED_TABLE_ANCHOR_MARKER, "");
-        resolved_text.as_str()
-    } else {
-        run.text.as_str()
-    };
+    let text = run.text.as_str();
 
     // Word treats a character-bordered run as one inline box. Keeping its
     // authored text together here prevents the ordinary whitespace splitter
@@ -1631,13 +1698,7 @@ pub(in crate::layout) fn marker_context(
 }
 
 pub(in crate::layout) fn contains_inline_marker(text: &str) -> bool {
-    text.contains(FOOTNOTE_REFERENCE_MARKER)
-        || text.contains(FOOTNOTE_REFERENCE_MARKER_END)
-        || text.contains(ENDNOTE_REFERENCE_MARKER)
-        || text.contains(ENDNOTE_REFERENCE_MARKER_END)
-        || text.contains(PASSIVE_ADVANCE_MARKER)
-        || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
+    text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
         || text.contains(PASSIVE_MATH_INLINE_LEAD_MARKER)
         || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
-        || text.contains(NESTED_TABLE_ANCHOR_MARKER)
 }

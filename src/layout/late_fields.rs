@@ -619,21 +619,9 @@ pub(in crate::layout) fn push_paragraph_stats(
 }
 
 pub(in crate::layout) fn remove_internal_stat_markers(text: &str) -> String {
-    let mut cleaned = text
-        .replace(PASSIVE_ADVANCE_MARKER, "")
-        .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "")
+    text.replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "")
         .replace(PASSIVE_MATH_INLINE_LEAD_MARKER, "")
-        .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "");
-    while let Some((start, end)) = next_bookmark_page_marker_range(&cleaned, 0) {
-        cleaned.replace_range(start..end, "");
-    }
-    while let Some((start, end)) = next_footnote_reference_marker_range(&cleaned, 0) {
-        cleaned.replace_range(start..end, "");
-    }
-    while let Some((start, end)) = next_endnote_reference_marker_range(&cleaned, 0) {
-        cleaned.replace_range(start..end, "");
-    }
-    cleaned
+        .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "")
 }
 
 pub(in crate::layout) fn format_page_number(value: usize, format: PageNumberFormat) -> String {
@@ -752,19 +740,19 @@ pub(in crate::layout) fn resolve_footnote_reference_markers(
             let Some(fragment) = layout_item_text_fragment_mut(item) else {
                 continue;
             };
-            if !fragment.text.contains(FOOTNOTE_REFERENCE_MARKER) {
+            let Some(InlineKind::FootnoteReference(id)) = fragment.dynamic_field else {
                 continue;
-            }
+            };
             let old_text = fragment.text.clone();
-            let new_text = replace_footnote_reference_markers_in_text(
-                &old_text,
+            let index = id.get();
+            let numbering = footnote_numbering_for(document, index);
+            let sequence = footnote_sequence_for_reference_page(
                 document,
+                index,
                 &reference_pages,
                 current_page,
             );
-            if new_text == old_text {
-                continue;
-            }
+            let new_text = format_note_number(numbering.start, sequence, numbering.format);
             let old_width = measure_text_with_document_font(
                 &old_text,
                 &fragment.style,
@@ -780,6 +768,7 @@ pub(in crate::layout) fn resolve_footnote_reference_markers(
                 font_provider,
             );
             fragment.text = new_text;
+            fragment.dynamic_field = None;
             let delta = new_width - old_width;
             if delta.abs() > 0.01 {
                 shifts.push((item_idx, fragment.baseline_y, fragment.x, delta));
@@ -801,18 +790,24 @@ pub(in crate::layout) fn resolve_endnote_reference_markers(
             let Some(fragment) = layout_item_text_fragment_mut(item) else {
                 continue;
             };
-            if !fragment.text.contains(ENDNOTE_REFERENCE_MARKER) {
+            let Some(InlineKind::EndnoteReference(id)) = fragment.dynamic_field else {
                 continue;
-            }
+            };
             let old_text = fragment.text.clone();
-            let new_text = replace_endnote_reference_markers_in_text(
-                &old_text,
+            let index = id.get();
+            let numbering = endnote_numbering_for(document, index);
+            let note_page = rendered_endnote_pages
+                .get(index)
+                .copied()
+                .flatten()
+                .unwrap_or(1);
+            let sequence = endnote_sequence_for_rendered_page(
                 document,
+                index,
                 rendered_endnote_pages,
+                note_page,
             );
-            if new_text == old_text {
-                continue;
-            }
+            let new_text = format_note_number(numbering.start, sequence, numbering.format);
             let old_width = measure_text_with_document_font(
                 &old_text,
                 &fragment.style,
@@ -828,6 +823,7 @@ pub(in crate::layout) fn resolve_endnote_reference_markers(
                 font_provider,
             );
             fragment.text = new_text;
+            fragment.dynamic_field = None;
             let delta = new_width - old_width;
             if delta.abs() > 0.01 {
                 shifts.push((item_idx, fragment.baseline_y, fragment.x, delta));
@@ -874,85 +870,15 @@ pub(in crate::layout) fn footnote_reference_pages(
             let Some(fragment) = layout_item_text_fragment(item) else {
                 continue;
             };
-            let mut search_start = 0;
-            while let Some((start, end)) =
-                next_footnote_reference_marker_range(&fragment.text, search_start)
+            if let Some(InlineKind::FootnoteReference(id)) = fragment.dynamic_field
+                && let Some(reference_page) = reference_pages.get_mut(id.get())
+                && reference_page.is_none()
             {
-                if let Some(index) = parse_footnote_reference_marker_id(&fragment.text[start..end])
-                    && let Some(reference_page) = reference_pages.get_mut(index.get())
-                    && reference_page.is_none()
-                {
-                    *reference_page = Some(page_number);
-                }
-                search_start = end;
+                *reference_page = Some(page_number);
             }
         }
     }
     reference_pages
-}
-
-pub(in crate::layout) fn replace_endnote_reference_markers_in_text(
-    text: &str,
-    document: &Document,
-    rendered_endnote_pages: &[Option<usize>],
-) -> String {
-    let mut output = String::new();
-    let mut search_start = 0;
-    while let Some((start, end)) = next_endnote_reference_marker_range(text, search_start) {
-        output.push_str(&text[search_start..start]);
-        let replacement = parse_endnote_reference_marker_id(&text[start..end])
-            .map(|id| {
-                let index = id.get();
-                let numbering = endnote_numbering_for(document, index);
-                let note_page = rendered_endnote_pages
-                    .get(index)
-                    .copied()
-                    .flatten()
-                    .unwrap_or(1);
-                let sequence = endnote_sequence_for_rendered_page(
-                    document,
-                    index,
-                    rendered_endnote_pages,
-                    note_page,
-                );
-                format_note_number(numbering.start, sequence, numbering.format)
-            })
-            .unwrap_or_else(|| "?".to_string());
-        output.push_str(&replacement);
-        search_start = end;
-    }
-    output.push_str(&text[search_start..]);
-    output
-}
-
-pub(in crate::layout) fn replace_footnote_reference_markers_in_text(
-    text: &str,
-    document: &Document,
-    reference_pages: &[Option<usize>],
-    current_page: usize,
-) -> String {
-    let mut output = String::with_capacity(text.len());
-    let mut search_start = 0;
-    while let Some((start, end)) = next_footnote_reference_marker_range(text, search_start) {
-        output.push_str(&text[search_start..start]);
-        let replacement = parse_footnote_reference_marker_id(&text[start..end])
-            .map(|id| {
-                let index = id.get();
-                let numbering = footnote_numbering_for(document, index);
-                let sequence = footnote_sequence_for_reference_page(
-                    document,
-                    index,
-                    reference_pages,
-                    current_page,
-                );
-                format_note_number(numbering.start, sequence, numbering.format)
-            })
-            .unwrap_or_else(|| "?".to_string());
-        output.push_str(&replacement);
-        search_start = end;
-    }
-    output.push_str(&text[search_start..]);
-    output
 }
 
 pub(in crate::layout) fn footnote_sequence_for_reference_page(
@@ -1002,7 +928,7 @@ pub(in crate::layout) fn replace_late_page_marker(
         let Some(fragment) = layout_item_text_fragment_mut(item) else {
             continue;
         };
-        if fragment.dynamic_field != Some(field) {
+        if fragment.dynamic_field != Some(InlineKind::DynamicField(field)) {
             continue;
         }
         let old_text = fragment.text.clone();
@@ -1321,12 +1247,11 @@ pub(in crate::layout) fn resolve_bookmark_page_ref_markers(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) {
-    let mut page_for_bookmark = Vec::<(usize, String)>::new();
+    let mut page_for_bookmark = Vec::<(BookmarkId, String)>::new();
     for page in pages.iter() {
         for item in &page.items {
             if let Some(fragment) = layout_item_text_fragment(item)
-                && let Some(id) =
-                    parse_bookmark_page_marker_id(&fragment.text, BOOKMARK_PAGE_ANCHOR_MARKER)
+                && let Some(InlineKind::BookmarkPageAnchor(id)) = fragment.dynamic_field
             {
                 if let Some((_, page_number)) = page_for_bookmark
                     .iter_mut()
@@ -1344,19 +1269,20 @@ pub(in crate::layout) fn resolve_bookmark_page_ref_markers(
         let mut shifts = Vec::<(usize, f32, f32, f32)>::new();
         for (item_idx, item) in page.items.iter_mut().enumerate() {
             if let Some(fragment) = layout_item_text_fragment_mut(item) {
-                if parse_bookmark_page_marker_id(&fragment.text, BOOKMARK_PAGE_ANCHOR_MARKER)
-                    .is_some()
-                {
+                if matches!(
+                    fragment.dynamic_field,
+                    Some(InlineKind::BookmarkPageAnchor(_))
+                ) {
                     fragment.text.clear();
-                } else if let Some(id) =
-                    parse_bookmark_page_marker_id(&fragment.text, BOOKMARK_PAGE_REF_MARKER)
-                {
+                    fragment.dynamic_field = None;
+                } else if let Some(InlineKind::BookmarkPageReference(id)) = fragment.dynamic_field {
                     fragment.text = page_for_bookmark
                         .iter()
                         .find_map(|(bookmark_id, page_number)| {
                             (*bookmark_id == id).then(|| page_number.clone())
                         })
                         .unwrap_or_else(|| "?".to_string());
+                    fragment.dynamic_field = None;
                     let width = measure_text_with_document_font(
                         &fragment.text,
                         &fragment.style,
@@ -1382,81 +1308,4 @@ pub(in crate::layout) fn resolve_bookmark_page_ref_markers(
             }
         }
     }
-}
-
-pub(in crate::layout) fn next_bookmark_page_marker_range(
-    text: &str,
-    start: usize,
-) -> Option<(usize, usize)> {
-    let anchor = text[start..]
-        .find(BOOKMARK_PAGE_ANCHOR_MARKER)
-        .map(|relative| start + relative);
-    let page_ref = text[start..]
-        .find(BOOKMARK_PAGE_REF_MARKER)
-        .map(|relative| start + relative);
-    let marker_start = match (anchor, page_ref) {
-        (Some(anchor), Some(page_ref)) => anchor.min(page_ref),
-        (Some(anchor), None) => anchor,
-        (None, Some(page_ref)) => page_ref,
-        (None, None) => return None,
-    };
-    let prefix = if text[marker_start..].starts_with(BOOKMARK_PAGE_ANCHOR_MARKER) {
-        BOOKMARK_PAGE_ANCHOR_MARKER
-    } else {
-        BOOKMARK_PAGE_REF_MARKER
-    };
-    let id_start = marker_start + prefix.len();
-    let marker_end_relative = text[id_start..].find(BOOKMARK_PAGE_MARKER_END)?;
-    let marker_end = id_start + marker_end_relative + BOOKMARK_PAGE_MARKER_END.len();
-    parse_bookmark_page_marker_id(&text[marker_start..marker_end], prefix)?;
-    Some((marker_start, marker_end))
-}
-
-pub(in crate::layout) fn next_footnote_reference_marker_range(
-    text: &str,
-    start: usize,
-) -> Option<(usize, usize)> {
-    let marker_start = text[start..]
-        .find(FOOTNOTE_REFERENCE_MARKER)
-        .map(|relative| start + relative)?;
-    let id_start = marker_start + FOOTNOTE_REFERENCE_MARKER.len();
-    let marker_end_relative = text[id_start..].find(FOOTNOTE_REFERENCE_MARKER_END)?;
-    let marker_end = id_start + marker_end_relative + FOOTNOTE_REFERENCE_MARKER_END.len();
-    parse_footnote_reference_marker_id(&text[marker_start..marker_end])?;
-    Some((marker_start, marker_end))
-}
-
-pub(in crate::layout) fn next_endnote_reference_marker_range(
-    text: &str,
-    start: usize,
-) -> Option<(usize, usize)> {
-    let marker_start = text[start..]
-        .find(ENDNOTE_REFERENCE_MARKER)
-        .map(|relative| start + relative)?;
-    let id_start = marker_start + ENDNOTE_REFERENCE_MARKER.len();
-    let marker_end_relative = text[id_start..].find(ENDNOTE_REFERENCE_MARKER_END)?;
-    let marker_end = id_start + marker_end_relative + ENDNOTE_REFERENCE_MARKER_END.len();
-    parse_endnote_reference_marker_id(&text[marker_start..marker_end])?;
-    Some((marker_start, marker_end))
-}
-
-pub(in crate::layout) fn parse_bookmark_page_marker_id(text: &str, prefix: &str) -> Option<usize> {
-    let rest = text.strip_prefix(prefix)?;
-    let id = rest.strip_suffix(BOOKMARK_PAGE_MARKER_END)?;
-    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok())?
-}
-
-pub(in crate::layout) fn parse_footnote_reference_marker_id(text: &str) -> Option<FootnoteId> {
-    let rest = text.strip_prefix(FOOTNOTE_REFERENCE_MARKER)?;
-    let id = rest.strip_suffix(FOOTNOTE_REFERENCE_MARKER_END)?;
-    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok().map(FootnoteId::new))?
-}
-
-pub(in crate::layout) fn parse_endnote_reference_marker_id(text: &str) -> Option<EndnoteId> {
-    let rest = text.strip_prefix(ENDNOTE_REFERENCE_MARKER)?;
-    let id = rest.strip_suffix(ENDNOTE_REFERENCE_MARKER_END)?;
-    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok().map(EndnoteId::new))?
 }

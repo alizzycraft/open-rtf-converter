@@ -8,19 +8,9 @@ pub(crate) use invariants::{
 
 use std::ops::{Deref, DerefMut};
 
-pub const BOOKMARK_PAGE_ANCHOR_MARKER: &str = "\u{f0005}";
-pub const BOOKMARK_PAGE_REF_MARKER: &str = "\u{f0006}";
-pub const BOOKMARK_PAGE_MARKER_END: &str = "\u{f0007}";
-pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
 pub const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
 pub const PASSIVE_MATH_STACK_ANCHOR_MARKER: &str = "\u{f0012}";
 pub const PASSIVE_MATH_INLINE_LEAD_MARKER: &str = "\u{f0013}";
-pub const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
-pub const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
-pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
-pub const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
-pub const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
-pub const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum DynamicField {
@@ -55,6 +45,26 @@ typed_index!(BlockIndex);
 typed_index!(FootnoteId);
 typed_index!(EndnoteId);
 typed_index!(InlineImageId);
+typed_index!(BookmarkId);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct LayoutAdvance {
+    pub horizontal_twips: i32,
+    pub vertical_twips: i32,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum InlineKind {
+    DynamicField(DynamicField),
+    InlineImage(InlineImageId),
+    PendingNoteReference,
+    FootnoteReference(FootnoteId),
+    EndnoteReference(EndnoteId),
+    BookmarkPageAnchor(BookmarkId),
+    BookmarkPageReference(BookmarkId),
+    LayoutAdvance(LayoutAdvance),
+    NestedTableAnchor,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Footnote {
@@ -215,28 +225,6 @@ impl Default for Document {
             blocks: vec![Block::Paragraph(Paragraph::default())],
         }
     }
-}
-
-pub fn inline_image_marker(index: usize) -> Option<char> {
-    let codepoint = INLINE_IMAGE_MARKER_BASE.checked_add(u32::try_from(index).ok()?)?;
-    char::from_u32(codepoint).filter(|ch| *ch <= '\u{ffffd}')
-}
-
-pub(crate) fn inline_image_marker_for_id(id: InlineImageId) -> Option<char> {
-    inline_image_marker(id.get())
-}
-
-pub fn inline_image_marker_index(text: &str) -> Option<usize> {
-    let mut chars = text.chars();
-    let codepoint = chars.next()? as u32;
-    if chars.next().is_some() || codepoint < INLINE_IMAGE_MARKER_BASE {
-        return None;
-    }
-    usize::try_from(codepoint - INLINE_IMAGE_MARKER_BASE).ok()
-}
-
-pub(crate) fn inline_image_marker_id(text: &str) -> Option<InlineImageId> {
-    inline_image_marker_index(text).map(InlineImageId::new)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1381,7 +1369,9 @@ const fn hidden_border() -> TableCellBorder {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Run {
-    pub dynamic_field: Option<DynamicField>,
+    // Transitional field name retained until MODEL-06 privatizes construction.
+    // It now carries every non-text inline node, including dynamic fields.
+    pub dynamic_field: Option<InlineKind>,
     pub text: String,
     pub style: CharacterStyle,
 }

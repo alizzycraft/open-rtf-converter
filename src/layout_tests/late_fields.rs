@@ -12,7 +12,7 @@
             let mut after_y = None;
             for item in &layout.pages[0].items {
                 if let LayoutItem::Text(fragment) = item {
-                    if fragment.text == PASSIVE_ADVANCE_MARKER {
+                    if matches!(fragment.dynamic_field, Some(InlineKind::LayoutAdvance(_))) {
                         marker_rendered = true;
                     }
                     if fragment.text == "After" {
@@ -40,9 +40,6 @@
                 style: Default::default(),
             },
         ];
-        let mut advance_style = CharacterStyle::default();
-        advance_style.character_spacing_twips = 240;
-        advance_style.baseline_shift_half_points = -12;
         let advanced_runs = vec![
             Run {
                 dynamic_field: None,
@@ -50,9 +47,12 @@
                 style: Default::default(),
             },
             Run {
-                dynamic_field: None,
-                text: PASSIVE_ADVANCE_MARKER.to_string(),
-                style: advance_style,
+                dynamic_field: Some(InlineKind::LayoutAdvance(LayoutAdvance {
+                    horizontal_twips: 240,
+                    vertical_twips: -120,
+                })),
+                text: String::new(),
+                style: CharacterStyle::default(),
             },
             Run {
                 dynamic_field: None,
@@ -524,7 +524,7 @@
                     style: Default::default(),
                 },
                 Run {
-                    dynamic_field: Some(DynamicField::TotalPages),
+                    dynamic_field: Some(InlineKind::DynamicField(DynamicField::TotalPages)),
                     text: String::new(),
                     style: Default::default(),
                 },
@@ -752,7 +752,7 @@
                     style: Default::default(),
                 },
                 Run {
-                    dynamic_field: Some(DynamicField::SectionPages),
+                    dynamic_field: Some(InlineKind::DynamicField(DynamicField::SectionPages)),
                     text: String::new(),
                     style: Default::default(),
                 },
@@ -822,7 +822,7 @@
             });
         }
         runs.push(Run {
-            dynamic_field: Some(field),
+            dynamic_field: Some(InlineKind::DynamicField(field)),
             text: String::new(),
             style,
         });

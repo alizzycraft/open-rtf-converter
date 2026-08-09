@@ -4,7 +4,7 @@ use super::super::*;
 use super::formula::*;
 
 pub(in crate::rtf::parser) struct PassiveFieldResult {
-    pub(in crate::rtf::parser) dynamic_field: Option<DynamicField>,
+    pub(in crate::rtf::parser) dynamic_field: Option<InlineKind>,
     pub(in crate::rtf::parser) text: String,
     pub(in crate::rtf::parser) font_name: Option<String>,
     pub(in crate::rtf::parser) font_size_half_points: Option<i32>,
@@ -75,7 +75,7 @@ pub(in crate::rtf::parser) enum FieldFormatSwitch {
 impl PassiveFieldResult {
     pub(in crate::rtf::parser) fn dynamic(field: DynamicField) -> Self {
         Self {
-            dynamic_field: Some(field),
+            dynamic_field: Some(InlineKind::DynamicField(field)),
             text: String::new(),
             font_name: None,
             font_size_half_points: None,
@@ -122,8 +122,17 @@ pub(in crate::rtf::parser) fn apply_field_format_switches(
     instruction: &str,
     mut result: PassiveFieldResult,
 ) -> Option<PassiveFieldResult> {
-    if let Some(field) = result.dynamic_field {
+    if let Some(InlineKind::DynamicField(field)) = result.dynamic_field {
         return (field_instruction_dynamic_field(instruction) == Some(field)).then_some(result);
+    }
+    if matches!(
+        result.dynamic_field,
+        Some(InlineKind::BookmarkPageReference(_))
+    ) {
+        return (field_instruction_name(instruction) == Some("PAGEREF")).then_some(result);
+    }
+    if result.dynamic_field.is_some() {
+        return None;
     }
     if result.font_name.is_some() {
         if !passive_field_result_text_is_safe(&result.text) {
@@ -132,11 +141,7 @@ pub(in crate::rtf::parser) fn apply_field_format_switches(
         return Some(result);
     }
     if contains_internal_marker(&result.text) {
-        return if field_result_allows_internal_marker(instruction, &result.text) {
-            Some(result)
-        } else {
-            None
-        };
+        return None;
     }
 
     if let Some(picture) = field_numeric_picture_switch(instruction)? {
@@ -199,16 +204,6 @@ pub(in crate::rtf::parser) fn passive_field_result_text_is_safe(text: &str) -> b
     text.chars().count() <= MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         && !text.chars().any(|ch| ch.is_control())
         && !contains_internal_marker(text)
-}
-
-pub(in crate::rtf::parser) fn field_result_allows_internal_marker(
-    instruction: &str,
-    text: &str,
-) -> bool {
-    match field_instruction_name(instruction) {
-        Some("PAGEREF") => is_bookmark_page_marker(text),
-        _ => false,
-    }
 }
 
 pub(in crate::rtf::parser) fn field_uses_numeric_formatting(instruction: &str) -> bool {
@@ -2389,12 +2384,4 @@ pub(in crate::rtf::parser) fn clean_bookmark_name(name: String) -> Option<String
         return None;
     }
     Some(name)
-}
-
-pub(in crate::rtf::parser) fn bookmark_page_anchor_marker(id: usize) -> String {
-    format!("{BOOKMARK_PAGE_ANCHOR_MARKER}{id}{BOOKMARK_PAGE_MARKER_END}")
-}
-
-pub(in crate::rtf::parser) fn bookmark_page_ref_marker(id: usize) -> String {
-    format!("{BOOKMARK_PAGE_REF_MARKER}{id}{BOOKMARK_PAGE_MARKER_END}")
 }

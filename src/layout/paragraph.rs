@@ -1312,12 +1312,12 @@ pub(in crate::layout) fn layout_paragraph_with_auto_footnotes(
             && line
                 .runs
                 .iter()
-                .any(|run| inline_image_marker_index(&run.text).is_some())
+                .any(|run| inline_image_id(run.dynamic_field).is_some())
         {
             let text_line_height = line
                 .runs
                 .iter()
-                .filter(|run| inline_image_marker_index(&run.text).is_none())
+                .filter(|run| inline_image_id(run.dynamic_field).is_none())
                 .map(|run| flow_run_line_height(run, document, font_provider))
                 .fold(0.0_f32, f32::max);
             *cursor_y -= text_line_height * 0.25;
@@ -1448,21 +1448,11 @@ pub(in crate::layout) fn flush_auto_footnotes_before_page_advance(
 pub(in crate::layout) fn max_footnote_reference_index_in_line(line: &Line) -> Option<usize> {
     line.runs
         .iter()
-        .filter_map(|run| max_footnote_reference_index_in_text(&run.text))
+        .filter_map(|run| match run.dynamic_field {
+            Some(InlineKind::FootnoteReference(id)) => Some(id.get()),
+            _ => None,
+        })
         .max()
-}
-
-pub(in crate::layout) fn max_footnote_reference_index_in_text(text: &str) -> Option<usize> {
-    let mut max_index = None;
-    let mut search_start = 0;
-    while let Some((start, end)) = next_footnote_reference_marker_range(text, search_start) {
-        if let Some(index) = parse_footnote_reference_marker_id(&text[start..end]) {
-            let index = index.get();
-            max_index = Some(max_index.map_or(index, |current: usize| current.max(index)));
-        }
-        search_start = end;
-    }
-    max_index
 }
 
 pub(in crate::layout) fn reset_line_numbers_for_page_restart(
@@ -1754,11 +1744,10 @@ pub(in crate::layout) fn push_passive_line_number(
 pub(in crate::layout) fn line_has_visible_text(line: &Line) -> bool {
     line.runs.iter().any(|run| {
         !run.style.hidden
-            && !is_passive_advance_marker(&run.text)
+            && layout_advance(run.dynamic_field).is_none()
             && !is_passive_math_inline_lead_marker(&run.text)
             && !run.text.trim().is_empty()
-            && parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_none()
-            && parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_none()
+            && !is_bookmark_page_kind(run.dynamic_field)
     })
 }
 

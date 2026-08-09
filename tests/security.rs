@@ -9,27 +9,41 @@ use open_rtf_converter::audit_passive_pdf_bytes;
 use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineJoin, LineStyle};
 use open_rtf_converter::model::{
-    Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DynamicField,
-    ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement,
-    FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch,
-    ImageFormat, ImageToneAdjustment, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment,
-    ParagraphFrameVerticalAlignment, PassiveMathFractionPart, PassiveMathLimitPart, ShadingPattern,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageWrapSide,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
-    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor, TabAlignment,
-    TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
-    inline_image_marker_index,
+    Alignment, Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DynamicField,
+    EndnotePlacement, FontFamilyHint, FontPitch, ImageFormat, ImageToneAdjustment, InlineKind,
+    PageVerticalAlignment, ParagraphFrameVerticalAlignment, PassiveMathFractionPart,
+    PassiveMathLimitPart, ShadingPattern, StaticImageTextHorizontalAlign,
+    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
+    StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor, TabAlignment, TableCellTextDirection,
+    TableRowAlignment, TextRelief, UnderlineStyle,
 };
 
 const PAGE_NUMBER_MARKER: &str = "\u{f0000}";
 const TOTAL_PAGES_MARKER: &str = "\u{f0001}";
 const SECTION_NUMBER_MARKER: &str = "\u{f0002}";
+const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
 const SECTION_PAGES_MARKER: &str = "\u{f0004}";
 const DOCUMENT_WORDS_MARKER: &str = "\u{f0008}";
 const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
 const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
+const BOOKMARK_PAGE_ANCHOR_MARKER: &str = "\u{f0005}";
+const BOOKMARK_PAGE_REF_MARKER: &str = "\u{f0006}";
+const BOOKMARK_PAGE_MARKER_END: &str = "\u{f0007}";
+const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
+const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
+const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
+const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
+const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
+const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
+const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
+
+fn inline_image_marker(index: usize) -> Option<char> {
+    let codepoint = INLINE_IMAGE_MARKER_BASE.checked_add(u32::try_from(index).ok()?)?;
+    char::from_u32(codepoint).filter(|ch| *ch <= '\u{ffffd}')
+}
+
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
 };
@@ -2886,17 +2900,28 @@ fn paragraph_run_style_for_text<'a>(
     paragraph: &'a open_rtf_converter::model::Paragraph,
     exact_text: &str,
 ) -> Option<&'a CharacterStyle> {
-    paragraph
-        .runs
-        .iter()
-        .find(|run| run.text == exact_text)
-        .map(|run| &run.style)
+    paragraph.runs.iter().find_map(|run| {
+        let matches = match run.dynamic_field {
+            Some(InlineKind::LayoutAdvance(_)) => exact_text == PASSIVE_ADVANCE_MARKER,
+            Some(InlineKind::InlineImage(id)) => {
+                inline_image_marker(id.get()).is_some_and(|marker| exact_text == marker.to_string())
+            }
+            Some(InlineKind::FootnoteReference(id)) => {
+                exact_text == footnote_reference_marker(id.get())
+            }
+            Some(InlineKind::EndnoteReference(id)) => {
+                exact_text == endnote_reference_marker(id.get())
+            }
+            _ => run.text == exact_text,
+        };
+        matches.then_some(&run.style)
+    })
 }
 
 fn append_paragraph_text(text: &mut String, paragraph: &open_rtf_converter::model::Paragraph) {
     for run in &paragraph.runs {
-        if let Some(field) = run.dynamic_field {
-            text.push_str(match field {
+        match run.dynamic_field {
+            Some(InlineKind::DynamicField(field)) => text.push_str(match field {
                 DynamicField::PageNumber => PAGE_NUMBER_MARKER,
                 DynamicField::TotalPages => TOTAL_PAGES_MARKER,
                 DynamicField::SectionNumber => SECTION_NUMBER_MARKER,
@@ -2904,9 +2929,30 @@ fn append_paragraph_text(text: &mut String, paragraph: &open_rtf_converter::mode
                 DynamicField::DocumentWords => DOCUMENT_WORDS_MARKER,
                 DynamicField::DocumentCharacters => DOCUMENT_CHARS_MARKER,
                 DynamicField::DocumentCharactersWithSpaces => DOCUMENT_CHARS_WITH_SPACES_MARKER,
-            });
-        } else {
-            text.push_str(&run.text);
+            }),
+            Some(InlineKind::InlineImage(id)) => {
+                if let Some(marker) = inline_image_marker(id.get()) {
+                    text.push(marker);
+                }
+            }
+            Some(InlineKind::PendingNoteReference) => text.push_str(PENDING_NOTE_REFERENCE_MARKER),
+            Some(InlineKind::FootnoteReference(id)) => {
+                text.push_str(&footnote_reference_marker(id.get()))
+            }
+            Some(InlineKind::EndnoteReference(id)) => {
+                text.push_str(&endnote_reference_marker(id.get()))
+            }
+            Some(InlineKind::BookmarkPageAnchor(id)) => text.push_str(&format!(
+                "{BOOKMARK_PAGE_ANCHOR_MARKER}{}{BOOKMARK_PAGE_MARKER_END}",
+                id.get()
+            )),
+            Some(InlineKind::BookmarkPageReference(id)) => text.push_str(&format!(
+                "{BOOKMARK_PAGE_REF_MARKER}{}{BOOKMARK_PAGE_MARKER_END}",
+                id.get()
+            )),
+            Some(InlineKind::LayoutAdvance(_)) => text.push_str(PASSIVE_ADVANCE_MARKER),
+            Some(InlineKind::NestedTableAnchor) => text.push_str(NESTED_TABLE_ANCHOR_MARKER),
+            None => text.push_str(&run.text),
         }
     }
 }

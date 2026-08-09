@@ -1205,7 +1205,7 @@ pub(in crate::layout) fn table_cell_paragraphs_for_layout(cell: &TableCell) -> V
         paragraph
             .runs
             .iter()
-            .any(|run| run.text.contains(NESTED_TABLE_ANCHOR_MARKER))
+            .any(|run| run.dynamic_field == Some(InlineKind::NestedTableAnchor))
     });
     if !has_anchor {
         let mut paragraphs = cell.paragraphs.clone();
@@ -1220,26 +1220,14 @@ pub(in crate::layout) fn table_cell_paragraphs_for_layout(cell: &TableCell) -> V
             paragraphs.push(paragraph.clone());
             continue;
         }
-        let Some((anchor_run_index, anchor_byte_index)) =
-            paragraph.runs.iter().enumerate().find_map(|(index, run)| {
-                run.text
-                    .find(NESTED_TABLE_ANCHOR_MARKER)
-                    .map(|byte_index| (index, byte_index))
-            })
-        else {
+        let Some(anchor_run_index) = paragraph.runs.iter().enumerate().find_map(|(index, run)| {
+            (run.dynamic_field == Some(InlineKind::NestedTableAnchor)).then_some(index)
+        }) else {
             paragraphs.push(paragraph.clone());
             continue;
         };
 
-        let mut before = paragraph.runs[..anchor_run_index].to_vec();
-        let anchor_run = &paragraph.runs[anchor_run_index];
-        if anchor_byte_index > 0 {
-            before.push(Run {
-                dynamic_field: None,
-                text: anchor_run.text[..anchor_byte_index].to_string(),
-                style: anchor_run.style.clone(),
-            });
-        }
+        let before = paragraph.runs[..anchor_run_index].to_vec();
         if !before.is_empty() {
             paragraphs.push(Paragraph {
                 style: paragraph.style.clone(),
@@ -1248,15 +1236,7 @@ pub(in crate::layout) fn table_cell_paragraphs_for_layout(cell: &TableCell) -> V
         }
         append_nested_table_paragraphs(&mut paragraphs, nested_table, 0);
 
-        let suffix_start = anchor_byte_index + NESTED_TABLE_ANCHOR_MARKER.len();
         let mut after = Vec::new();
-        if suffix_start < anchor_run.text.len() {
-            after.push(Run {
-                dynamic_field: None,
-                text: anchor_run.text[suffix_start..].to_string(),
-                style: anchor_run.style.clone(),
-            });
-        }
         after.extend(paragraph.runs[anchor_run_index + 1..].iter().cloned());
         if !after.is_empty() {
             paragraphs.push(Paragraph {
@@ -1865,29 +1845,27 @@ pub(in crate::layout) fn nested_table_row_range(
 }
 
 pub(in crate::layout) fn nested_table_paragraph_start(cell: &TableCell) -> usize {
-    let Some((paragraph_index, run_index, byte_index)) = cell
-        .paragraphs
-        .iter()
-        .enumerate()
-        .find_map(|(paragraph_index, paragraph)| {
-            paragraph
-                .runs
-                .iter()
-                .enumerate()
-                .find_map(|(run_index, run)| {
-                    run.text
-                        .find(NESTED_TABLE_ANCHOR_MARKER)
-                        .map(|byte_index| (paragraph_index, run_index, byte_index))
-                })
-        })
+    let Some((paragraph_index, run_index)) =
+        cell.paragraphs
+            .iter()
+            .enumerate()
+            .find_map(|(paragraph_index, paragraph)| {
+                paragraph
+                    .runs
+                    .iter()
+                    .enumerate()
+                    .find_map(|(run_index, run)| {
+                        (run.dynamic_field == Some(InlineKind::NestedTableAnchor))
+                            .then_some((paragraph_index, run_index))
+                    })
+            })
     else {
         return cell.paragraphs.len();
     };
 
-    let has_prefix_text = byte_index > 0
-        || cell.paragraphs[paragraph_index].runs[..run_index]
-            .iter()
-            .any(|run| !run.text.is_empty());
+    let has_prefix_text = cell.paragraphs[paragraph_index].runs[..run_index]
+        .iter()
+        .any(|run| !run.text.is_empty());
     paragraph_index + usize::from(has_prefix_text)
 }
 

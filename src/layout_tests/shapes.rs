@@ -80,22 +80,20 @@
             new_layout_page(geometry, 1),
             new_layout_page(geometry.for_physical_page(2), 2),
         ];
-        pages[0].items.push(deep_drawing_wrapped_item(
-            passive_text_item(
-                &format!("{BOOKMARK_PAGE_ANCHOR_MARKER}7{BOOKMARK_PAGE_MARKER_END}"),
-                36.0,
-                64.0,
-            ),
-            2048,
-        ));
-        pages[1].items.push(deep_drawing_wrapped_item(
-            passive_text_item(
-                &format!("{BOOKMARK_PAGE_REF_MARKER}7{BOOKMARK_PAGE_MARKER_END}"),
-                36.0,
-                64.0,
-            ),
-            2048,
-        ));
+        let mut anchor = passive_text_item("", 36.0, 64.0);
+        if let LayoutItem::Text(fragment) = &mut anchor {
+            fragment.dynamic_field = Some(InlineKind::BookmarkPageAnchor(BookmarkId::new(7)));
+        }
+        pages[0]
+            .items
+            .push(deep_drawing_wrapped_item(anchor, 2048));
+        let mut reference = passive_text_item("", 36.0, 64.0);
+        if let LayoutItem::Text(fragment) = &mut reference {
+            fragment.dynamic_field = Some(InlineKind::BookmarkPageReference(BookmarkId::new(7)));
+        }
+        pages[1]
+            .items
+            .push(deep_drawing_wrapped_item(reference, 2048));
         pages[1].items.push(deep_drawing_wrapped_item(
             passive_text_item(" after", 44.0, 64.0),
             2048,
@@ -108,8 +106,7 @@
         assert_eq!(leaf_text_fragment(&pages[0].items[0]).text, "");
         let resolved = leaf_text_fragment(&pages[1].items[0]);
         assert_eq!(resolved.text, "1");
-        assert!(!resolved.text.contains(BOOKMARK_PAGE_REF_MARKER));
-        assert!(!resolved.text.contains(BOOKMARK_PAGE_MARKER_END));
+        assert_eq!(resolved.dynamic_field, None);
         assert!(leaf_text_fragment(&pages[1].items[1]).x > old_suffix_x);
     }
 
@@ -4173,7 +4170,7 @@
                     style: style.clone(),
                 },
                 Run {
-                    dynamic_field: Some(DynamicField::TotalPages),
+                    dynamic_field: Some(InlineKind::DynamicField(DynamicField::TotalPages)),
                     text: String::new(),
                     style: style.clone(),
                 },
@@ -4218,7 +4215,7 @@
                     style: style.clone(),
                 },
                 Run {
-                    dynamic_field: Some(DynamicField::SectionPages),
+                    dynamic_field: Some(InlineKind::DynamicField(DynamicField::SectionPages)),
                     text: String::new(),
                     style: style.clone(),
                 },
@@ -4258,6 +4255,6 @@
         let LayoutItem::Text(fragment) = &mut item else {
             unreachable!("passive text helper must create a text fragment");
         };
-        fragment.dynamic_field = Some(field);
+        fragment.dynamic_field = Some(InlineKind::DynamicField(field));
         item
     }

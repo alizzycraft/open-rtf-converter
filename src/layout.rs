@@ -32,24 +32,21 @@ use unicode_linebreak::{BreakOpportunity, linebreaks};
 use crate::fonts::{FontAssetStyle, FontProvider};
 use crate::model::StaticImageWrapSide;
 use crate::model::{
-    Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterStyle, Document, DynamicField, ENDNOTE_REFERENCE_MARKER,
-    ENDNOTE_REFERENCE_MARKER_END, EndnoteId, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
-    FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnoteId,
-    FootnotePlacement, ImageFormat, LineNumberRestart, ModelInvariantError,
-    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PASSIVE_ADVANCE_MARKER,
-    PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_INLINE_LEAD_MARKER,
-    PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
-    Paragraph, ParagraphBorders, ParagraphFrameVerticalAlignment, ParagraphStyle,
-    PassiveMathFractionPart, PassiveMathLimitPart, Run, ShadingPattern, StaticImage,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TabAlignment, TabLeader, Table, TableCell,
-    TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
-    inline_image_marker_id, inline_image_marker_index, validate_document_invariants,
+    Alignment, Block, BookmarkId, BorderStyle, CharacterStyle, Document, DynamicField,
+    EndnotePlacement, FontDef, FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat,
+    InlineImageId, InlineKind, LayoutAdvance, LineNumberRestart, ModelInvariantError,
+    NoteNumberRestart, NoteNumbering, PASSIVE_MATH_FRACTION_RULE_MARKER,
+    PASSIVE_MATH_INLINE_LEAD_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
+    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
+    ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart,
+    Run, ShadingPattern, StaticImage, StaticImageVectorCommand, StaticImageVectorFillRule,
+    StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind,
+    StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
+    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellHorizontalMerge,
+    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
+    TableRowAlignment, TableRowWrapMargins, UnderlineStyle, validate_document_invariants,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -264,7 +261,7 @@ pub enum LineJoin {
 
 #[derive(Debug, Clone)]
 pub struct TextFragment {
-    pub dynamic_field: Option<DynamicField>,
+    pub dynamic_field: Option<InlineKind>,
     pub text: String,
     pub x: f32,
     pub baseline_y: f32,
@@ -791,7 +788,7 @@ fn new_layout_page(geometry: PageGeometry, physical_page_number: usize) -> Layou
 
 #[derive(Debug, Clone)]
 struct FlowRun {
-    dynamic_field: Option<DynamicField>,
+    dynamic_field: Option<InlineKind>,
     text: String,
     style: CharacterStyle,
     width: f32,
@@ -1666,8 +1663,7 @@ impl LayoutEngine {
 mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProviderLimits};
     use crate::model::{
-        BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER, Block,
-        Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat, PageNumberFormat,
+        Block, Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat, PageNumberFormat,
         PageSettings, Paragraph, Run, StaticImagePlacement, StaticShape, StaticShapeKind,
         StaticShapePoint, Table, TableCell, TableCellBorder, TableCellBorders, TableCellPadding,
         TableCellSpacing, TableCellVerticalMerge, TableRow, TableRowWrapMargins,
@@ -1675,6 +1671,8 @@ mod tests {
     use crate::rtf::parse_rtf;
 
     use super::*;
+
+    const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
 
     fn test_markers(page_number: &str, section_number: &str) -> MarkerContext {
         MarkerContext {

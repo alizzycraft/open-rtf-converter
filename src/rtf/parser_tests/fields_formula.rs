@@ -35,12 +35,16 @@
         let text = document_text(&output.document);
 
         assert!(
-            text.contains(&format!(
-                "Note {} again I missing [Field removed: no passive result]",
-                footnote_reference_marker(FootnoteId::new(0))
-            )),
+            text.contains("Note ")
+                && text.contains(" again I missing [Field removed: no passive result]"),
             "text was {text:?}"
         );
+        assert!(output.document.blocks.iter().any(|block| matches!(
+            block,
+            Block::Paragraph(paragraph)
+                if paragraph.runs.iter().any(|run| run.dynamic_field
+                    == Some(InlineKind::FootnoteReference(FootnoteId::new(0))))
+        )));
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         for forbidden in [
             "NOTEREF",
@@ -591,13 +595,16 @@ After\par}"#;
         let advance = paragraph
             .runs
             .iter()
-            .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
-            .expect("passive advance marker");
+            .find_map(|run| match run.dynamic_field {
+                Some(InlineKind::LayoutAdvance(advance)) => Some(advance),
+                _ => None,
+            })
+            .expect("typed layout advance");
 
         assert!(text.contains("Before"), "text was {text:?}");
         assert!(text.contains("after"), "text was {text:?}");
-        assert_eq!(advance.style.character_spacing_twips, 240);
-        assert_eq!(advance.style.baseline_shift_half_points, -12);
+        assert_eq!(advance.horizontal_twips, 240);
+        assert_eq!(advance.vertical_twips, -120);
         assert!(!text.contains("[Field removed"));
         for forbidden in ["ADVANCE", "\\r", "\\d", "fldinst"] {
             assert!(
@@ -643,11 +650,14 @@ After\par}"#;
         let advance = paragraph
             .runs
             .iter()
-            .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
-            .expect("passive advance marker");
+            .find_map(|run| match run.dynamic_field {
+                Some(InlineKind::LayoutAdvance(advance)) => Some(advance),
+                _ => None,
+            })
+            .expect("typed layout advance");
 
-        assert_eq!(advance.style.character_spacing_twips, 120);
-        assert_eq!(advance.style.baseline_shift_half_points, 12);
+        assert_eq!(advance.horizontal_twips, 120);
+        assert_eq!(advance.vertical_twips, 120);
         assert!(output.diagnostics.iter().all(|diagnostic| {
             !diagnostic
                 .message
@@ -1147,14 +1157,19 @@ After\par}"#;
                 Block::Paragraph(paragraph) => paragraph.runs.iter().collect::<Vec<_>>(),
                 _ => Vec::new(),
             })
-            .filter(|run| run.text == PASSIVE_ADVANCE_MARKER)
+            .filter(|run| matches!(run.dynamic_field, Some(InlineKind::LayoutAdvance(_))))
             .collect::<Vec<_>>();
 
         assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 12);
         assert_eq!(advances.len(), 12);
         assert!(advances.iter().all(|run| {
-            run.style.character_spacing_twips == WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS
-                && run.style.baseline_shift_half_points == 0
+            matches!(
+                run.dynamic_field,
+                Some(InlineKind::LayoutAdvance(LayoutAdvance {
+                    horizontal_twips: WORD_LITERAL_DRAWING_FIELD_SIDE_BEARING_TWIPS,
+                    vertical_twips: 0,
+                }))
+            )
         }));
         assert!(visible_document_text(&output.document).contains(
             "Quote Visible if Yes compare 1 macro Button stored Drawing empty [Field removed: no passive result]"
@@ -1338,8 +1353,8 @@ After\par}"#;
             apply_field_format_switches(
                 "PAGEREF Target",
                 PassiveFieldResult {
-                    dynamic_field: None,
-                    text: bookmark_page_ref_marker(7),
+                    dynamic_field: Some(InlineKind::BookmarkPageReference(BookmarkId::new(7))),
+                    text: String::new(),
                     font_name: None,
                     font_size_half_points: None,
                     form_field: false,
@@ -1359,8 +1374,8 @@ After\par}"#;
             apply_field_format_switches(
                 "MACROBUTTON Launch Visible",
                 PassiveFieldResult {
-                    dynamic_field: None,
-                    text: bookmark_page_ref_marker(7),
+                    dynamic_field: Some(InlineKind::BookmarkPageReference(BookmarkId::new(7))),
+                    text: String::new(),
                     font_name: None,
                     font_size_half_points: None,
                     form_field: false,
@@ -1372,8 +1387,11 @@ After\par}"#;
             apply_field_format_switches(
                 "SYMBOL 65",
                 PassiveFieldResult {
-                    dynamic_field: None,
-                    text: PASSIVE_ADVANCE_MARKER.to_string(),
+                    dynamic_field: Some(InlineKind::LayoutAdvance(LayoutAdvance {
+                        horizontal_twips: 120,
+                        vertical_twips: 0,
+                    })),
+                    text: String::new(),
                     font_name: Some("ZapfDingbats".to_string()),
                     font_size_half_points: None,
                     form_field: false,

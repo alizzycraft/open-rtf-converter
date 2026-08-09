@@ -2701,11 +2701,15 @@ fn custom_xml_markup_preserves_visible_text_without_metadata_leakage() {
     let text = collect_text(&parsed.document);
     assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 1);
     let marker_spacing = parsed.document.blocks.iter().find_map(|block| match block {
-        Block::Paragraph(paragraph) => paragraph
-            .runs
-            .iter()
-            .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
-            .map(|run| run.style.character_spacing_twips),
+        Block::Paragraph(paragraph) => {
+            paragraph
+                .runs
+                .iter()
+                .find_map(|run| match run.dynamic_field {
+                    Some(InlineKind::LayoutAdvance(advance)) => Some(advance.horizontal_twips),
+                    _ => None,
+                })
+        }
         _ => None,
     });
     assert_eq!(marker_spacing, Some(82));
@@ -2718,11 +2722,15 @@ fn custom_xml_markup_preserves_visible_text_without_metadata_leakage() {
         .blocks
         .iter()
         .find_map(|block| match block {
-            Block::Paragraph(paragraph) => paragraph
-                .runs
-                .iter()
-                .find(|run| run.text == PASSIVE_ADVANCE_MARKER)
-                .map(|run| run.style.character_spacing_twips),
+            Block::Paragraph(paragraph) => {
+                paragraph
+                    .runs
+                    .iter()
+                    .find_map(|run| match run.dynamic_field {
+                        Some(InlineKind::LayoutAdvance(advance)) => Some(advance.horizontal_twips),
+                        _ => None,
+                    })
+            }
             _ => None,
         });
     assert_eq!(calibri_marker_spacing, Some(144));

@@ -345,15 +345,7 @@ fn formatted_explicit_listtext_marker_renders_passively_without_control_leakage(
 fn resultless_passive_field_inside_explicit_list_marker_stays_marker_text() {
     let input = br#"{\rtf1{\*\listtext{\field{\*\fldinst QUOTE "Q"}}\tab}Body\par}"#.to_vec();
     let parsed = parse_rtf_bytes(&input).unwrap();
-    let paragraph = match &parsed.document.blocks[0] {
-        Block::Paragraph(paragraph) => paragraph,
-        _ => panic!("expected list paragraph"),
-    };
-    let text = paragraph
-        .runs
-        .iter()
-        .map(|run| run.text.as_str())
-        .collect::<String>();
+    let text = collect_text(&parsed.document);
 
     assert_eq!(text.replace(PASSIVE_ADVANCE_MARKER, ""), "Q\tBody");
     assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 2);
@@ -414,12 +406,23 @@ fn passive_advance_field_inside_explicit_list_marker_stays_marker_text() {
         _ => panic!("expected list paragraph"),
     };
 
-    assert_eq!(paragraph.runs[0].text, PASSIVE_ADVANCE_MARKER);
-    assert_eq!(paragraph.runs[0].style.character_spacing_twips, 240);
-    assert_eq!(paragraph.runs[0].style.baseline_shift_half_points, -12);
-    assert_eq!(paragraph.runs[1].text, "1.\tBody");
-    assert_eq!(paragraph.runs[1].style.character_spacing_twips, 0);
-    assert_eq!(paragraph.runs[1].style.baseline_shift_half_points, 0);
+    let advance = paragraph
+        .runs
+        .iter()
+        .find_map(|run| match run.dynamic_field {
+            Some(InlineKind::LayoutAdvance(advance)) => Some(advance),
+            _ => None,
+        })
+        .expect("typed passive advance");
+    assert_eq!(advance.horizontal_twips, 240);
+    assert_eq!(advance.vertical_twips, -120);
+    let visible_run = paragraph
+        .runs
+        .iter()
+        .find(|run| run.dynamic_field.is_none() && run.text == "1.\tBody")
+        .expect("visible list marker and body");
+    assert_eq!(visible_run.style.character_spacing_twips, 0);
+    assert_eq!(visible_run.style.baseline_shift_half_points, 0);
     let text = collect_text(&parsed.document);
     for forbidden in ["ADVANCE", "fldinst", "\\r", "\\d"] {
         assert!(

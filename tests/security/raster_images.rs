@@ -121,11 +121,10 @@ fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
             _ => None,
         })
         .expect("inline picture paragraph");
-    assert!(paragraph.runs.iter().any(|run| {
-        run.text
-            .chars()
-            .any(|ch| inline_image_marker_index(&ch.to_string()) == Some(0))
-    }));
+    assert!(paragraph.runs.iter().any(|run| matches!(
+        run.dynamic_field,
+        Some(InlineKind::InlineImage(id)) if id.get() == 0
+    )));
 
     let layout = LayoutEngine::try_layout(&parsed.document)
         .expect("parsed documents satisfy model invariants");

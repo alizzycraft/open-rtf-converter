@@ -1,11 +1,11 @@
 use open_rtf_converter::{
     layout::LayoutEngine,
     model::{
-        Block, BlockIndex, CharacterStyle, Document, DynamicField, FOOTNOTE_REFERENCE_MARKER,
-        FOOTNOTE_REFERENCE_MARKER_END, Footnote, ModelInvariantError, Paragraph, Run, SectionIndex,
-        Table, TableCell, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
-        TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
-        TableRow, TableRowAlignment, TableRowWrapMargins, inline_image_marker,
+        Block, BlockIndex, CharacterStyle, Document, DynamicField, Footnote, FootnoteId,
+        InlineImageId, InlineKind, ModelInvariantError, Paragraph, Run, SectionIndex, Table,
+        TableCell, TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
+        TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
+        TableRowAlignment, TableRowWrapMargins,
     },
 };
 
@@ -53,8 +53,8 @@ fn advanced_layout_rejects_out_of_range_section_and_block_indexes() {
 fn advanced_layout_rejects_invalid_inline_and_note_identifiers() {
     let mut document = Document::default();
     first_paragraph(&mut document).runs.push(Run {
-        dynamic_field: None,
-        text: inline_image_marker(7).expect("bounded marker").to_string(),
+        dynamic_field: Some(InlineKind::InlineImage(InlineImageId::new(7))),
+        text: String::new(),
         style: CharacterStyle::default(),
     });
     assert!(matches!(
@@ -67,8 +67,8 @@ fn advanced_layout_rejects_invalid_inline_and_note_identifiers() {
         })
     ));
 
-    first_paragraph(&mut document).runs[0].text =
-        format!("{FOOTNOTE_REFERENCE_MARKER}4{FOOTNOTE_REFERENCE_MARKER_END}");
+    first_paragraph(&mut document).runs[0].dynamic_field =
+        Some(InlineKind::FootnoteReference(FootnoteId::new(4)));
     assert!(matches!(
         LayoutEngine::try_layout(&document),
         Err(ModelInvariantError::IndexOutOfBounds {
@@ -81,17 +81,17 @@ fn advanced_layout_rejects_invalid_inline_and_note_identifiers() {
 }
 
 #[test]
-fn advanced_layout_rejects_dynamic_fields_that_also_carry_text() {
+fn advanced_layout_rejects_semantic_inline_nodes_that_also_carry_text() {
     let mut document = Document::default();
     first_paragraph(&mut document).runs.push(Run {
-        dynamic_field: Some(DynamicField::TotalPages),
+        dynamic_field: Some(InlineKind::DynamicField(DynamicField::TotalPages)),
         text: "not atomic".to_owned(),
         style: CharacterStyle::default(),
     });
 
     assert!(matches!(
         LayoutEngine::try_layout(&document),
-        Err(ModelInvariantError::DynamicFieldWithText { .. })
+        Err(ModelInvariantError::InlineKindWithText { .. })
     ));
 }
 

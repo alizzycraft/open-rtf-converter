@@ -231,13 +231,12 @@
         let output = parse_rtf(r"{\rtf1{\header \chpgn\par}Body text\page More text\par}").unwrap();
 
         assert_eq!(output.document.header.len(), 1);
-        let text = output.document.header[0]
+        let advances = output.document.header[0]
             .runs
             .iter()
-            .map(|run| run.text.as_str())
-            .collect::<String>();
-        assert_eq!(text.replace(PASSIVE_ADVANCE_MARKER, ""), "");
-        assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 1);
+            .filter(|run| matches!(run.dynamic_field, Some(InlineKind::LayoutAdvance(_))))
+            .count();
+        assert_eq!(advances, 1);
         assert_eq!(
             paragraph_dynamic_fields(&output.document.header[0]),
             vec![DynamicField::PageNumber]
@@ -440,17 +439,13 @@
             _ => panic!("expected body paragraph"),
         };
 
-        assert_eq!(
-            body.runs
-                .iter()
-                .map(|run| run.text.as_str())
-                .collect::<String>(),
-            format!("Body{}", footnote_reference_marker(FootnoteId::new(0)))
-        );
+        assert_eq!(body.runs.iter().map(|run| run.text.as_str()).collect::<String>(), "Body");
         let reference = body
             .runs
             .iter()
-            .find(|run| run.text == footnote_reference_marker(FootnoteId::new(0)))
+            .find(|run| {
+                run.dynamic_field == Some(InlineKind::FootnoteReference(FootnoteId::new(0)))
+            })
             .expect("footnote reference run");
         assert_eq!(
             reference.style.baseline_shift_half_points,
@@ -532,12 +527,12 @@
         };
 
         assert_eq!(
-            body.runs
-                .iter()
-                .map(|run| run.text.as_str())
-                .collect::<String>(),
-            format!("Foot{} End1", footnote_reference_marker(FootnoteId::new(0)))
+            body.runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "Foot End1"
         );
+        assert!(body.runs.iter().any(|run| {
+            run.dynamic_field == Some(InlineKind::FootnoteReference(FootnoteId::new(0)))
+        }));
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
     }
@@ -564,12 +559,12 @@
             PageNumberFormat::LowerLetter
         );
         assert_eq!(
-            body.runs
-                .iter()
-                .map(|run| run.text.as_str())
-                .collect::<String>(),
-            format!("Body{} Endi", footnote_reference_marker(FootnoteId::new(0)))
+            body.runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "Body Endi"
         );
+        assert!(body.runs.iter().any(|run| {
+            run.dynamic_field == Some(InlineKind::FootnoteReference(FootnoteId::new(0)))
+        }));
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
         assert_eq!(
@@ -604,12 +599,12 @@
         };
 
         assert_eq!(
-            body.runs
-                .iter()
-                .map(|run| run.text.as_str())
-                .collect::<String>(),
-            format!("Body{} Endb", footnote_reference_marker(FootnoteId::new(0)))
+            body.runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "Body Endb"
         );
+        assert!(body.runs.iter().any(|run| {
+            run.dynamic_field == Some(InlineKind::FootnoteReference(FootnoteId::new(0)))
+        }));
         assert_eq!(output.document.footnotes[0].numbering.expect("footnote numbering").start, 4);
         assert_eq!(
             output.document.footnotes[0].numbering.expect("footnote numbering").format,

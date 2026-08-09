@@ -36,27 +36,24 @@ use crate::config::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::model::{
-    Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BlockIndex, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, Document,
-    DynamicField, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END, Endnote, EndnoteId,
-    EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
-    FontFamilyHint, FontPitch, Footnote, FootnoteId, FootnotePlacement, ImageCrop, ImageFormat,
-    ImageToneAdjustment, InlineImageEntry, InlineImageId, LineNumberRestart,
-    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PASSIVE_ADVANCE_MARKER,
-    PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
-    PageSettings, PageVerticalAlignment, Paragraph, ParagraphFrameVerticalAlignment,
-    ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SectionIndex,
-    ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
-    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
-    TableCellHorizontalMerge, TableCellPadding, TableCellSpacing, TableCellTextDirection,
-    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TableRowWrapMargins, TextRelief, UnderlineStyle, inline_image_marker_for_id,
+    Alignment, Block, BlockIndex, BookmarkId, BorderStyle, CharacterEmphasisMark, CharacterStyle,
+    Color, Document, DynamicField, Endnote, EndnoteId, EndnotePlacement, FontDef, FontFamilyHint,
+    FontPitch, Footnote, FootnoteId, FootnotePlacement, ImageCrop, ImageFormat,
+    ImageToneAdjustment, InlineImageEntry, InlineImageId, InlineKind, LayoutAdvance,
+    LineNumberRestart, NoteNumberRestart, NoteNumbering, PASSIVE_MATH_FRACTION_RULE_MARKER,
+    PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
+    Paragraph, ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart,
+    PassiveMathLimitPart, Run, SectionIndex, ShadingPattern, StaticImage, StaticImageAlphaMask,
+    StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
+    StaticImageVectorRaster, StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
+    StaticShapeLineJoin, StaticShapePoint, StaticShapeTextVerticalAnchor,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TabAlignment, TabLeader, Table, TableCell,
+    TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
+    TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
+    TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
     normalize_missing_color_references, normalize_missing_font_references,
     validate_document_invariants,
 };
@@ -84,8 +81,6 @@ const DEFAULT_FLOATING_TABLE_WRAP_MARGIN_TWIPS: i32 = DEFAULT_SHAPE_WRAP_MARGIN_
 const MAX_PASSIVE_SHAPE_Z_ORDER: i32 = 65_535;
 const MAX_EXACT_JPEG_COLOR_MODE_BYTES: usize = 256 * 1024;
 const MAX_EXACT_JPEG_COLOR_MODE_PIXELS: u64 = 1_000_000;
-const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
-
 #[derive(Debug, Error)]
 pub enum ParseError {
     #[error(transparent)]
@@ -1819,10 +1814,23 @@ struct FieldSequenceCounter {
 
 #[derive(Debug, Clone)]
 struct BookmarkCapture {
-    id: usize,
+    id: BookmarkId,
     name: String,
     text: String,
+    note_references: Vec<BookmarkNoteReference>,
     active: bool,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct BookmarkNoteReference {
+    byte_offset: usize,
+    kind: InlineKind,
+}
+
+#[derive(Debug, Clone)]
+enum NoteReferenceResolution {
+    Inline(InlineKind),
+    Text(String),
 }
 
 #[derive(Debug, Clone)]
@@ -2048,27 +2056,6 @@ fn remap_retained_document_block_index(
         }
     }
     old_to_new.iter().flatten().next().copied().unwrap_or(0)
-}
-
-fn footnote_reference_marker(id: FootnoteId) -> String {
-    format!(
-        "{FOOTNOTE_REFERENCE_MARKER}{}{FOOTNOTE_REFERENCE_MARKER_END}",
-        id.get()
-    )
-}
-
-fn endnote_reference_marker(id: EndnoteId) -> String {
-    format!(
-        "{ENDNOTE_REFERENCE_MARKER}{}{ENDNOTE_REFERENCE_MARKER_END}",
-        id.get()
-    )
-}
-
-fn parse_footnote_reference_marker_id(text: &str) -> Option<FootnoteId> {
-    let rest = text.strip_prefix(FOOTNOTE_REFERENCE_MARKER)?;
-    let id = rest.strip_suffix(FOOTNOTE_REFERENCE_MARKER_END)?;
-    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok().map(FootnoteId::new))?
 }
 
 impl Parser {
@@ -3250,8 +3237,7 @@ impl Parser {
                 let name = self.state.bookmark_name_text.clone();
                 self.state = previous;
                 if let Some(id) = self.start_bookmark_capture(name, offset)? {
-                    let marker = bookmark_page_anchor_marker(id);
-                    self.push_text(&marker, offset)?;
+                    self.push_inline_kind(InlineKind::BookmarkPageAnchor(id), offset)?;
                 }
                 return Ok(());
             }
@@ -8697,25 +8683,33 @@ impl Parser {
         destination: Destination,
         offset: usize,
     ) -> Result<(), ParseError> {
-        let replacement = match destination {
+        let resolution = match destination {
             Destination::Footnote => {
                 self.next_footnote_reference_sequence();
                 self.current_footnote_reference_block_index = self.current_reference_block_index();
-                footnote_reference_marker(FootnoteId::new(self.document.footnotes.len()))
+                NoteReferenceResolution::Inline(InlineKind::FootnoteReference(FootnoteId::new(
+                    self.document.footnotes.len(),
+                )))
             }
             Destination::Endnote => {
                 let numbering = self.effective_endnote_numbering();
                 if numbering.restart == NoteNumberRestart::EachPage {
                     self.next_endnote_reference_sequence();
-                    endnote_reference_marker(EndnoteId::new(self.document.endnotes.len()))
+                    NoteReferenceResolution::Inline(InlineKind::EndnoteReference(EndnoteId::new(
+                        self.document.endnotes.len(),
+                    )))
                 } else {
                     let sequence = self.next_endnote_reference_sequence();
-                    format_note_number(numbering.start, sequence, numbering.format)
+                    NoteReferenceResolution::Text(format_note_number(
+                        numbering.start,
+                        sequence,
+                        numbering.format,
+                    ))
                 }
             }
-            _ => "1".to_string(),
+            _ => NoteReferenceResolution::Text("1".to_string()),
         };
-        self.resolve_latest_pending_note_reference(&replacement, offset)?;
+        self.resolve_latest_pending_note_reference(&resolution, offset)?;
         self.state.destination = destination;
         Ok(())
     }
@@ -8730,55 +8724,50 @@ impl Parser {
             return self.start_note_destination(Destination::Endnote, offset);
         }
 
-        let footnote_marker =
-            footnote_reference_marker(FootnoteId::new(self.document.footnotes.len()));
-        let replacement = PENDING_NOTE_REFERENCE_MARKER;
+        let footnote_kind =
+            InlineKind::FootnoteReference(FootnoteId::new(self.document.footnotes.len()));
+        let pending_resolution = NoteReferenceResolution::Inline(InlineKind::PendingNoteReference);
         let replaced = if let Some(row) = self.current_table_row.as_mut()
-            && replace_last_note_marker_in_paragraph(
+            && replace_last_note_reference_in_paragraph(
                 &mut row.current_cell_paragraph,
-                &footnote_marker,
-                replacement,
+                footnote_kind,
+                &pending_resolution,
             ) {
             true
         } else {
-            replace_last_note_marker_in_paragraph(
+            replace_last_note_reference_in_paragraph(
                 &mut self.current_paragraph,
-                &footnote_marker,
-                replacement,
-            ) || replace_last_note_marker_in_paragraph(
+                footnote_kind,
+                &pending_resolution,
+            ) || replace_last_note_reference_in_paragraph(
                 &mut self.current_header_paragraph,
-                &footnote_marker,
-                replacement,
-            ) || replace_last_note_marker_in_paragraph(
+                footnote_kind,
+                &pending_resolution,
+            ) || replace_last_note_reference_in_paragraph(
                 &mut self.current_first_page_header_paragraph,
-                &footnote_marker,
-                replacement,
-            ) || replace_last_note_marker_in_paragraph(
+                footnote_kind,
+                &pending_resolution,
+            ) || replace_last_note_reference_in_paragraph(
                 &mut self.current_even_page_header_paragraph,
-                &footnote_marker,
-                replacement,
-            ) || replace_last_note_marker_in_paragraph(
+                footnote_kind,
+                &pending_resolution,
+            ) || replace_last_note_reference_in_paragraph(
                 &mut self.current_footer_paragraph,
-                &footnote_marker,
-                replacement,
-            ) || replace_last_note_marker_in_paragraph(
+                footnote_kind,
+                &pending_resolution,
+            ) || replace_last_note_reference_in_paragraph(
                 &mut self.current_first_page_footer_paragraph,
-                &footnote_marker,
-                replacement,
-            ) || replace_last_note_marker_in_paragraph(
+                footnote_kind,
+                &pending_resolution,
+            ) || replace_last_note_reference_in_paragraph(
                 &mut self.current_even_page_footer_paragraph,
-                &footnote_marker,
-                replacement,
+                footnote_kind,
+                &pending_resolution,
             )
         };
 
         if replaced {
-            let marker_chars = footnote_marker.chars().count();
-            let replacement_chars = replacement.chars().count();
-            self.output_text_chars = self
-                .output_text_chars
-                .saturating_sub(marker_chars.saturating_sub(replacement_chars));
-            self.replace_last_note_marker_in_bookmarks(&footnote_marker, replacement);
+            self.resolve_last_bookmark_note_reference(footnote_kind, &pending_resolution);
         }
 
         self.rollback_last_footnote_reference_sequence();
@@ -8870,7 +8859,7 @@ impl Parser {
 
         self.output_text_chars = self
             .output_text_chars
-            .checked_add(PENDING_NOTE_REFERENCE_MARKER.chars().count())
+            .checked_add(1)
             .ok_or(ParseError::OutputTextTooLarge(offset))?;
         if self.output_text_chars > self.limits().max_output_text_chars {
             return Err(ParseError::OutputTextTooLarge(offset));
@@ -8905,13 +8894,13 @@ impl Parser {
             &mut self.current_paragraph
         };
 
-        push_text_to_paragraph(
+        push_inline_kind_to_paragraph(
             paragraph,
-            PENDING_NOTE_REFERENCE_MARKER,
+            InlineKind::PendingNoteReference,
             &self.state.paragraph,
             &style,
         );
-        self.capture_bookmark_text(PENDING_NOTE_REFERENCE_MARKER, offset)?;
+        self.capture_bookmark_note_reference(InlineKind::PendingNoteReference);
         Ok(())
     }
 
@@ -9737,14 +9726,15 @@ impl Parser {
 
     fn resolve_latest_pending_note_reference(
         &mut self,
-        replacement: &str,
+        resolution: &NoteReferenceResolution,
         offset: usize,
     ) -> Result<(), ParseError> {
-        if replacement.chars().count() > PENDING_NOTE_REFERENCE_MARKER.chars().count() {
-            let extra = replacement
-                .chars()
-                .count()
-                .saturating_sub(PENDING_NOTE_REFERENCE_MARKER.chars().count());
+        let replacement_chars = match resolution {
+            NoteReferenceResolution::Inline(_) => 1,
+            NoteReferenceResolution::Text(text) => text.chars().count(),
+        };
+        if replacement_chars > 1 {
+            let extra = replacement_chars.saturating_sub(1);
             self.output_text_chars = self
                 .output_text_chars
                 .checked_add(extra)
@@ -9757,46 +9747,49 @@ impl Parser {
         if let Some(row) = self.current_table_row.as_mut()
             && replace_last_pending_note_marker_in_paragraph(
                 &mut row.current_cell_paragraph,
-                &replacement,
+                resolution,
             )
         {
-            self.replace_last_pending_note_marker_in_bookmarks(replacement);
+            self.resolve_last_bookmark_note_reference(InlineKind::PendingNoteReference, resolution);
             return Ok(());
         }
 
-        if replace_last_pending_note_marker_in_paragraph(&mut self.current_paragraph, &replacement)
+        if replace_last_pending_note_marker_in_paragraph(&mut self.current_paragraph, resolution)
             || replace_last_pending_note_marker_in_paragraph(
                 &mut self.current_header_paragraph,
-                &replacement,
+                resolution,
             )
             || replace_last_pending_note_marker_in_paragraph(
                 &mut self.current_first_page_header_paragraph,
-                &replacement,
+                resolution,
             )
             || replace_last_pending_note_marker_in_paragraph(
                 &mut self.current_even_page_header_paragraph,
-                &replacement,
+                resolution,
             )
             || replace_last_pending_note_marker_in_paragraph(
                 &mut self.current_footer_paragraph,
-                &replacement,
+                resolution,
             )
             || replace_last_pending_note_marker_in_paragraph(
                 &mut self.current_first_page_footer_paragraph,
-                &replacement,
+                resolution,
             )
             || replace_last_pending_note_marker_in_paragraph(
                 &mut self.current_even_page_footer_paragraph,
-                &replacement,
+                resolution,
             )
         {
-            self.replace_last_pending_note_marker_in_bookmarks(replacement);
+            self.resolve_last_bookmark_note_reference(InlineKind::PendingNoteReference, resolution);
             return Ok(());
         }
 
         for block in self.document.blocks.iter_mut().rev() {
-            if replace_last_pending_note_marker_in_block(block, &replacement) {
-                self.replace_last_pending_note_marker_in_bookmarks(replacement);
+            if replace_last_pending_note_marker_in_block(block, resolution) {
+                self.resolve_last_bookmark_note_reference(
+                    InlineKind::PendingNoteReference,
+                    resolution,
+                );
                 return Ok(());
             }
         }
@@ -9810,17 +9803,15 @@ impl Parser {
                 &mut self.document.first_page_footer,
                 &mut self.document.even_page_footer,
             ] {
-                if replace_last_pending_note_marker_in_paragraphs(paragraphs, &replacement) {
+                if replace_last_pending_note_marker_in_paragraphs(paragraphs, resolution) {
                     replaced = true;
                     break;
                 }
             }
             if !replaced {
                 for note in self.document.footnotes.iter_mut().rev() {
-                    if replace_last_pending_note_marker_in_paragraph(
-                        &mut note.content,
-                        &replacement,
-                    ) {
+                    if replace_last_pending_note_marker_in_paragraph(&mut note.content, resolution)
+                    {
                         replaced = true;
                         break;
                     }
@@ -9828,10 +9819,8 @@ impl Parser {
             }
             if !replaced {
                 for note in self.document.endnotes.iter_mut().rev() {
-                    if replace_last_pending_note_marker_in_paragraph(
-                        &mut note.content,
-                        &replacement,
-                    ) {
+                    if replace_last_pending_note_marker_in_paragraph(&mut note.content, resolution)
+                    {
                         replaced = true;
                         break;
                     }
@@ -9840,11 +9829,11 @@ impl Parser {
             replaced
         };
         if replaced_in_saved_paragraphs {
-            self.replace_last_pending_note_marker_in_bookmarks(replacement);
+            self.resolve_last_bookmark_note_reference(InlineKind::PendingNoteReference, resolution);
             return Ok(());
         }
 
-        self.replace_last_pending_note_marker_in_bookmarks(replacement);
+        self.resolve_last_bookmark_note_reference(InlineKind::PendingNoteReference, resolution);
         Ok(())
     }
 
@@ -10024,7 +10013,7 @@ impl Parser {
 
         if let Some(marker) = pending_marker.as_ref() {
             for run in &marker.runs {
-                push_text_to_paragraph(paragraph, &run.text, &self.state.paragraph, &run.style);
+                push_run_to_paragraph(paragraph, run, &self.state.paragraph);
             }
         }
         if let Some((marker_text, marker_style)) = styled_marker.as_ref() {
@@ -10045,7 +10034,7 @@ impl Parser {
         Ok(())
     }
 
-    fn push_dynamic_field(&mut self, field: DynamicField, offset: usize) -> Result<(), ParseError> {
+    fn push_inline_kind(&mut self, kind: InlineKind, offset: usize) -> Result<(), ParseError> {
         if self.state.character.hidden {
             return self.count_skipped_destination_bytes(1, offset);
         }
@@ -10139,7 +10128,7 @@ impl Parser {
 
         if let Some(marker) = pending_marker.as_ref() {
             for run in &marker.runs {
-                push_text_to_paragraph(paragraph, &run.text, &self.state.paragraph, &run.style);
+                push_run_to_paragraph(paragraph, run, &self.state.paragraph);
             }
         }
         if let Some((marker_text, marker_style)) = styled_marker.as_ref() {
@@ -10157,7 +10146,7 @@ impl Parser {
         if self.state.field_result_form_field_shading {
             style.form_field_shading = true;
         }
-        push_dynamic_field_to_paragraph(paragraph, field, &self.state.paragraph, &style);
+        push_inline_kind_to_paragraph(paragraph, kind, &self.state.paragraph, &style);
         Ok(())
     }
 
@@ -10266,19 +10255,21 @@ impl Parser {
         style.hidden = false;
         style.character_spacing_twips = width_twips;
         if let Some(last) = paragraph.runs.last_mut()
-            && last.text == PASSIVE_ADVANCE_MARKER
             && last.style.passive_math_phantom_id == style.passive_math_phantom_id
+            && let Some(InlineKind::LayoutAdvance(advance)) = last.dynamic_field.as_mut()
         {
-            last.style.character_spacing_twips = last
-                .style
-                .character_spacing_twips
+            advance.horizontal_twips = advance
+                .horizontal_twips
                 .saturating_add(width_twips)
                 .min(max_width_twips);
             return Ok(());
         }
-        push_text_to_paragraph(
+        push_inline_kind_to_paragraph(
             paragraph,
-            PASSIVE_ADVANCE_MARKER,
+            InlineKind::LayoutAdvance(LayoutAdvance {
+                horizontal_twips: width_twips,
+                vertical_twips: 0,
+            }),
             &self.state.paragraph,
             &style,
         );
@@ -10363,6 +10354,14 @@ impl Parser {
         field: DynamicField,
         offset: usize,
     ) -> Result<(), ParseError> {
+        self.push_visible_inline_kind(InlineKind::DynamicField(field), offset)
+    }
+
+    fn push_visible_inline_kind(
+        &mut self,
+        kind: InlineKind,
+        offset: usize,
+    ) -> Result<(), ParseError> {
         if self.state.destination == Destination::Body && self.state.table_nesting_level > 1 {
             if self.state.character.hidden {
                 return self.count_skipped_destination_bytes(1, offset);
@@ -10378,9 +10377,9 @@ impl Parser {
             if let Some(row) = self.current_table_row.as_mut()
                 && let Some(capture) = row.nested_table_capture.as_mut()
             {
-                push_dynamic_field_to_paragraph(
+                push_inline_kind_to_paragraph(
                     &mut capture.current_cell_paragraph,
-                    field,
+                    kind,
                     &self.state.paragraph,
                     &self.state.character,
                 );
@@ -10393,7 +10392,7 @@ impl Parser {
                 if self.current_table.is_some() && self.current_table_row.is_none() {
                     self.finish_table(offset)?;
                 }
-                self.push_dynamic_field(field, offset)
+                self.push_inline_kind(kind, offset)
             }
             Destination::Header
             | Destination::FirstPageHeader
@@ -10407,7 +10406,25 @@ impl Parser {
             | Destination::FootnoteSeparator
             | Destination::FootnoteContinuationSeparator
             | Destination::EndnoteSeparator
-            | Destination::EndnoteContinuationSeparator => self.push_dynamic_field(field, offset),
+            | Destination::EndnoteContinuationSeparator => self.push_inline_kind(kind, offset),
+            Destination::ListText => {
+                if self.state.character.hidden {
+                    return self.count_skipped_destination_bytes(1, offset);
+                }
+                self.output_text_chars = self
+                    .output_text_chars
+                    .checked_add(1)
+                    .ok_or(ParseError::OutputTextTooLarge(offset))?;
+                if self.output_text_chars > self.limits().max_output_text_chars {
+                    return Err(ParseError::OutputTextTooLarge(offset));
+                }
+                self.pending_list_marker_runs.push(Run {
+                    dynamic_field: Some(kind),
+                    text: String::new(),
+                    style: self.state.character.clone(),
+                });
+                Ok(())
+            }
             _ => self.count_skipped_destination_bytes(1, offset),
         }
     }
@@ -10849,7 +10866,7 @@ impl Parser {
         &mut self,
         name: String,
         offset: usize,
-    ) -> Result<Option<usize>, ParseError> {
+    ) -> Result<Option<BookmarkId>, ParseError> {
         let Some(name) = clean_bookmark_name(name) else {
             return Ok(None);
         };
@@ -10859,6 +10876,7 @@ impl Parser {
             .find(|bookmark| bookmark.name == name)
         {
             bookmark.text.clear();
+            bookmark.note_references.clear();
             bookmark.active = true;
             return Ok(Some(bookmark.id));
         }
@@ -10869,7 +10887,7 @@ impl Parser {
                 offset,
             });
         }
-        let id = self.next_bookmark_marker_id;
+        let id = BookmarkId::new(self.next_bookmark_marker_id);
         self.next_bookmark_marker_id = self.next_bookmark_marker_id.checked_add(1).ok_or(
             ParseError::ResourceLimitExceeded {
                 resource: "bookmarks".to_string(),
@@ -10880,6 +10898,7 @@ impl Parser {
             id,
             name,
             text: String::new(),
+            note_references: Vec::new(),
             active: true,
         });
         Ok(Some(id))
@@ -10899,9 +10918,6 @@ impl Parser {
     }
 
     fn capture_bookmark_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
-        if is_bookmark_page_marker(text) || text == PASSIVE_ADVANCE_MARKER {
-            return Ok(());
-        }
         let max_text_run_len = self.limits().max_text_run_len;
         for bookmark in self
             .bookmark_captures
@@ -10925,14 +10941,31 @@ impl Parser {
         Ok(())
     }
 
-    fn replace_last_pending_note_marker_in_bookmarks(&mut self, replacement: &str) {
-        self.replace_last_note_marker_in_bookmarks(PENDING_NOTE_REFERENCE_MARKER, replacement);
+    fn capture_bookmark_note_reference(&mut self, kind: InlineKind) {
+        for bookmark in self
+            .bookmark_captures
+            .iter_mut()
+            .filter(|bookmark| bookmark.active)
+        {
+            bookmark.note_references.push(BookmarkNoteReference {
+                byte_offset: bookmark.text.len(),
+                kind,
+            });
+        }
     }
 
-    fn replace_last_note_marker_in_bookmarks(&mut self, marker: &str, replacement: &str) {
+    fn resolve_last_bookmark_note_reference(
+        &mut self,
+        target: InlineKind,
+        resolution: &NoteReferenceResolution,
+    ) {
         for bookmark in self.bookmark_captures.iter_mut().rev() {
-            if bookmark.text.contains(marker) {
-                bookmark.text = replace_last_marker(&bookmark.text, marker, replacement);
+            if let Some(index) = bookmark
+                .note_references
+                .iter()
+                .rposition(|reference| reference.kind == target)
+            {
+                apply_bookmark_note_resolution(bookmark, index, resolution);
                 return;
             }
         }
@@ -10940,10 +10973,20 @@ impl Parser {
 
     fn replace_all_pending_note_markers_in_bookmarks(&mut self, replacement: &str) {
         for bookmark in &mut self.bookmark_captures {
-            if bookmark.text.contains(PENDING_NOTE_REFERENCE_MARKER) {
-                bookmark.text = bookmark
-                    .text
-                    .replace(PENDING_NOTE_REFERENCE_MARKER, replacement);
+            let mut indexes = bookmark
+                .note_references
+                .iter()
+                .enumerate()
+                .filter_map(|(index, reference)| {
+                    (reference.kind == InlineKind::PendingNoteReference).then_some(index)
+                })
+                .collect::<Vec<_>>();
+            for index in indexes.drain(..).rev() {
+                apply_bookmark_note_resolution(
+                    bookmark,
+                    index,
+                    &NoteReferenceResolution::Text(replacement.to_string()),
+                );
             }
         }
     }
@@ -10952,8 +10995,27 @@ impl Parser {
         let name = clean_bookmark_name(name.to_string())?;
         self.bookmark_captures
             .iter()
-            .find(|bookmark| bookmark.name == name && !bookmark.active && !bookmark.text.is_empty())
+            .find(|bookmark| {
+                bookmark.name == name
+                    && !bookmark.active
+                    && !bookmark.text.is_empty()
+                    && bookmark.note_references.is_empty()
+            })
             .map(|bookmark| bookmark.text.clone())
+    }
+
+    fn bookmark_footnote_reference(&self, name: &str) -> Option<FootnoteId> {
+        let name = clean_bookmark_name(name.to_string())?;
+        let bookmark = self.bookmark_captures.iter().find(|bookmark| {
+            bookmark.name == name
+                && !bookmark.active
+                && bookmark.text.is_empty()
+                && bookmark.note_references.len() == 1
+        })?;
+        match bookmark.note_references[0].kind {
+            InlineKind::FootnoteReference(id) => Some(id),
+            _ => None,
+        }
     }
 
     fn bookmark_text(&self, name: &str) -> Option<String> {
@@ -10968,7 +11030,7 @@ impl Parser {
         &mut self,
         name: String,
         offset: usize,
-    ) -> Result<Option<usize>, ParseError> {
+    ) -> Result<Option<BookmarkId>, ParseError> {
         let Some(name) = clean_bookmark_name(name) else {
             return Ok(None);
         };
@@ -10985,7 +11047,7 @@ impl Parser {
                 offset,
             });
         }
-        let id = self.next_bookmark_marker_id;
+        let id = BookmarkId::new(self.next_bookmark_marker_id);
         self.next_bookmark_marker_id = self.next_bookmark_marker_id.checked_add(1).ok_or(
             ParseError::ResourceLimitExceeded {
                 resource: "bookmarks".to_string(),
@@ -10996,6 +11058,7 @@ impl Parser {
             id,
             name,
             text: String::new(),
+            note_references: Vec::new(),
             active: false,
         });
         Ok(Some(id))
@@ -11529,10 +11592,10 @@ impl Parser {
 
         let result = if let Err(error) = leading_result {
             Err(error)
-        } else if let Some(field) = result.dynamic_field {
+        } else if let Some(kind) = result.dynamic_field {
             let previous_destination = self.state.destination;
             self.state.destination = destination;
-            let pushed = self.push_visible_dynamic_field(field, offset);
+            let pushed = self.push_visible_inline_kind(kind, offset);
             self.state.destination = previous_destination;
             pushed
         } else if field_instruction_name(instruction) == Some("EQ") {
@@ -11670,17 +11733,16 @@ impl Parser {
         vertical_twips: i32,
         offset: usize,
     ) -> Result<(), ParseError> {
-        let previous_spacing = self.state.character.character_spacing_twips;
-        let previous_baseline_shift = self.state.character.baseline_shift_half_points;
-        self.state.character.character_spacing_twips = horizontal_twips;
-        self.state.character.baseline_shift_half_points = vertical_twips / 10;
-        let result = self.push_passive_field_text_for_destination(
-            destination,
-            PASSIVE_ADVANCE_MARKER,
+        let previous_destination = self.state.destination;
+        self.state.destination = destination;
+        let result = self.push_visible_inline_kind(
+            InlineKind::LayoutAdvance(LayoutAdvance {
+                horizontal_twips,
+                vertical_twips,
+            }),
             offset,
         );
-        self.state.character.character_spacing_twips = previous_spacing;
-        self.state.character.baseline_shift_half_points = previous_baseline_shift;
+        self.state.destination = previous_destination;
         result
     }
 
@@ -12294,12 +12356,13 @@ impl Parser {
                 bookmark.name.eq_ignore_ascii_case(&name)
                     && !bookmark.active
                     && !bookmark.text.is_empty()
+                    && bookmark.note_references.is_empty()
             })
             .map(|bookmark| bookmark.text.clone())?;
         if contains_internal_marker(&text) || text.chars().any(|ch| ch.is_control()) {
             return None;
         }
-        strip_bookmark_page_markers(&text)
+        Some(text)
     }
 
     fn passive_compare_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
@@ -12316,8 +12379,8 @@ impl Parser {
 
     fn passive_noteref_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
-        if let Some(text) = self.bookmark_captured_text(&name)
-            && let Some(text) = self.passive_footnote_marker_noteref_text(&text, instruction)
+        if let Some(id) = self.bookmark_footnote_reference(&name)
+            && let Some(text) = self.passive_footnote_noteref_text(id, instruction)
         {
             return Some(PassiveFieldResult {
                 dynamic_field: None,
@@ -12330,16 +12393,8 @@ impl Parser {
         self.passive_ref_field_result(instruction)
     }
 
-    fn passive_footnote_marker_noteref_text(
-        &self,
-        text: &str,
-        instruction: &str,
-    ) -> Option<String> {
-        if text.chars().any(|ch| ch.is_control()) {
-            return None;
-        }
-        let text = strip_bookmark_page_markers(text)?;
-        let note_index = parse_footnote_reference_marker_id(&text)?.get();
+    fn passive_footnote_noteref_text(&self, id: FootnoteId, instruction: &str) -> Option<String> {
+        let note_index = id.get();
         if note_index > self.document.footnotes.len() {
             return None;
         }
@@ -12435,8 +12490,8 @@ impl Parser {
             return Ok(None);
         };
         Ok(Some(PassiveFieldResult {
-            dynamic_field: None,
-            text: bookmark_page_ref_marker(id),
+            dynamic_field: Some(InlineKind::BookmarkPageReference(id)),
+            text: String::new(),
             font_name: None,
             font_size_half_points: None,
             form_field: false,
@@ -12714,7 +12769,7 @@ impl Parser {
             );
         } else {
             for run in &marker.runs {
-                push_text_to_paragraph(paragraph, &run.text, &self.state.paragraph, &run.style);
+                push_run_to_paragraph(paragraph, run, &self.state.paragraph);
             }
         }
         Ok(())
@@ -13738,8 +13793,8 @@ impl Parser {
             && row.nested_table_capture.is_none()
         {
             row.current_cell_paragraph.runs.push(Run {
-                dynamic_field: None,
-                text: NESTED_TABLE_ANCHOR_MARKER.to_string(),
+                dynamic_field: Some(InlineKind::NestedTableAnchor),
+                text: String::new(),
                 style: self.state.character.clone(),
             });
             let mut capture = NestedTableCapture::default();
@@ -16679,25 +16734,14 @@ impl Parser {
             && image.placement.is_none()
             && !self.state.inside_shape
         {
-            let image_index = self.document.inline_images.len();
-            let marker = inline_image_marker_for_id(InlineImageId::new(image_index)).ok_or(
-                ParseError::ResourceLimitExceeded {
-                    resource: "inline image references".to_string(),
-                    offset,
-                },
-            )?;
+            let image_id = InlineImageId::new(self.document.inline_images.len());
             let block_index = self.document.blocks.len();
             self.push_document_block(Block::Image(image.clone()), offset)?;
             self.document.inline_images.push(InlineImageEntry {
                 image,
                 body_block_index: BlockIndex::new(block_index),
             });
-            push_text_to_paragraph(
-                &mut self.current_paragraph,
-                &marker.to_string(),
-                &self.state.paragraph,
-                &self.state.character,
-            );
+            self.push_inline_kind(InlineKind::InlineImage(image_id), offset)?;
         } else {
             self.push_document_block(Block::Image(image), offset)?;
         }
@@ -23197,29 +23241,13 @@ fn field_switch_argument_value(input: &str) -> Option<String> {
 fn is_internal_marker(text: &str) -> bool {
     matches!(
         text,
-        PASSIVE_ADVANCE_MARKER
-            | PASSIVE_MATH_FRACTION_RULE_MARKER
-            | PASSIVE_MATH_STACK_ANCHOR_MARKER
-            | PENDING_NOTE_REFERENCE_MARKER
-            | FOOTNOTE_REFERENCE_MARKER
-            | FOOTNOTE_REFERENCE_MARKER_END
-            | ENDNOTE_REFERENCE_MARKER
-            | ENDNOTE_REFERENCE_MARKER_END
-    ) || is_bookmark_page_marker(text)
+        PASSIVE_MATH_FRACTION_RULE_MARKER | PASSIVE_MATH_STACK_ANCHOR_MARKER
+    )
 }
 
 fn contains_internal_marker(text: &str) -> bool {
-    text.contains(PASSIVE_ADVANCE_MARKER)
-        || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
+    text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
         || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
-        || text.contains(PENDING_NOTE_REFERENCE_MARKER)
-        || text.contains(FOOTNOTE_REFERENCE_MARKER)
-        || text.contains(FOOTNOTE_REFERENCE_MARKER_END)
-        || text.contains(ENDNOTE_REFERENCE_MARKER)
-        || text.contains(ENDNOTE_REFERENCE_MARKER_END)
-        || text.contains(BOOKMARK_PAGE_ANCHOR_MARKER)
-        || text.contains(BOOKMARK_PAGE_REF_MARKER)
-        || text.contains(BOOKMARK_PAGE_MARKER_END)
 }
 
 fn contains_reserved_private_use(text: &str) -> bool {
@@ -23228,17 +23256,8 @@ fn contains_reserved_private_use(text: &str) -> bool {
 }
 
 fn sanitize_internal_markers(text: &str) -> String {
-    text.replace(PASSIVE_ADVANCE_MARKER, "\u{fffd}")
-        .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "\u{fffd}")
+    text.replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "\u{fffd}")
         .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "\u{fffd}")
-        .replace(PENDING_NOTE_REFERENCE_MARKER, "\u{fffd}")
-        .replace(FOOTNOTE_REFERENCE_MARKER, "\u{fffd}")
-        .replace(FOOTNOTE_REFERENCE_MARKER_END, "\u{fffd}")
-        .replace(ENDNOTE_REFERENCE_MARKER, "\u{fffd}")
-        .replace(ENDNOTE_REFERENCE_MARKER_END, "\u{fffd}")
-        .replace(BOOKMARK_PAGE_ANCHOR_MARKER, "\u{fffd}")
-        .replace(BOOKMARK_PAGE_REF_MARKER, "\u{fffd}")
-        .replace(BOOKMARK_PAGE_MARKER_END, "\u{fffd}")
         .chars()
         .map(|ch| {
             if ('\u{f0000}'..='\u{ffffd}').contains(&ch) {
@@ -23248,51 +23267,6 @@ fn sanitize_internal_markers(text: &str) -> String {
             }
         })
         .collect()
-}
-
-fn is_bookmark_page_marker(text: &str) -> bool {
-    parse_bookmark_page_marker_id(text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
-        || parse_bookmark_page_marker_id(text, BOOKMARK_PAGE_REF_MARKER).is_some()
-}
-
-fn contains_bookmark_page_marker(text: &str) -> bool {
-    text.contains(BOOKMARK_PAGE_ANCHOR_MARKER)
-        || text.contains(BOOKMARK_PAGE_REF_MARKER)
-        || text.contains(BOOKMARK_PAGE_MARKER_END)
-}
-
-fn strip_bookmark_page_markers(text: &str) -> Option<String> {
-    let mut output = String::with_capacity(text.len());
-    let mut search_start = 0;
-    loop {
-        let anchor_start = text[search_start..]
-            .find(BOOKMARK_PAGE_ANCHOR_MARKER)
-            .map(|relative| (search_start + relative, BOOKMARK_PAGE_ANCHOR_MARKER));
-        let ref_start = text[search_start..]
-            .find(BOOKMARK_PAGE_REF_MARKER)
-            .map(|relative| (search_start + relative, BOOKMARK_PAGE_REF_MARKER));
-        let Some((marker_start, prefix)) = [anchor_start, ref_start]
-            .into_iter()
-            .flatten()
-            .min_by_key(|(start, _)| *start)
-        else {
-            output.push_str(&text[search_start..]);
-            return Some(output);
-        };
-        let id_start = marker_start + prefix.len();
-        let marker_end_relative = text[id_start..].find(BOOKMARK_PAGE_MARKER_END)?;
-        let marker_end = id_start + marker_end_relative + BOOKMARK_PAGE_MARKER_END.len();
-        parse_bookmark_page_marker_id(&text[marker_start..marker_end], prefix)?;
-        output.push_str(&text[search_start..marker_start]);
-        search_start = marker_end;
-    }
-}
-
-fn parse_bookmark_page_marker_id(text: &str, prefix: &str) -> Option<usize> {
-    let rest = text.strip_prefix(prefix)?;
-    let id = rest.strip_suffix(BOOKMARK_PAGE_MARKER_END)?;
-    (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok())?
 }
 
 fn format_list_counter(value: i32, format: ListNumberFormat) -> String {
@@ -23644,8 +23618,6 @@ fn push_text_to_paragraph(
     if let Some(last) = paragraph.runs.last_mut()
         && last.style == *character_style
         && last.dynamic_field.is_none()
-        && !contains_bookmark_page_marker(text)
-        && !contains_bookmark_page_marker(&last.text)
     {
         last.text.push_str(text);
         return;
@@ -23658,9 +23630,9 @@ fn push_text_to_paragraph(
     });
 }
 
-fn push_dynamic_field_to_paragraph(
+fn push_inline_kind_to_paragraph(
     paragraph: &mut Paragraph,
-    field: DynamicField,
+    kind: InlineKind,
     paragraph_style: &ParagraphStyle,
     character_style: &CharacterStyle,
 ) {
@@ -23668,10 +23640,18 @@ fn push_dynamic_field_to_paragraph(
         paragraph.style = paragraph_style.clone();
     }
     paragraph.runs.push(Run {
-        dynamic_field: Some(field),
+        dynamic_field: Some(kind),
         text: String::new(),
         style: character_style.clone(),
     });
+}
+
+fn push_run_to_paragraph(paragraph: &mut Paragraph, run: &Run, paragraph_style: &ParagraphStyle) {
+    if let Some(kind) = run.dynamic_field {
+        push_inline_kind_to_paragraph(paragraph, kind, paragraph_style, &run.style);
+    } else {
+        push_text_to_paragraph(paragraph, &run.text, paragraph_style, &run.style);
+    }
 }
 
 fn paragraph_plain_text(paragraph: &Paragraph) -> Option<String> {
@@ -23747,16 +23727,42 @@ fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &Characte
     });
 }
 
-fn replace_last_pending_note_marker_in_block(block: &mut Block, replacement: &str) -> bool {
+fn apply_bookmark_note_resolution(
+    bookmark: &mut BookmarkCapture,
+    index: usize,
+    resolution: &NoteReferenceResolution,
+) {
+    match resolution {
+        NoteReferenceResolution::Inline(kind) => {
+            if let Some(reference) = bookmark.note_references.get_mut(index) {
+                reference.kind = *kind;
+            }
+        }
+        NoteReferenceResolution::Text(text) => {
+            let reference = bookmark.note_references.remove(index);
+            bookmark.text.insert_str(reference.byte_offset, text);
+            for (other_index, other) in bookmark.note_references.iter_mut().enumerate() {
+                if other_index >= index && other.byte_offset >= reference.byte_offset {
+                    other.byte_offset = other.byte_offset.saturating_add(text.len());
+                }
+            }
+        }
+    }
+}
+
+fn replace_last_pending_note_marker_in_block(
+    block: &mut Block,
+    resolution: &NoteReferenceResolution,
+) -> bool {
     match block {
         Block::Paragraph(paragraph) => {
-            replace_last_pending_note_marker_in_paragraph(paragraph, replacement)
+            replace_last_pending_note_marker_in_paragraph(paragraph, resolution)
         }
         Block::Table(table) => {
             for row in table.rows.iter_mut().rev() {
                 for cell in row.cells.iter_mut().rev() {
                     for paragraph in cell.paragraphs.iter_mut().rev() {
-                        if replace_last_pending_note_marker_in_paragraph(paragraph, replacement) {
+                        if replace_last_pending_note_marker_in_paragraph(paragraph, resolution) {
                             return true;
                         }
                     }
@@ -23770,19 +23776,29 @@ fn replace_last_pending_note_marker_in_block(block: &mut Block, replacement: &st
 
 fn replace_last_pending_note_marker_in_paragraph(
     paragraph: &mut Paragraph,
-    replacement: &str,
+    resolution: &NoteReferenceResolution,
 ) -> bool {
-    replace_last_note_marker_in_paragraph(paragraph, PENDING_NOTE_REFERENCE_MARKER, replacement)
+    replace_last_note_reference_in_paragraph(
+        paragraph,
+        InlineKind::PendingNoteReference,
+        resolution,
+    )
 }
 
-fn replace_last_note_marker_in_paragraph(
+fn replace_last_note_reference_in_paragraph(
     paragraph: &mut Paragraph,
-    marker: &str,
-    replacement: &str,
+    target: InlineKind,
+    resolution: &NoteReferenceResolution,
 ) -> bool {
     for run in paragraph.runs.iter_mut().rev() {
-        if run.text.contains(marker) {
-            run.text = replace_last_marker(&run.text, marker, replacement);
+        if run.dynamic_field == Some(target) {
+            match resolution {
+                NoteReferenceResolution::Inline(kind) => run.dynamic_field = Some(*kind),
+                NoteReferenceResolution::Text(text) => {
+                    run.dynamic_field = None;
+                    run.text = text.clone();
+                }
+            }
             return true;
         }
     }
@@ -23791,25 +23807,14 @@ fn replace_last_note_marker_in_paragraph(
 
 fn replace_last_pending_note_marker_in_paragraphs(
     paragraphs: &mut [Paragraph],
-    replacement: &str,
+    resolution: &NoteReferenceResolution,
 ) -> bool {
     for paragraph in paragraphs.iter_mut().rev() {
-        if replace_last_pending_note_marker_in_paragraph(paragraph, replacement) {
+        if replace_last_pending_note_marker_in_paragraph(paragraph, resolution) {
             return true;
         }
     }
     false
-}
-
-fn replace_last_marker(text: &str, marker: &str, replacement: &str) -> String {
-    let Some(idx) = text.rfind(marker) else {
-        return text.to_string();
-    };
-    let mut output = String::with_capacity(text.len() + replacement.len());
-    output.push_str(&text[..idx]);
-    output.push_str(replacement);
-    output.push_str(&text[idx + marker.len()..]);
-    output
 }
 
 fn replace_all_pending_note_markers_in_block(block: &mut Block, replacement: &str) {
@@ -23832,8 +23837,9 @@ fn replace_all_pending_note_markers_in_block(block: &mut Block, replacement: &st
 
 fn replace_all_pending_note_markers_in_paragraph(paragraph: &mut Paragraph, replacement: &str) {
     for run in &mut paragraph.runs {
-        if run.text.contains(PENDING_NOTE_REFERENCE_MARKER) {
-            run.text = run.text.replace(PENDING_NOTE_REFERENCE_MARKER, replacement);
+        if run.dynamic_field == Some(InlineKind::PendingNoteReference) {
+            run.dynamic_field = None;
+            run.text = replacement.to_string();
         }
     }
 }
@@ -24367,21 +24373,75 @@ fn source_ignoring_passive_source_raster_command(
 mod tests {
     use super::*;
 
+    const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
+    const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
+    const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
+    const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
+    const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
+    const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
+    const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
+    const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
+
+    fn inline_image_marker(index: usize) -> Option<char> {
+        let codepoint = INLINE_IMAGE_MARKER_BASE.checked_add(u32::try_from(index).ok()?)?;
+        char::from_u32(codepoint).filter(|ch| *ch <= '\u{ffffd}')
+    }
+
+    fn footnote_reference_marker(id: FootnoteId) -> String {
+        format!(
+            "{FOOTNOTE_REFERENCE_MARKER}{}{FOOTNOTE_REFERENCE_MARKER_END}",
+            id.get()
+        )
+    }
+
+    fn endnote_reference_marker(id: EndnoteId) -> String {
+        format!(
+            "{ENDNOTE_REFERENCE_MARKER}{}{ENDNOTE_REFERENCE_MARKER_END}",
+            id.get()
+        )
+    }
+
     fn document_text(document: &Document) -> String {
-        document
-            .blocks
-            .iter()
-            .flat_map(|block| match block {
-                Block::Paragraph(paragraph) => paragraph
-                    .runs
-                    .iter()
-                    .filter(|run| !is_bookmark_page_marker(&run.text))
-                    .map(|run| run.text.as_str())
-                    .collect::<Vec<_>>(),
-                Block::Placeholder(text) => vec![text.as_str()],
-                _ => Vec::new(),
-            })
-            .collect::<String>()
+        let mut text = String::new();
+        for block in &document.blocks {
+            match block {
+                Block::Paragraph(paragraph) => {
+                    for run in &paragraph.runs {
+                        match run.dynamic_field {
+                            Some(InlineKind::InlineImage(id)) => {
+                                if let Some(marker) = inline_image_marker(id.get()) {
+                                    text.push(marker);
+                                }
+                            }
+                            Some(InlineKind::PendingNoteReference) => {
+                                text.push_str(PENDING_NOTE_REFERENCE_MARKER)
+                            }
+                            Some(InlineKind::FootnoteReference(id)) => {
+                                text.push_str(&footnote_reference_marker(id))
+                            }
+                            Some(InlineKind::EndnoteReference(id)) => {
+                                text.push_str(&endnote_reference_marker(id))
+                            }
+                            Some(InlineKind::LayoutAdvance(_)) => {
+                                text.push_str(PASSIVE_ADVANCE_MARKER)
+                            }
+                            Some(
+                                InlineKind::BookmarkPageAnchor(_)
+                                | InlineKind::BookmarkPageReference(_)
+                                | InlineKind::DynamicField(_),
+                            ) => {}
+                            Some(InlineKind::NestedTableAnchor) => {
+                                text.push_str(NESTED_TABLE_ANCHOR_MARKER)
+                            }
+                            None => text.push_str(&run.text),
+                        }
+                    }
+                }
+                Block::Placeholder(placeholder) => text.push_str(placeholder),
+                _ => {}
+            }
+        }
+        text
     }
 
     fn visible_document_text(document: &Document) -> String {
@@ -24392,7 +24452,10 @@ mod tests {
         paragraph
             .runs
             .iter()
-            .filter_map(|run| run.dynamic_field)
+            .filter_map(|run| match run.dynamic_field {
+                Some(InlineKind::DynamicField(field)) => Some(field),
+                _ => None,
+            })
             .collect()
     }
 

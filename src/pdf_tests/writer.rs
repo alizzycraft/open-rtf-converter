@@ -513,7 +513,7 @@
     }
     fn typed_field_run(field: DynamicField) -> Run {
         Run {
-            dynamic_field: Some(field),
+            dynamic_field: Some(InlineKind::DynamicField(field)),
             text: String::new(),
             style: Default::default(),
         }

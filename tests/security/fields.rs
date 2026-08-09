@@ -23,15 +23,20 @@ fn advance_field_offsets_passively_without_instruction_or_marker_pdf_leakage() {
         .blocks
         .iter()
         .find_map(|block| match block {
-            Block::Paragraph(paragraph) => paragraph
-                .runs
-                .iter()
-                .find(|run| run.text == PASSIVE_ADVANCE_MARKER),
+            Block::Paragraph(paragraph) => {
+                paragraph
+                    .runs
+                    .iter()
+                    .find_map(|run| match run.dynamic_field {
+                        Some(InlineKind::LayoutAdvance(advance)) => Some(advance),
+                        _ => None,
+                    })
+            }
             _ => None,
         })
         .expect("passive advance marker");
-    assert_eq!(advance.style.character_spacing_twips, 240);
-    assert_eq!(advance.style.baseline_shift_half_points, -12);
+    assert_eq!(advance.horizontal_twips, 240);
+    assert_eq!(advance.vertical_twips, -120);
     for forbidden in ["ADVANCE", "fldinst", "\\r", "\\d"] {
         assert!(
             !text.contains(forbidden),
@@ -5040,6 +5045,40 @@ fn resultless_symbol_field_cannot_inject_reserved_private_use_semantics() {
             "forbidden hostile symbol-field content leaked to PDF: {:?}",
             String::from_utf8_lossy(forbidden)
         );
+    }
+}
+
+#[test]
+fn former_inline_protocol_scalars_cannot_trigger_typed_semantics() {
+    for scalar in [
+        0xF0003_u32, // pending note
+        0xF0005,     // bookmark anchor
+        0xF0006,     // bookmark reference
+        0xF0007,     // former bookmark terminator
+        0xF000B,     // layout advance
+        0xF000C,     // footnote reference
+        0xF000D,     // former footnote terminator
+        0xF000E,     // endnote reference
+        0xF000F,     // former endnote terminator
+        0xF0010,     // nested-table anchor
+        0xF1000,     // first former inline-image marker
+    ] {
+        let input =
+            format!("{{\\rtf1 Before {{\\field{{\\*\\fldinst SYMBOL {scalar}}}}} After\\par}}");
+        let parsed = parse_rtf_bytes(input.as_bytes()).expect("reserved scalar remains parseable");
+
+        assert_eq!(collect_text(&parsed.document), "Before \u{fffd} After");
+        assert!(parsed.document.inline_images.is_empty());
+        assert!(parsed.document.footnotes.is_empty());
+        assert!(parsed.document.endnotes.is_empty());
+        for block in &parsed.document.blocks {
+            if let Block::Paragraph(paragraph) = block {
+                assert!(
+                    paragraph.runs.iter().all(|run| run.dynamic_field.is_none()),
+                    "U+{scalar:05X} created typed inline semantics"
+                );
+            }
+        }
     }
 }
 

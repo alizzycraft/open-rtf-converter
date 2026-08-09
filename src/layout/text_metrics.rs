@@ -10,38 +10,15 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
 ) {
     let mut start = 0;
     for (idx, ch) in text.char_indices() {
-        let is_passive_advance = ch.to_string() == PASSIVE_ADVANCE_MARKER;
         let is_math_fraction_rule = ch.to_string() == PASSIVE_MATH_FRACTION_RULE_MARKER;
         let is_math_inline_lead = ch.to_string() == PASSIVE_MATH_INLINE_LEAD_MARKER;
         let is_math_stack_anchor = ch.to_string() == PASSIVE_MATH_STACK_ANCHOR_MARKER;
-        let inline_image_index = inline_image_marker_index(&ch.to_string());
-        if ch == '\t'
-            || is_passive_advance
-            || is_math_fraction_rule
-            || is_math_inline_lead
-            || is_math_stack_anchor
-            || inline_image_index.is_some()
-        {
+        if ch == '\t' || is_math_fraction_rule || is_math_inline_lead || is_math_stack_anchor {
             if start < idx {
                 let text = text[start..idx].replace('\u{00ad}', "");
                 if !text.is_empty() {
                     push_display_text_segment(output, &text, style, false);
                 }
-            }
-            if is_passive_advance {
-                output.push(FlowRun {
-                    dynamic_field: None,
-                    text: PASSIVE_ADVANCE_MARKER.to_string(),
-                    style: style.clone(),
-                    width: passive_advance_width_points(style),
-                    line_height_points: 0.0,
-                    tab_leader: TabLeader::None,
-                    tab_alignment: TabAlignment::Left,
-                    tab_stop_position: None,
-                    soft_hyphen_after: false,
-                });
-                start = idx + ch.len_utf8();
-                continue;
             }
             if is_math_inline_lead {
                 output.push(FlowRun {
@@ -88,21 +65,6 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
                 start = idx + ch.len_utf8();
                 continue;
             }
-            if inline_image_index.is_some() {
-                output.push(FlowRun {
-                    dynamic_field: None,
-                    text: ch.to_string(),
-                    style: style.clone(),
-                    width: 0.0,
-                    line_height_points: 0.0,
-                    tab_leader: TabLeader::None,
-                    tab_alignment: TabAlignment::Left,
-                    tab_stop_position: None,
-                    soft_hyphen_after: false,
-                });
-                start = idx + ch.len_utf8();
-                continue;
-            }
             output.push(FlowRun {
                 dynamic_field: None,
                 text: "\t".to_string(),
@@ -135,44 +97,7 @@ pub(in crate::layout) fn push_display_text_segment(
     style: &CharacterStyle,
     soft_hyphen_after: bool,
 ) {
-    if text.contains(BOOKMARK_PAGE_ANCHOR_MARKER) || text.contains(BOOKMARK_PAGE_REF_MARKER) {
-        push_display_text_segment_with_bookmark_markers(output, text, style, soft_hyphen_after);
-        return;
-    }
     push_display_text_segment_without_bookmark_markers(output, text, style, soft_hyphen_after);
-}
-
-pub(in crate::layout) fn push_display_text_segment_with_bookmark_markers(
-    output: &mut Vec<FlowRun>,
-    text: &str,
-    style: &CharacterStyle,
-    soft_hyphen_after: bool,
-) {
-    let mut cursor = 0;
-    let mut marker_seen = false;
-    while let Some((start, end)) = next_bookmark_page_marker_range(text, cursor) {
-        if start > cursor {
-            push_display_text_segment_without_bookmark_markers(
-                output,
-                &text[cursor..start],
-                style,
-                false,
-            );
-        }
-        push_flow_run(output, &text[start..end], style, false);
-        marker_seen = true;
-        cursor = end;
-    }
-    if cursor < text.len() {
-        push_display_text_segment_without_bookmark_markers(
-            output,
-            &text[cursor..],
-            style,
-            soft_hyphen_after,
-        );
-    } else if soft_hyphen_after && !marker_seen {
-        mark_last_soft_hyphen(output);
-    }
 }
 
 pub(in crate::layout) fn push_display_text_segment_without_bookmark_markers(
@@ -366,7 +291,7 @@ pub(in crate::layout) fn push_segment(
         adjust_pending_aligned_tab(line, &segment, document, font_provider);
     }
     line.width += segment.width;
-    if let Some(image) = inline_image_for_marker(document, &segment.text) {
+    if let Some(image) = inline_image_for_kind(document, segment.dynamic_field) {
         let (_, image_height) = image_display_size(image, f32::MAX);
         line.height = line.height.max(image_height);
         line.runs.push(segment);
@@ -439,12 +364,11 @@ pub(in crate::layout) fn apply_fit_text_scaling_to_segment(
     };
     if target_twips <= 0
         || segment.text.is_empty()
-        || is_passive_advance_marker(&segment.text)
+        || layout_advance(segment.dynamic_field).is_some()
         || is_passive_math_inline_lead_marker(&segment.text)
         || is_passive_math_fraction_rule_marker(&segment.text)
         || is_passive_math_stack_anchor_marker(&segment.text)
-        || parse_bookmark_page_marker_id(&segment.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
-        || parse_bookmark_page_marker_id(&segment.text, BOOKMARK_PAGE_REF_MARKER).is_some()
+        || is_bookmark_page_kind(segment.dynamic_field)
     {
         return;
     }
@@ -561,10 +485,10 @@ pub(in crate::layout) fn flow_run_line_height(
     if run.text.is_empty() {
         return 0.0;
     }
-    if inline_image_marker_index(&run.text).is_some() {
+    if inline_image_id(run.dynamic_field).is_some() {
         return 0.0;
     }
-    if is_passive_advance_marker(&run.text) {
+    if layout_advance(run.dynamic_field).is_some() {
         return 0.0;
     }
     if is_passive_math_inline_lead_marker(&run.text) {
@@ -672,16 +596,14 @@ pub(in crate::layout) fn measure_flow_run(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
-    if let Some(image) = inline_image_for_marker(document, &run.text) {
+    if let Some(image) = inline_image_for_kind(document, run.dynamic_field) {
         return image_display_size(image, f32::MAX).0;
     }
-    if parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
-        || parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_some()
-    {
+    if is_bookmark_page_kind(run.dynamic_field) {
         return 0.0;
     }
-    if is_passive_advance_marker(&run.text) {
-        return passive_advance_width_points(&run.style);
+    if let Some(advance) = layout_advance(run.dynamic_field) {
+        return twips_to_points(advance.horizontal_twips);
     }
     if is_passive_math_inline_lead_marker(&run.text) {
         return passive_advance_width_points(&run.style);
@@ -729,12 +651,12 @@ pub(in crate::layout) fn inline_image_cluster_width(
     }
 
     let mut width = first_width;
-    let mut contains_inline_image = inline_image_marker_index(&first.text).is_some();
+    let mut contains_inline_image = inline_image_id(first.dynamic_field).is_some();
     for segment in segments.iter().skip(start + 1) {
         if segment.text.chars().next().is_some_and(char::is_whitespace) {
             break;
         }
-        contains_inline_image |= inline_image_marker_index(&segment.text).is_some();
+        contains_inline_image |= inline_image_id(segment.dynamic_field).is_some();
         width += measure_flow_run(
             segment,
             current_line_width + width,
@@ -753,8 +675,11 @@ pub(in crate::layout) fn inline_image_cluster_width(
     }
 }
 
-pub(in crate::layout) fn is_passive_advance_marker(text: &str) -> bool {
-    text == PASSIVE_ADVANCE_MARKER
+pub(in crate::layout) fn layout_advance(kind: Option<InlineKind>) -> Option<LayoutAdvance> {
+    match kind {
+        Some(InlineKind::LayoutAdvance(advance)) => Some(advance),
+        _ => None,
+    }
 }
 
 pub(in crate::layout) fn is_passive_math_inline_lead_marker(text: &str) -> bool {
@@ -769,13 +694,34 @@ pub(in crate::layout) fn is_passive_math_stack_anchor_marker(text: &str) -> bool
     text == PASSIVE_MATH_STACK_ANCHOR_MARKER
 }
 
-pub(in crate::layout) fn inline_image_for_marker<'a>(
+pub(in crate::layout) fn inline_image_id(kind: Option<InlineKind>) -> Option<InlineImageId> {
+    match kind {
+        Some(InlineKind::InlineImage(id)) => Some(id),
+        _ => None,
+    }
+}
+
+pub(in crate::layout) fn is_bookmark_page_kind(kind: Option<InlineKind>) -> bool {
+    matches!(
+        kind,
+        Some(InlineKind::BookmarkPageAnchor(_) | InlineKind::BookmarkPageReference(_))
+    )
+}
+
+pub(in crate::layout) fn is_note_reference_kind(kind: Option<InlineKind>) -> bool {
+    matches!(
+        kind,
+        Some(InlineKind::FootnoteReference(_) | InlineKind::EndnoteReference(_))
+    )
+}
+
+pub(in crate::layout) fn inline_image_for_kind<'a>(
     document: &'a Document,
-    text: &str,
+    kind: Option<InlineKind>,
 ) -> Option<&'a StaticImage> {
     document
         .inline_images
-        .get(inline_image_marker_id(text)?.get())
+        .get(inline_image_id(kind)?.get())
         .map(|entry| &entry.image)
 }
 
@@ -783,8 +729,8 @@ pub(in crate::layout) fn passive_advance_width_points(style: &CharacterStyle) ->
     twips_to_points(style.character_spacing_twips)
 }
 
-pub(in crate::layout) fn passive_advance_baseline_delta_points(style: &CharacterStyle) -> f32 {
-    style.baseline_shift_points()
+pub(in crate::layout) fn passive_advance_baseline_delta_points(advance: LayoutAdvance) -> f32 {
+    twips_to_points(advance.vertical_twips)
 }
 
 pub(in crate::layout) fn passive_math_fraction_width_points(style: &CharacterStyle) -> f32 {
@@ -984,7 +930,7 @@ pub(in crate::layout) fn push_line_with_rotation(
     let has_inline_image = line
         .runs
         .iter()
-        .any(|run| inline_image_marker_index(&run.text).is_some());
+        .any(|run| inline_image_id(run.dynamic_field).is_some());
     let line_border_inset = line
         .runs
         .iter()
@@ -1001,7 +947,7 @@ pub(in crate::layout) fn push_line_with_rotation(
     let page = pages.last_mut().expect("layout always has a page");
 
     let last_spaced_run_index = line.runs.iter().rposition(|run| {
-        !is_passive_advance_marker(&run.text)
+        layout_advance(run.dynamic_field).is_none()
             && !is_passive_math_inline_lead_marker(&run.text)
             && !is_passive_math_fraction_rule_marker(&run.text)
             && !is_passive_math_stack_anchor_marker(&run.text)
@@ -1009,13 +955,18 @@ pub(in crate::layout) fn push_line_with_rotation(
             && !run.text.is_empty()
     });
     for (run_index, run) in line.runs.iter().enumerate() {
-        if run.text.is_empty() {
+        if run.text.is_empty()
+            && inline_image_id(run.dynamic_field).is_none()
+            && !is_bookmark_page_kind(run.dynamic_field)
+            && !is_note_reference_kind(run.dynamic_field)
+            && layout_advance(run.dynamic_field).is_none()
+        {
             cursor_advance += run.width;
             continue;
         }
-        if is_passive_advance_marker(&run.text) {
+        if let Some(advance) = layout_advance(run.dynamic_field) {
             cursor_advance += run.width;
-            cursor_baseline_delta += passive_advance_baseline_delta_points(&run.style);
+            cursor_baseline_delta += passive_advance_baseline_delta_points(advance);
             continue;
         }
         if is_passive_math_inline_lead_marker(&run.text) {
@@ -1058,7 +1009,7 @@ pub(in crate::layout) fn push_line_with_rotation(
         if is_passive_math_stack_anchor_marker(&run.text) {
             continue;
         }
-        if let Some(image) = inline_image_for_marker(document, &run.text) {
+        if let Some(image) = inline_image_for_kind(document, run.dynamic_field) {
             let (width, height) = image_display_size(image, f32::MAX);
             let (run_x, run_baseline_y) = rotated_line_run_origin(
                 x,
@@ -1086,11 +1037,9 @@ pub(in crate::layout) fn push_line_with_rotation(
             cursor_baseline_delta,
             rotation,
         );
-        if parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_ANCHOR_MARKER).is_some()
-            || parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_some()
-        {
+        if is_bookmark_page_kind(run.dynamic_field) || is_note_reference_kind(run.dynamic_field) {
             page.items.push(LayoutItem::Text(TextFragment {
-                dynamic_field: None,
+                dynamic_field: run.dynamic_field,
                 text: run.text.clone(),
                 x: run_x,
                 baseline_y: run_baseline_y,
@@ -1286,7 +1235,7 @@ pub(in crate::layout) fn word_compatible_source_line_baseline_delta_points(
         .filter(|run| {
             !run.text.trim().is_empty()
                 && !contains_inline_marker(&run.text)
-                && inline_image_marker_index(&run.text).is_none()
+                && inline_image_id(run.dynamic_field).is_none()
         })
         .filter_map(|run| {
             let inset_em = match font_for_style(document, &run.style) {
@@ -1733,7 +1682,7 @@ pub(in crate::layout) fn distributed_character_spacing(
         .runs
         .iter()
         .filter(|run| {
-            !is_passive_advance_marker(&run.text)
+            layout_advance(run.dynamic_field).is_none()
                 && !is_passive_math_inline_lead_marker(&run.text)
                 && run.text != "\t"
         })
