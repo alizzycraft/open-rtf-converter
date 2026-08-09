@@ -11,10 +11,10 @@
 //! configured policy, limit the generated layout/PDF, and audit the completed PDF
 //! for forbidden active features.
 //!
-//! Lower parser, normalized-model, layout, and raw-renderer modules remain
-//! temporarily accessible for repository migration and fuzzing, but they are
-//! hidden from generated documentation and are not the supported conversion
-//! security boundary.
+//! Parser, normalized-model, layout, and raw-renderer modules are crate-private.
+//! The repository's fuzz crate uses only payload-opaque hooks behind the
+//! non-default `fuzzing` feature; those hooks are unstable and hidden from
+//! generated documentation.
 //!
 //! # Example
 //!
@@ -31,23 +31,15 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-#[doc(hidden)]
-pub mod config;
-#[doc(hidden)]
-pub mod convert;
-#[doc(hidden)]
-pub mod diagnostics;
-#[doc(hidden)]
-pub mod fonts;
+mod config;
+mod convert;
+mod diagnostics;
+mod fonts;
 mod inspect;
-#[doc(hidden)]
-pub mod layout;
-#[doc(hidden)]
-pub mod model;
-#[doc(hidden)]
-pub mod pdf;
-#[doc(hidden)]
-pub mod rtf;
+mod layout;
+mod model;
+mod pdf;
+mod rtf;
 
 /// Unstable, non-default entry points used only by the repository's fuzz crate.
 #[cfg(feature = "fuzzing")]

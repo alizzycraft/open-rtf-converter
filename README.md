@@ -46,6 +46,7 @@ The repository pins its Rust toolchain in `rust-toolchain.toml`. Run the same lo
 ```powershell
 cargo fmt --all -- --check
 cargo check --all-targets --all-features
+$env:RUSTDOCFLAGS = "-D warnings"; cargo doc --no-deps --all-features; Remove-Item Env:RUSTDOCFLAGS
 cargo clippy --all-targets --all-features -- -D clippy::correctness -D clippy::suspicious -D clippy::perf
 cargo test --lib
 cargo test --bin open-rtf-converter

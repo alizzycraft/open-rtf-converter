@@ -961,7 +961,7 @@ struct ResolvedCellSpacing {
 }
 
 impl LayoutEngine {
-    /// Validate and lay out a temporarily public normalized document.
+    /// Validate and lay out a normalized document at the crate-internal boundary.
     pub fn try_layout(document: &Document) -> Result<LayoutDocument, ModelInvariantError> {
         Self::try_layout_with_font_provider(document, None)
     }

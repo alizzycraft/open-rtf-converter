@@ -474,7 +474,7 @@ pub struct Color {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-// Boxing a variant would break the currently public normalized-model API. The
+// Boxing a variant would complicate the normalized-model representation. The
 // architecture plan privatizes model construction before changing this shape.
 #[allow(clippy::large_enum_variant)]
 pub enum Block {

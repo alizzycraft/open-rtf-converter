@@ -9,7 +9,7 @@ use super::*;
 
 const MAX_TRANSITIONAL_NESTED_TABLE_DEPTH: usize = 128;
 
-/// A violated invariant in the temporarily public normalized document model.
+/// A violated invariant in the normalized document model.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ModelInvariantError {
     #[error("parallel model vector {vector} has length {actual}; expected {expected}")]
