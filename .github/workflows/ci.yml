@@ -68,6 +68,9 @@ jobs:
       - name: Run supported public API tests
         run: cargo test --test public_api
 
+      - name: Run public API documentation tests
+        run: cargo test --doc
+
       - name: Verify decomposed test inventory
         run: cargo test --test test_structure
 
@@ -101,6 +104,30 @@ jobs:
 
       - name: Run fuzz regression tests
         run: cargo test --test fuzz_regression
+
+      - name: Compile all fuzz targets
+        run: cargo check --manifest-path fuzz/Cargo.toml --all-targets
+
+  fuzz-smoke:
+    name: Bounded libFuzzer smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install the nightly fuzz toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install cargo-fuzz --locked
+
+      - name: Run bounded fuzz targets
+        run: |
+          cargo +nightly fuzz run rtf_lexer -- -runs=100
+          cargo +nightly fuzz run rtf_parser -- -runs=100
+          cargo +nightly fuzz run rtf_to_pdf_passive -- -runs=100
 
   wasm-core:
     name: WASM core and dependency policy

@@ -175,6 +175,10 @@ fn fuzz_targets_use_only_explicit_non_default_hooks_and_the_facade() {
 #[test]
 fn crate_root_exposes_no_raw_implementation_modules() {
     let library = production_source("src/lib.rs");
+    assert!(
+        library.contains("#![warn(missing_docs)]"),
+        "crate root must enforce documentation on the supported public API"
+    );
     for module in [
         "config",
         "convert",

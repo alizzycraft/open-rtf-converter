@@ -27,7 +27,7 @@ The conversion façade validates options and fonts, performs bounded parsing and
 
 Use `inspect_rtf` with `RtfParseOptions` when a caller needs only the bounded, deterministic list of primary and alternate font-family names before conversion.
 
-Supported output format in this first version is PDF.
+The currently supported output format is PDF.
 
 ## Current Scope
 
@@ -37,7 +37,7 @@ Supported output format in this first version is PDF.
 - Supports browser-safe defaults with stricter limits, no filesystem requirement in the core conversion API, caller-provided font assets, and `wasm32-unknown-unknown` compatibility for the no-default-features core.
 - Emits diagnostics for intentional security differences and layout approximations.
 
-Remaining fidelity work is tracked incrementally against `docs/project_plan.md`; Word-exported reference PDFs/PNGs are still needed before claiming full visual coverage.
+The maintained architecture is documented in `docs/architecture.md`, and 0.1 users should read `docs/migration-0.2.md`. Remaining fidelity work is tracked incrementally against `docs/project_plan.md`; Word-exported reference PDFs/PNGs are still needed before claiming full visual coverage.
 
 ## Quality Gates
 
@@ -52,11 +52,13 @@ cargo test --lib
 cargo test --bin open-rtf-converter
 cargo test --test conversion
 cargo test --test public_api
+cargo test --doc
 cargo test --test test_structure
 cargo test --lib security_tests::
 cargo test --test security
 cargo test --test reference_fixtures
 cargo test --test fuzz_regression
+cargo check --manifest-path fuzz/Cargo.toml --all-targets
 cargo test --test wasm_dependency_policy
 cargo check --no-default-features --target wasm32-unknown-unknown
 ```

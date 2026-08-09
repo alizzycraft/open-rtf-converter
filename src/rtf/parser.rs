@@ -81,25 +81,51 @@ const MAX_PASSIVE_SHAPE_Z_ORDER: i32 = 65_535;
 const MAX_EXACT_JPEG_COLOR_MODE_BYTES: usize = 256 * 1024;
 const MAX_EXACT_JPEG_COLOR_MODE_PIXELS: u64 = 1_000_000;
 #[derive(Debug, Error)]
+/// A bounded parser, policy, or normalized-model failure.
 pub enum ParseError {
+    /// Tokenization rejected malformed input or exceeded a lexer limit.
     #[error(transparent)]
     Lex(#[from] LexError),
+    /// A closing group had no matching opening group.
     #[error("unbalanced RTF group ending at byte {0}")]
     UnbalancedGroup(usize),
+    /// Nested groups exceeded the configured depth at the contained byte offset.
     #[error("RTF group depth limit exceeded at byte {0}")]
     GroupDepthExceeded(usize),
+    /// A destination exceeded its configured byte limit.
     #[error("RTF destination data limit exceeded at byte {0}")]
     DestinationTooLarge(usize),
+    /// Normalized output text exceeded its configured character limit.
     #[error("output text character limit exceeded at byte {0}")]
     OutputTextTooLarge(usize),
+    /// A named parser resource exceeded its configured bound.
     #[error("resource limit exceeded for {resource} at byte {offset}")]
-    ResourceLimitExceeded { resource: String, offset: usize },
+    ResourceLimitExceeded {
+        /// Stable resource category.
+        resource: String,
+        /// Input byte offset where the limit was detected.
+        offset: usize,
+    },
+    /// Input syntax or structure is malformed.
     #[error("malformed RTF input at byte {offset}: {reason}")]
-    MalformedInput { reason: String, offset: usize },
+    MalformedInput {
+        /// Payload-safe description of the malformed structure.
+        reason: String,
+        /// Input byte offset where the problem was detected.
+        offset: usize,
+    },
+    /// Active content was encountered under reject policy.
     #[error("active content rejected: {feature} at byte {offset}")]
-    ActiveContentRejected { feature: String, offset: usize },
+    ActiveContentRejected {
+        /// Stable active-feature category.
+        feature: String,
+        /// Input byte offset where the feature was detected.
+        offset: usize,
+    },
+    /// Parser resource limits are internally invalid.
     #[error("invalid RTF limits: {0}")]
     InvalidLimits(#[from] LimitValidationError),
+    /// The parser produced a normalized document that violated an invariant.
     #[error("normalized document invariant failed: {0}")]
     ModelInvariant(#[from] crate::model::ModelInvariantError),
 }

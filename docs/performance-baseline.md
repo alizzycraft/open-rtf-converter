@@ -65,6 +65,10 @@ Peak memory was not captured because this Windows session did not have a control
 
 The fixture set covers the general sample, multipage table flow, recovered WMF with JPEG/DIB raster content, framed/rotated text across pages, and legacy font code-page handling.
 
+## Architecture completion verification
+
+The completed 0.2 architecture plan was remeasured on 2026-08-09 with the same primary command and machine. `docs/sample.rtf` produced 1,363,655 bytes, 2 pages, 36 indirect objects, and SHA-256 `a4f80ebeacc220acf3282735f71ecb309e968f159804b4825675b563a58e4a07`, exactly matching the deterministic baseline. The 16-iteration median was 112.598 ms. Timing remains diagnostic; the exact output properties are the release gate.
+
 ## Test inventory
 
 The Cargo harness discovered this inventory after adding the two baseline-example tests:

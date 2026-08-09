@@ -72,13 +72,18 @@ const MISSING_STREAM_LENGTH_TOKEN: &str = "<missing direct stream length>";
 const DUPLICATE_STREAM_LENGTH_TOKEN: &str = "<duplicate direct stream length>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// One forbidden or malformed PDF name found by the passive-output audit.
 pub struct PassivePdfIssue {
+    /// Bounded canonical token label; never an arbitrary payload excerpt.
     pub token: &'static str,
+    /// Byte offset of the token in the audited PDF.
     pub offset: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Failure returned when a PDF violates the converter's passive-output policy.
 pub struct PassivePdfError {
+    /// All bounded issues found during the audit.
     pub issues: Vec<PassivePdfIssue>,
 }
 

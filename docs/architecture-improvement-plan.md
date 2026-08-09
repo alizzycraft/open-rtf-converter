@@ -1,14 +1,14 @@
 # Architecture Improvement Project Plan
 
-Status: Draft for implementation
+Status: Implemented; retained as the evidence and decision record
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 Owner: open-rtf-converter maintainers
 
 ## 1. Purpose
 
-This document turns the architectural review into an implementation plan for improving the internal structure, public API contract, runtime ownership, and delivery safeguards of `open-rtf-converter`.
+This document turned the architectural review into an implementation plan for improving the internal structure, public API contract, runtime ownership, and delivery safeguards of `open-rtf-converter`. All backlog items were implemented on 2026-08-09. The stable current design is maintained in `docs/architecture.md`; this longer document remains the technical specification, implementation history, and acceptance record.
 
 The work is intended to preserve the converter's current strengths:
 
@@ -38,7 +38,7 @@ When this plan is complete:
 
 ## 3. Current-state snapshot
 
-This snapshot is evidence for the plan and should be refreshed before implementation starts.
+This is the pre-implementation snapshot captured for comparison. It is intentionally historical and is not a description of the current tree.
 
 ### 3.1 Pipeline and dependency direction
 
@@ -1163,7 +1163,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | PDF-04 | Render exclusively from `PdfPlan`; remove duplicate estimator traversal | PDF-03 | The renderer and compatibility estimator now build/consume only `PdfPlan`; render-ready page/font/CMap/text/image records eliminate duplicate estimator discovery and reuse planned supplied encodings, with deterministic repeat-render, malformed-record, and single-path source-policy coverage; 1,309 library/1,044 security/83 PDF tests, full native/reference/fuzz/Clippy/WASM gates, unchanged sample PDF, and a 114.107 ms local median passed on 2026-08-09 |
 | [x] | API-04 | Migrate white-box tests and add non-default narrow fuzz hooks | MODEL-06, PDF-04 | All 1,044 security white-box and five model-invariant tests now run crate-internally, while two black-box security tests and every other normal integration target use only the supported façade; the fuzz crate explicitly enables two payload-opaque hooks under a non-default `fuzzing` feature, with recursive source policies, 2,358 library tests, compiled fuzz targets, full native/reference/regression/Clippy/WASM gates, unchanged sample PDF, and a 115.194 ms local median passed on 2026-08-09 |
 | [x] | API-05 | Make layout/model/raw parser/raw renderer modules crate-private | API-03, API-04 | All implementation modules are crate-private; repository consumers compile through the supported facade or non-default payload-opaque fuzz hooks; generated docs with warnings denied, the six structural policies, full native/security/reference/regression/Clippy/WASM gates, and unchanged sample PDF passed on 2026-08-09 |
-| [ ] | DOC-01 | Finalize architecture docs, changelog, and version migration notes | API-05 | Definition of done is fully evidenced |
+| [x] | DOC-01 | Finalize architecture docs, changelog, and version migration notes | API-05 | Maintained architecture, 0.2 migration guide/changelog/version, complete supported-API docs with `missing_docs`, refreshed 2,462-test inventory, strict rustdoc/doctest, all native/security/reference/regression/Clippy/WASM gates, three 100-run nightly ASan/libFuzzer smokes, unchanged sample PDF, and a 112.598 ms local median passed on 2026-08-09 |
 
 ## 15. Implementation phases and dependency order
 
@@ -1287,16 +1287,18 @@ cargo test --lib
 cargo test --bin open-rtf-converter
 cargo test --test conversion
 cargo test --test public_api
+cargo test --doc
 cargo test --test test_structure
 cargo test --lib security_tests::
 cargo test --test security
 cargo test --test reference_fixtures
 cargo test --test fuzz_regression
+cargo check --manifest-path fuzz/Cargo.toml --all-targets
 cargo test --test wasm_dependency_policy
 cargo check --no-default-features --target wasm32-unknown-unknown
 ```
 
-Also run the repository's cargo-fuzz smoke procedure for lexer, parser, and full passive conversion targets. Long fuzz campaigns remain scheduled/manual, but every changed parser/media boundary requires at least a bounded smoke run.
+Also run the bounded nightly cargo-fuzz procedure in `fuzz/README.md` for lexer, parser, and full passive conversion targets. Long fuzz campaigns remain scheduled/manual, but every changed parser/media boundary requires at least a bounded smoke run.
 
 Completion additionally requires:
 
@@ -1373,22 +1375,42 @@ Decision: prepared fonts will store shared bytes, indexes, and cached results bu
 
 Reason: this keeps ownership safe and understandable while still allowing validation and selection to be amortized.
 
+### 2026-08-09: reusable converter approved
+
+Decision: support `Converter` as a reusable root-facade API while retaining the one-shot functions.
+
+Reason: prepared immutable font state is safely reusable, per-call mutable sessions remain isolated, and repeated conversion did not regress the deterministic or local performance baselines.
+
+### 2026-08-09: raw modules remain private
+
+Decision: do not publish an advanced raw parser/model/layout/renderer API. Keep only two payload-opaque hooks behind the non-default `fuzzing` feature.
+
+Reason: repository consumers were migrated without losing coverage, and no downstream product requirement justified a second security/versioning boundary.
+
+### 2026-08-09: typed math and exact PDF identity
+
+Decision: represent passive math as typed inline grouping/control data, and render exclusively from a conversion-local exact `PdfPlan`.
+
+Reason: both migrations removed hidden protocols and duplicate discovery while preserving the representative PDFs byte-for-byte.
+
+### 2026-08-09: establish the 0.2 API boundary
+
+Decision: release the enforced root facade and private internals as version 0.2.0, with migration guidance and `missing_docs` enforcement.
+
+Reason: removing accidentally public modules is a pre-1.0 breaking API correction and deserves an explicit minor-version boundary.
+
 ## 20. Open decisions
 
-Resolve these during the named workstream, not by assumption:
+The implementation resolved the workstream decisions about `Converter`, raw parser access, typed math, and PDF byte identity. The following longer-term decisions remain open:
 
 1. Whether the supported minimum Rust version should remain 1.96 after the first reproducible CI baseline or be lowered through an explicit MSRV test.
-2. Whether `Converter` should become a supported reusable API or remain an internal optimization.
-3. Whether raw parser access has a genuine downstream product use that warrants a separately versioned advanced API, rather than only fuzz hooks and crate-private tests.
-4. Whether the final typed math representation should be an inline tree or a separate math layout subtree.
-5. Whether object planning can preserve byte-for-byte PDF identity or requires a documented one-time object-order migration.
-6. Whether model/style limit fields should eventually be grouped into sub-structures in a 0.2 or later API.
+2. Whether model/style limit fields should eventually be grouped into sub-structures in a post-0.2 API.
 
 An open decision does not block earlier independent phases.
 
 ## 21. Definition of done
 
-The architectural improvement project is complete when:
+The architectural improvement project completed on 2026-08-09 with:
 
 - CI and toolchain policy are active and green;
 - the supported public façade is documented and enforced;

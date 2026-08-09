@@ -33,16 +33,21 @@ const BUNDLED_BROWSER_SAFE_MONO_BOLD_ITALIC_FONT: &[u8] =
     include_bytes!("../fixtures/fonts/Cousine-BoldItalic.ttf");
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Bounded in-memory font assets used for metrics and PDF embedding.
 pub struct FontProvider {
+    /// Font assets in deterministic selection order.
     pub assets: Vec<FontAsset>,
+    /// Limits applied while validating the asset catalog.
     pub limits: FontProviderLimits,
 }
 
 impl FontProvider {
+    /// Returns the recommended browser-safe bundled metric-font catalog.
     pub fn browser_safe_defaults() -> Self {
         Self::browser_safe_with_bundled_metric_fonts()
     }
 
+    /// Returns bundled sans, serif, monospace, symbol, and fallback metric fonts.
     pub fn browser_safe_with_bundled_metric_fonts() -> Self {
         Self {
             assets: bundled_browser_safe_metric_assets(),
@@ -50,6 +55,7 @@ impl FontProvider {
         }
     }
 
+    /// Returns a smaller browser-safe catalog containing only the fallback font.
     pub fn browser_safe_with_bundled_fallback() -> Self {
         Self {
             assets: vec![FontAsset::from_bundled_bytes(
@@ -61,6 +67,7 @@ impl FontProvider {
         }
     }
 
+    /// Validates catalog bounds, aliases, byte payloads, and font parseability.
     pub fn validate(&self) -> Result<(), FontProviderError> {
         if self.assets.len() > self.limits.max_assets {
             return Err(FontProviderError::TooManyAssets {
@@ -125,6 +132,7 @@ impl FontProvider {
         Ok(())
     }
 
+    /// Reports whether an exact or wildcard asset can satisfy a family name.
     pub fn has_asset_for_family(&self, family_name: &str) -> bool {
         let family_name = family_name.trim();
         if family_name.is_empty() {
@@ -144,6 +152,7 @@ impl FontProvider {
                 .any(|asset| asset.family_match_priority(&family_name) == Some(0))
     }
 
+    /// Reports character coverage for the best matching family asset.
     pub fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
         let family_name = family_name.trim();
         if family_name.is_empty() {
@@ -168,10 +177,12 @@ impl FontProvider {
         }
     }
 
+    /// Returns regular-style glyph metrics for a family and character.
     pub fn glyph_metrics_for_char(&self, family_name: &str, ch: char) -> Option<FontGlyphMetrics> {
         self.glyph_metrics_for_char_with_style(family_name, FontAssetStyle::default(), ch)
     }
 
+    /// Returns glyph metrics for the best family and style match.
     pub fn glyph_metrics_for_char_with_style(
         &self,
         family_name: &str,
@@ -795,28 +806,42 @@ fn validate_font_asset_input(
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+/// Bold and italic attributes advertised by a supplied font face.
 pub struct FontAssetStyle {
+    /// Whether the face is bold.
     pub bold: bool,
+    /// Whether the face is italic.
     pub italic: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+/// Result of checking a character against configured font assets.
 pub enum FontCoverage {
+    /// No configured asset matches the requested family.
     NoAsset,
+    /// A matching asset contains the character's glyph.
     Covered,
+    /// A matching asset exists but lacks the character's glyph.
     MissingGlyph,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+/// Scale-independent horizontal and vertical metrics for one glyph.
 pub struct FontGlyphMetrics {
+    /// Font design units per em.
     pub units_per_em: u16,
+    /// Horizontal glyph advance in font design units.
     pub advance_units: u16,
+    /// Face ascender in font design units.
     pub ascender_units: i16,
+    /// Face descender in font design units.
     pub descender_units: i16,
+    /// Additional line gap in font design units.
     pub line_gap_units: i16,
 }
 
 impl FontGlyphMetrics {
+    /// Scales the horizontal advance to PDF points at the requested font size.
     pub fn advance_points(self, font_size_points: f32) -> f32 {
         if self.units_per_em == 0 {
             return 0.0;
@@ -824,6 +849,7 @@ impl FontGlyphMetrics {
         font_size_points * f32::from(self.advance_units) / f32::from(self.units_per_em)
     }
 
+    /// Scales the face line height to points, or returns `None` for invalid metrics.
     pub fn line_height_points(self, font_size_points: f32) -> Option<f32> {
         if self.units_per_em == 0 {
             return None;
@@ -891,11 +917,17 @@ fn supplied_font_style_mismatch_score(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Bounds applied to an in-memory font catalog.
 pub struct FontProviderLimits {
+    /// Maximum font-asset count.
     pub max_assets: usize,
+    /// Maximum bytes in one font asset.
     pub max_asset_bytes: usize,
+    /// Maximum aggregate font bytes.
     pub max_total_bytes: usize,
+    /// Maximum family aliases on one asset.
     pub max_family_names_per_asset: usize,
+    /// Maximum byte length of one family alias.
     pub max_family_name_len: usize,
 }
 
@@ -912,6 +944,7 @@ impl Default for FontProviderLimits {
 }
 
 impl FontProviderLimits {
+    /// Returns stricter bounds suitable for browser and WASM workers.
     pub fn browser_defaults() -> Self {
         Self {
             max_assets: 16,
@@ -924,38 +957,64 @@ impl FontProviderLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Explains why an in-memory font catalog is invalid.
 pub enum FontProviderError {
+    /// The catalog contains more assets than allowed.
     TooManyAssets {
+        /// Configured asset count.
         count: usize,
+        /// Maximum asset count.
         limit: usize,
     },
+    /// A font asset contains no bytes.
     EmptyAsset {
+        /// Zero-based asset position.
         asset_index: usize,
     },
+    /// One font asset exceeds its byte limit.
     AssetTooLarge {
+        /// Zero-based asset position.
         asset_index: usize,
+        /// Asset byte count.
         size: usize,
+        /// Maximum asset byte count.
         limit: usize,
     },
+    /// Aggregate font bytes exceed the catalog limit.
     TotalBytesTooLarge {
+        /// Aggregate byte count.
         size: usize,
+        /// Maximum aggregate byte count.
         limit: usize,
     },
+    /// One asset declares too many family aliases.
     TooManyFamilyNames {
+        /// Zero-based asset position.
         asset_index: usize,
+        /// Alias count.
         count: usize,
+        /// Maximum alias count.
         limit: usize,
     },
+    /// One asset has no non-empty family alias.
     MissingFamilyName {
+        /// Zero-based asset position.
         asset_index: usize,
     },
+    /// One family alias exceeds its byte-length limit.
     FamilyNameTooLong {
+        /// Zero-based asset position.
         asset_index: usize,
+        /// Alias byte length.
         len: usize,
+        /// Maximum alias byte length.
         limit: usize,
     },
+    /// Font parsing rejected an asset.
     InvalidAsset {
+        /// Zero-based asset position.
         asset_index: usize,
+        /// Parser-provided failure description without font payload bytes.
         reason: String,
     },
 }

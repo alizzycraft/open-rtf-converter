@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! Convert RTF bytes into passive PDF bytes without invoking an office suite,
 //! browser print engine, system font service, filesystem API, or network API in
 //! the conversion core.

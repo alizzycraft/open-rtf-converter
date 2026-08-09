@@ -32,19 +32,40 @@ use crate::model::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+/// A checked failure while planning or serializing a passive PDF.
 pub enum PdfRenderError {
+    /// The planned indirect-object count exceeds the configured limit.
     #[error("PDF object count exceeded limit: {count} > {limit}")]
-    TooManyObjects { count: usize, limit: usize },
+    TooManyObjects {
+        /// Planned object count.
+        count: usize,
+        /// Configured object limit.
+        limit: usize,
+    },
+    /// A checked PDF object identifier could not be represented.
     #[error("PDF object identifier overflow")]
     ObjectIdOverflow,
+    /// A planned font points outside the prepared font catalog.
     #[error("invalid prepared font reference at asset index {asset_index}")]
-    InvalidPreparedFontReference { asset_index: usize },
+    InvalidPreparedFontReference {
+        /// Invalid zero-based font asset position.
+        asset_index: usize,
+    },
+    /// A planned page points to an unavailable image resource.
     #[error("invalid planned image reference on page {page_index}")]
-    InvalidImageReference { page_index: usize },
+    InvalidImageReference {
+        /// Zero-based page containing the invalid reference.
+        page_index: usize,
+    },
+    /// The PDF writer's Unicode CMap template no longer matches the checked form.
     #[error("pdf-writer emitted an unexpected Unicode CMap template")]
     UnexpectedUnicodeCmapTemplate,
+    /// Planned resources and emitted resources disagree.
     #[error("PDF plan and writer diverged: {context}")]
-    InternalPlanMismatch { context: &'static str },
+    InternalPlanMismatch {
+        /// Static, payload-free description of the mismatch.
+        context: &'static str,
+    },
 }
 
 const HELVETICA_REGULAR: &[u8] = b"F1";

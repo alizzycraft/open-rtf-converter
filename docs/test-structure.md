@@ -5,17 +5,18 @@ The large test targets keep their established Cargo target names while test func
 | Target or subsystem | Domain files | Preserved tests |
 | --- | ---: | ---: |
 | `src/security_tests.rs` | 14 | 1,044 |
-| `tests/conversion.rs` | 3 | 44 |
+| `tests/conversion.rs` | 3 | 46 |
 | `tests/reference_fixtures.rs` | 2 | 4 |
-| RTF parser unit tests | 11 | 845 |
-| RTF media decoder unit tests | 5 | 5 |
+| RTF lexer/parser/media unit tests | 17 | 856 |
 | Layout unit tests | 9 | 319 |
-| PDF renderer unit tests | 5 | 78 |
+| PDF renderer/planning unit tests | 5 | 83 |
 | PDF audit unit tests | 1 | 18 |
-| Model invariant integration tests | 1 | 5 |
+| Model invariant crate tests | 1 | 5 |
 
 The domain files are under `src/security_tests/`, `tests/{conversion,reference}/`, `src/rtf/parser_tests/`, `src/rtf/parser/media/`, `src/layout_tests/`, and `src/pdf_tests/`, beside the renderer-independent audit at `src/pdf/audit_tests.rs` and model-invariant checks in `src/model_invariant_tests.rs`. `tests/test_structure.rs` locks the decomposed inventories so a later move cannot silently drop a test. The remaining crate, CLI, public-facade, black-box security, fuzz-regression, WASM-policy, example, and doctest coverage remains in focused files.
 
-The repository now contains 2,439 `#[test]` functions. Including the crate doctest and the two baseline-example tests, the verified harness inventory is 2,442 tests; the increase over the earlier 2,402 baseline comes from validation, public-inspection, CLI-policy, structure-guard, explicit media-decoder limit, and malformed-model invariant tests added by plan items. MODEL-02 removed the obsolete parallel-vector mismatch test because aggregate records make that invalid state unrepresentable; MODEL-03 replaced it with typed dynamic-field exclusivity coverage.
+The repository now contains 2,461 `#[test]` functions across library, binary, integration, and example sources. Including the crate doctest, the verified harness inventory is 2,462 tests. The library target contains 2,358 tests, including the 1,044 internal security tests; the remaining focused targets contain 35 CLI, 46 conversion, 5 public-facade, 6 structure-policy, 2 black-box security, 4 reference, 1 fuzz-regression, 2 WASM-policy, and 2 baseline-example tests.
+
+The increase over the earlier 2,402 baseline comes from validation, public inspection, CLI policy, structure guards, media-decoder limits, typed-model invariants, font preparation/caching, and exact PDF planning. Tests removed during typed-model migration covered states that the new representation makes unrepresentable and were replaced by typed exclusivity/invariant assertions.
 
 This is a structural organization only. Test functions and assertions were moved verbatim; relative compile-time fixture paths gained one parent component because the source files are now one directory deeper.
