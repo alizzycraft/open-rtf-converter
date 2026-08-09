@@ -1972,37 +1972,37 @@ fn office_math_limits_render_passive_lower_and_upper_scripts() {
     assert_eq!(lower_limit_style.baseline_shift_half_points, -15);
     assert_eq!(lower_limit_style.font_size_scale_percent, 71);
     assert_eq!(
-        lower_limit_style.passive_math_limit_part,
+        lower_limit_style.passive_math.limit_part,
         PassiveMathLimitPart::Lower
     );
     let lower_base_style = run_style_for_text(&parsed.document, "lim").expect("lower base run");
     assert_eq!(
-        lower_base_style.passive_math_limit_part,
+        lower_base_style.passive_math.limit_part,
         PassiveMathLimitPart::Base
     );
     assert_eq!(
-        lower_base_style.passive_math_limit_id,
-        lower_limit_style.passive_math_limit_id
+        lower_base_style.passive_math.limit_id,
+        lower_limit_style.passive_math.limit_id
     );
     let upper_limit_style = run_style_for_text(&parsed.document, "n").expect("upper limit run");
     assert_eq!(upper_limit_style.baseline_shift_half_points, 17);
     assert_eq!(upper_limit_style.font_size_scale_percent, 71);
     assert_eq!(
-        upper_limit_style.passive_math_limit_part,
+        upper_limit_style.passive_math.limit_part,
         PassiveMathLimitPart::Upper
     );
     let upper_base_style = run_style_for_text(&parsed.document, "max").expect("upper base run");
     assert_eq!(
-        upper_base_style.passive_math_limit_part,
+        upper_base_style.passive_math.limit_part,
         PassiveMathLimitPart::Base
     );
     assert_eq!(
-        upper_base_style.passive_math_limit_id,
-        upper_limit_style.passive_math_limit_id
+        upper_base_style.passive_math.limit_id,
+        upper_limit_style.passive_math.limit_id
     );
     assert_ne!(
-        lower_limit_style.passive_math_limit_id,
-        upper_limit_style.passive_math_limit_id
+        lower_limit_style.passive_math.limit_id,
+        upper_limit_style.passive_math.limit_id
     );
     for forbidden in [
         "mmath",

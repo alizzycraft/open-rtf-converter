@@ -789,6 +789,7 @@ fn validate_inline_kind(
         | InlineKind::BookmarkPageAnchor(_)
         | InlineKind::BookmarkPageReference(_)
         | InlineKind::LayoutAdvance(_)
+        | InlineKind::Math(_)
         | InlineKind::NestedTableAnchor => Ok(()),
     }
 }

@@ -40,22 +40,21 @@ use crate::model::{
     Color, Document, DynamicField, Endnote, EndnoteId, EndnotePlacement, FontDef, FontFamilyHint,
     FontPitch, Footnote, FootnoteId, FootnotePlacement, ImageCrop, ImageFormat,
     ImageToneAdjustment, InlineImageEntry, InlineImageId, InlineKind, LayoutAdvance,
-    LineNumberRestart, NoteNumberRestart, NoteNumbering, PASSIVE_MATH_FRACTION_RULE_MARKER,
-    PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
-    Paragraph, ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart,
-    PassiveMathLimitPart, Run, SectionIndex, ShadingPattern, StaticImage, StaticImageAlphaMask,
-    StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
-    StaticImageVectorRaster, StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
-    StaticShapeLineJoin, StaticShapePoint, StaticShapeTextVerticalAnchor,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TabAlignment, TabLeader, Table, TableCell,
-    TableCellBorder, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
-    TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
-    TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle,
-    normalize_missing_color_references, normalize_missing_font_references,
-    validate_document_invariants,
+    LineNumberRestart, MathGroupId, NoteNumberRestart, NoteNumbering, PageNumberFormat,
+    PageSettings, PageVerticalAlignment, Paragraph, ParagraphFrameVerticalAlignment,
+    ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SectionIndex,
+    ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
+    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
+    TableCellHorizontalMerge, TableCellPadding, TableCellSpacing, TableCellTextDirection,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TableRowWrapMargins, TextRelief, UnderlineStyle, normalize_missing_color_references,
+    normalize_missing_font_references, validate_document_invariants,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -248,7 +247,7 @@ struct ParserState {
     office_math_delimiter_argument_seen: bool,
     office_math_array_context: OfficeMathArrayKind,
     office_math_array_container_direct: OfficeMathArrayKind,
-    office_math_array_id: Option<usize>,
+    office_math_array_id: Option<MathGroupId>,
     office_math_array_rows_seen: usize,
     office_math_array_row_direct: bool,
     office_math_array_row_cells_seen: usize,
@@ -257,7 +256,7 @@ struct ParserState {
     office_math_fraction_type_capture: bool,
     office_math_fraction_type_text: String,
     office_math_fraction_kind: OfficeMathFractionKind,
-    office_math_fraction_id: Option<usize>,
+    office_math_fraction_id: Option<MathGroupId>,
     office_math_script_container_direct: bool,
     office_math_border_box_container_direct: bool,
     office_math_border_box_property_direct: bool,
@@ -272,9 +271,9 @@ struct ParserState {
     office_math_bar_position_text: String,
     office_math_bar_position: OfficeMathBarPosition,
     office_math_limit_container_direct: OfficeMathLimitKind,
-    office_math_limit_id: Option<usize>,
+    office_math_limit_id: Option<MathGroupId>,
     office_math_nary_container_direct: bool,
-    office_math_nary_id: Option<usize>,
+    office_math_nary_id: Option<MathGroupId>,
     office_math_nary_property_direct: bool,
     office_math_nary_limit_location_capture: bool,
     office_math_nary_limit_location_text: String,
@@ -3341,7 +3340,7 @@ impl Parser {
             "mf" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_fraction_container_direct = true;
                 self.state.office_math_fraction_kind = OfficeMathFractionKind::Bar;
-                self.state.office_math_fraction_id = Some(offset);
+                self.state.office_math_fraction_id = Some(MathGroupId::new(offset));
             }
             "mfPr"
                 if destination_allows_visible_content(&self.state)
@@ -3359,11 +3358,11 @@ impl Parser {
             "mnum" if destination_allows_visible_content(&self.state) => {
                 let fraction_kind = self.office_math_direct_parent_fraction_kind();
                 if fraction_kind.uses_stacked_scripts() {
-                    self.state.character.passive_math_fraction_id =
+                    self.state.character.passive_math.fraction_id =
                         self.office_math_direct_parent_fraction_id();
-                    self.state.character.passive_math_fraction_part =
+                    self.state.character.passive_math.fraction_part =
                         PassiveMathFractionPart::Numerator;
-                    self.state.character.passive_math_fraction_has_bar =
+                    self.state.character.passive_math.fraction_has_bar =
                         fraction_kind == OfficeMathFractionKind::Bar;
                     self.state.character.baseline_shift_half_points =
                         OFFICE_MATH_FRACTION_NUMERATOR_SHIFT_HALF_POINTS;
@@ -3377,11 +3376,11 @@ impl Parser {
                     self.push_text("\u{2044}", offset)?;
                 }
                 if fraction_kind.uses_stacked_scripts() {
-                    self.state.character.passive_math_fraction_id =
+                    self.state.character.passive_math.fraction_id =
                         self.office_math_direct_parent_fraction_id();
-                    self.state.character.passive_math_fraction_part =
+                    self.state.character.passive_math.fraction_part =
                         PassiveMathFractionPart::Denominator;
-                    self.state.character.passive_math_fraction_has_bar =
+                    self.state.character.passive_math.fraction_has_bar =
                         fraction_kind == OfficeMathFractionKind::Bar;
                     self.state.character.baseline_shift_half_points =
                         OFFICE_MATH_FRACTION_DENOMINATOR_SHIFT_HALF_POINTS;
@@ -3467,7 +3466,7 @@ impl Parser {
                 self.state.office_math_phantom_argument_context = false;
                 self.state.office_math_phantom_hidden = true;
                 self.state.office_math_phantom_zero_width = false;
-                self.state.character.passive_math_phantom_id = Some(offset);
+                self.state.character.passive_math.phantom_id = Some(MathGroupId::new(offset));
                 self.state.character.hidden = true;
             }
             "mphantPr"
@@ -3589,7 +3588,7 @@ impl Parser {
             }
             "mnary" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_nary_container_direct = true;
-                self.state.office_math_nary_id = Some(offset);
+                self.state.office_math_nary_id = Some(MathGroupId::new(offset));
                 self.state.office_math_nary_limit_location = OfficeMathNaryLimitLocation::SubSup;
                 self.state.office_math_nary_subscript_hidden = false;
                 self.state.office_math_nary_superscript_hidden = false;
@@ -3600,12 +3599,13 @@ impl Parser {
             {
                 self.state.office_math_nary_property_direct = true;
                 if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
-                    self.state.character.passive_math_nary_id =
+                    self.state.character.passive_math.nary_id =
                         self.office_math_direct_parent_nary_id();
                     if self.state.office_math_nary_subscript_hidden
                         && self.state.office_math_nary_superscript_hidden
                     {
-                        self.state.character.passive_math_nary_base_id = Some(offset);
+                        self.state.character.passive_math.nary_base_id =
+                            Some(MathGroupId::new(offset));
                     }
                 }
             }
@@ -3667,7 +3667,7 @@ impl Parser {
             }
             "mlimLow" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_limit_container_direct = OfficeMathLimitKind::Lower;
-                self.state.office_math_limit_id = Some(offset);
+                self.state.office_math_limit_id = Some(MathGroupId::new(offset));
             }
             "mlimLowPr"
                 if destination_allows_visible_content(&self.state)
@@ -3678,7 +3678,7 @@ impl Parser {
             }
             "mlimUpp" if destination_allows_visible_content(&self.state) => {
                 self.state.office_math_limit_container_direct = OfficeMathLimitKind::Upper;
-                self.state.office_math_limit_id = Some(offset);
+                self.state.office_math_limit_id = Some(MathGroupId::new(offset));
             }
             "mlimUppPr"
                 if destination_allows_visible_content(&self.state)
@@ -3717,9 +3717,9 @@ impl Parser {
             "me" if destination_allows_visible_content(&self.state)
                 && self.office_math_direct_parent_limit_kind() != OfficeMathLimitKind::None =>
             {
-                self.state.character.passive_math_limit_id =
+                self.state.character.passive_math.limit_id =
                     self.office_math_direct_parent_limit_id();
-                self.state.character.passive_math_limit_part = PassiveMathLimitPart::Base;
+                self.state.character.passive_math.limit_part = PassiveMathLimitPart::Base;
             }
             "mlim" if destination_allows_visible_content(&self.state) => {
                 self.start_office_math_limit();
@@ -3750,16 +3750,16 @@ impl Parser {
                 && self.office_math_direct_parent_is_nary() =>
             {
                 if self.options.compatibility_mode == CompatibilityMode::WordCompatiblePassive {
-                    self.state.character.passive_math_nary_id =
+                    self.state.character.passive_math.nary_id =
                         self.office_math_direct_parent_nary_id();
                     if self.state.office_math_nary_subscript_hidden
                         && self.state.office_math_nary_superscript_hidden
                     {
-                        self.state.character.passive_math_nary_base_id =
+                        self.state.character.passive_math.nary_base_id =
                             self.office_math_direct_parent_nary_id();
                     }
                 } else {
-                    self.state.character.passive_math_nary_base_id = Some(offset);
+                    self.state.character.passive_math.nary_base_id = Some(MathGroupId::new(offset));
                 }
             }
             "me" if destination_allows_visible_content(&self.state)
@@ -3773,10 +3773,10 @@ impl Parser {
                         == CompatibilityMode::WordCompatiblePassive
                         && self.office_math_direct_parent_is_nary();
                     if word_compatible_nary {
-                        self.state.character.passive_math_nary_id =
+                        self.state.character.passive_math.nary_id =
                             self.office_math_direct_parent_nary_id();
                         if !self.state.office_math_nary_subscript_hidden {
-                            self.state.character.passive_math_nary_base_id =
+                            self.state.character.passive_math.nary_base_id =
                                 self.office_math_direct_parent_nary_id();
                         }
                     }
@@ -3796,12 +3796,12 @@ impl Parser {
                         == CompatibilityMode::WordCompatiblePassive
                         && self.office_math_direct_parent_is_nary();
                     if word_compatible_nary {
-                        self.state.character.passive_math_nary_id =
+                        self.state.character.passive_math.nary_id =
                             self.office_math_direct_parent_nary_id();
                         if self.state.office_math_nary_subscript_hidden
                             && !self.state.office_math_nary_superscript_hidden
                         {
-                            self.state.character.passive_math_nary_base_id =
+                            self.state.character.passive_math.nary_base_id =
                                 self.office_math_direct_parent_nary_id();
                         }
                     }
@@ -3820,7 +3820,7 @@ impl Parser {
                 && !is_office_math_delimiter_metadata_control(name) =>
             {
                 if name == "mmath" || name == "moMath" {
-                    self.state.character.passive_math = true;
+                    self.state.character.passive_math.enabled = true;
                     if let Some(font_index) = self.office_math_font_index() {
                         self.state.character.font_index = font_index;
                     }
@@ -8914,7 +8914,7 @@ impl Parser {
         self.state.office_math_array_context = kind;
         self.state.office_math_array_container_direct = kind;
         self.state.office_math_array_id =
-            (kind == OfficeMathArrayKind::EquationArray).then_some(offset);
+            (kind == OfficeMathArrayKind::EquationArray).then_some(MathGroupId::new(offset));
         self.state.office_math_array_rows_seen = 0;
         self.state.office_math_array_row_direct = false;
         self.state.office_math_array_row_cells_seen = 0;
@@ -8934,7 +8934,7 @@ impl Parser {
             .unwrap_or(OfficeMathLimitKind::None)
     }
 
-    fn office_math_direct_parent_limit_id(&self) -> Option<usize> {
+    fn office_math_direct_parent_limit_id(&self) -> Option<MathGroupId> {
         self.stack
             .last()
             .filter(|state| state.office_math_limit_container_direct != OfficeMathLimitKind::None)
@@ -8973,7 +8973,7 @@ impl Parser {
             .unwrap_or(OfficeMathFractionKind::Bar)
     }
 
-    fn office_math_direct_parent_fraction_id(&self) -> Option<usize> {
+    fn office_math_direct_parent_fraction_id(&self) -> Option<MathGroupId> {
         self.stack
             .last()
             .filter(|state| state.office_math_fraction_container_direct)
@@ -9003,7 +9003,7 @@ impl Parser {
             .is_some_and(|state| state.office_math_nary_container_direct)
     }
 
-    fn office_math_direct_parent_nary_id(&self) -> Option<usize> {
+    fn office_math_direct_parent_nary_id(&self) -> Option<MathGroupId> {
         self.stack
             .last()
             .filter(|state| state.office_math_nary_container_direct)
@@ -9251,8 +9251,8 @@ impl Parser {
                 (row_index, parent.office_math_array_id)
             })
             .unwrap_or((0, None));
-        self.state.character.passive_math_equation_array_id = array_id;
-        self.state.character.passive_math_equation_array_row = row_index;
+        self.state.character.passive_math.equation_array_id = array_id;
+        self.state.character.passive_math.equation_array_row = row_index;
         if row_index > 0 {
             self.push_text("\n", offset)?;
         }
@@ -9261,19 +9261,19 @@ impl Parser {
     }
 
     fn start_office_math_limit(&mut self) {
-        self.state.character.passive_math_limit_id = self.office_math_direct_parent_limit_id();
+        self.state.character.passive_math.limit_id = self.office_math_direct_parent_limit_id();
         match self.office_math_direct_parent_limit_kind() {
             OfficeMathLimitKind::Lower => {
                 self.state.character.baseline_shift_half_points =
                     OFFICE_MATH_LOWER_LIMIT_SHIFT_HALF_POINTS;
                 self.state.character.font_size_scale_percent = OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT;
-                self.state.character.passive_math_limit_part = PassiveMathLimitPart::Lower;
+                self.state.character.passive_math.limit_part = PassiveMathLimitPart::Lower;
             }
             OfficeMathLimitKind::Upper => {
                 self.state.character.baseline_shift_half_points =
                     OFFICE_MATH_UPPER_LIMIT_SHIFT_HALF_POINTS;
                 self.state.character.font_size_scale_percent = OFFICE_MATH_LIMIT_FONT_SCALE_PERCENT;
-                self.state.character.passive_math_limit_part = PassiveMathLimitPart::Upper;
+                self.state.character.passive_math.limit_part = PassiveMathLimitPart::Upper;
             }
             OfficeMathLimitKind::None => {}
         }
@@ -10255,7 +10255,7 @@ impl Parser {
         style.hidden = false;
         style.character_spacing_twips = width_twips;
         if let Some(last) = paragraph.runs.last_mut()
-            && last.style.passive_math_phantom_id == style.passive_math_phantom_id
+            && last.style.passive_math.phantom_id == style.passive_math.phantom_id
             && let Some(InlineKind::LayoutAdvance(advance)) = last.dynamic_field.as_mut()
         {
             advance.horizontal_twips = advance
@@ -23238,16 +23238,12 @@ fn field_switch_argument_value(input: &str) -> Option<String> {
     Some(value.to_string())
 }
 
-fn is_internal_marker(text: &str) -> bool {
-    matches!(
-        text,
-        PASSIVE_MATH_FRACTION_RULE_MARKER | PASSIVE_MATH_STACK_ANCHOR_MARKER
-    )
+fn is_internal_marker(_text: &str) -> bool {
+    false
 }
 
-fn contains_internal_marker(text: &str) -> bool {
-    text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
-        || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
+fn contains_internal_marker(_text: &str) -> bool {
+    false
 }
 
 fn contains_reserved_private_use(text: &str) -> bool {
@@ -23256,9 +23252,7 @@ fn contains_reserved_private_use(text: &str) -> bool {
 }
 
 fn sanitize_internal_markers(text: &str) -> String {
-    text.replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "\u{fffd}")
-        .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "\u{fffd}")
-        .chars()
+    text.chars()
         .map(|ch| {
             if ('\u{f0000}'..='\u{ffffd}').contains(&ch) {
                 '\u{fffd}'
@@ -24372,6 +24366,7 @@ fn source_ignoring_passive_source_raster_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::MathInline;
 
     const PENDING_NOTE_REFERENCE_MARKER: &str = "\u{f0003}";
     const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
@@ -24381,6 +24376,9 @@ mod tests {
     const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
     const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
     const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
+    const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
+    const PASSIVE_MATH_STACK_ANCHOR_MARKER: &str = "\u{f0012}";
+    const PASSIVE_MATH_INLINE_LEAD_MARKER: &str = "\u{f0013}";
 
     fn inline_image_marker(index: usize) -> Option<char> {
         let codepoint = INLINE_IMAGE_MARKER_BASE.checked_add(u32::try_from(index).ok()?)?;
@@ -24425,6 +24423,11 @@ mod tests {
                             Some(InlineKind::LayoutAdvance(_)) => {
                                 text.push_str(PASSIVE_ADVANCE_MARKER)
                             }
+                            Some(InlineKind::Math(kind)) => text.push_str(match kind {
+                                MathInline::FractionRule => PASSIVE_MATH_FRACTION_RULE_MARKER,
+                                MathInline::StackAnchor => PASSIVE_MATH_STACK_ANCHOR_MARKER,
+                                MathInline::InlineLead => PASSIVE_MATH_INLINE_LEAD_MARKER,
+                            }),
                             Some(
                                 InlineKind::BookmarkPageAnchor(_)
                                 | InlineKind::BookmarkPageReference(_)

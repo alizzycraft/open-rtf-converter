@@ -39,7 +39,7 @@ fn office_math_text_renders_passively_without_math_control_leakage() {
             _ => None,
         })
         .expect("math run");
-    assert!(math_style.passive_math);
+    assert!(math_style.passive_math.enabled);
     assert_eq!(math_style.baseline_shift_half_points, 0);
     assert_eq!(math_style.font_size_scale_percent, 100);
     for forbidden in ["mmath", "moMath", "mtext", "msup", "mctrlPr"] {
@@ -131,7 +131,7 @@ fn office_math_fractions_render_readable_passive_text() {
     assert!(numerator_style.baseline_shift_half_points > 0);
     assert!(numerator_style.font_size_scale_percent < 100);
     assert_eq!(
-        numerator_style.passive_math_fraction_part,
+        numerator_style.passive_math.fraction_part,
         PassiveMathFractionPart::Numerator
     );
     let denominator_style =
@@ -139,12 +139,12 @@ fn office_math_fractions_render_readable_passive_text() {
     assert!(denominator_style.baseline_shift_half_points < 0);
     assert!(denominator_style.font_size_scale_percent < 100);
     assert_eq!(
-        denominator_style.passive_math_fraction_part,
+        denominator_style.passive_math.fraction_part,
         PassiveMathFractionPart::Denominator
     );
     assert_eq!(
-        numerator_style.passive_math_fraction_id,
-        denominator_style.passive_math_fraction_id
+        numerator_style.passive_math.fraction_id,
+        denominator_style.passive_math.fraction_id
     );
     for forbidden in ["mmath", "moMath", "mf", "mnum", "mden", "mtext"] {
         assert!(
@@ -874,8 +874,8 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
         run_style_for_text(&parsed.document, "i=1").expect("lower n-ary limit run");
     assert_eq!(lower_limit_style.baseline_shift_half_points, 0);
     assert_eq!(lower_limit_style.font_size_scale_percent, 100);
-    assert!(lower_limit_style.passive_math_nary_id.is_some());
-    assert!(lower_limit_style.passive_math_nary_base_id.is_some());
+    assert!(lower_limit_style.passive_math.nary_id.is_some());
+    assert!(lower_limit_style.passive_math.nary_base_id.is_some());
     let upper_limit_style = parsed
         .document
         .blocks
@@ -885,12 +885,12 @@ fn office_math_nary_operators_render_passively_without_control_leakage() {
             _ => None,
         })
         .flat_map(|paragraph| &paragraph.runs)
-        .find(|run| run.style.passive_math_nary_id.is_some() && run.text.contains('n'))
+        .find(|run| run.style.passive_math.nary_id.is_some() && run.text.contains('n'))
         .map(|run| &run.style)
         .expect("upper n-ary limit run");
     assert_eq!(upper_limit_style.baseline_shift_half_points, 0);
     assert_eq!(upper_limit_style.font_size_scale_percent, 100);
-    assert!(upper_limit_style.passive_math_nary_id.is_some());
+    assert!(upper_limit_style.passive_math.nary_id.is_some());
     let strict = parse_rtf_bytes_with_options(
         &input,
         &RtfParseOptions {
@@ -2284,7 +2284,7 @@ fn office_math_nary_hidden_limits_are_stripped_passively() {
     );
     assert!(
         run_style_for_text(&parsed.document, "i")
-            .and_then(|style| style.passive_math_nary_base_id)
+            .and_then(|style| style.passive_math.nary_base_id)
             .is_some(),
         "n-ary base should retain bounded spacing identity"
     );
@@ -2831,12 +2831,12 @@ fn office_math_equation_arrays_render_passive_rows() {
     let first_row_style = run_style_for_text(&parsed.document, "X=1").expect("first array row");
     let second_row_style = run_style_for_text(&parsed.document, "\nY=2").expect("second array row");
     assert_eq!(
-        first_row_style.passive_math_equation_array_id,
-        second_row_style.passive_math_equation_array_id
+        first_row_style.passive_math.equation_array_id,
+        second_row_style.passive_math.equation_array_id
     );
-    assert!(first_row_style.passive_math_equation_array_id.is_some());
-    assert_eq!(first_row_style.passive_math_equation_array_row, 0);
-    assert_eq!(second_row_style.passive_math_equation_array_row, 1);
+    assert!(first_row_style.passive_math.equation_array_id.is_some());
+    assert_eq!(first_row_style.passive_math.equation_array_row, 0);
+    assert_eq!(second_row_style.passive_math.equation_array_row, 1);
     for forbidden in [
         "mmath", "moMath", "meqArr", "meqArrPr", "me", "mtext", "calc.exe", "objdata", "414243",
     ] {

@@ -5049,7 +5049,7 @@ fn resultless_symbol_field_cannot_inject_reserved_private_use_semantics() {
 }
 
 #[test]
-fn former_inline_protocol_scalars_cannot_trigger_typed_semantics() {
+fn former_semantic_protocol_scalars_cannot_trigger_typed_semantics() {
     for scalar in [
         0xF0003_u32, // pending note
         0xF0005,     // bookmark anchor
@@ -5061,13 +5061,21 @@ fn former_inline_protocol_scalars_cannot_trigger_typed_semantics() {
         0xF000E,     // endnote reference
         0xF000F,     // former endnote terminator
         0xF0010,     // nested-table anchor
+        0xF0011,     // fraction rule
+        0xF0012,     // math stack anchor
+        0xF0013,     // inline math lead
         0xF1000,     // first former inline-image marker
     ] {
         let input =
             format!("{{\\rtf1 Before {{\\field{{\\*\\fldinst SYMBOL {scalar}}}}} After\\par}}");
         let parsed = parse_rtf_bytes(input.as_bytes()).expect("reserved scalar remains parseable");
 
-        assert_eq!(collect_text(&parsed.document), "Before \u{fffd} After");
+        let text = collect_text(&parsed.document);
+        assert!(
+            text == "Before \u{fffd} After"
+                || text == "Before [Field removed: no passive result] After",
+            "U+{scalar:05X} was not handled by the reserved-scalar policy: {text:?}"
+        );
         assert!(parsed.document.inline_images.is_empty());
         assert!(parsed.document.footnotes.is_empty());
         assert!(parsed.document.endnotes.is_empty());

@@ -10,60 +10,12 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
 ) {
     let mut start = 0;
     for (idx, ch) in text.char_indices() {
-        let is_math_fraction_rule = ch.to_string() == PASSIVE_MATH_FRACTION_RULE_MARKER;
-        let is_math_inline_lead = ch.to_string() == PASSIVE_MATH_INLINE_LEAD_MARKER;
-        let is_math_stack_anchor = ch.to_string() == PASSIVE_MATH_STACK_ANCHOR_MARKER;
-        if ch == '\t' || is_math_fraction_rule || is_math_inline_lead || is_math_stack_anchor {
+        if ch == '\t' {
             if start < idx {
                 let text = text[start..idx].replace('\u{00ad}', "");
                 if !text.is_empty() {
                     push_display_text_segment(output, &text, style, false);
                 }
-            }
-            if is_math_inline_lead {
-                output.push(FlowRun {
-                    dynamic_field: None,
-                    text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
-                    style: style.clone(),
-                    width: passive_advance_width_points(style),
-                    line_height_points: 0.0,
-                    tab_leader: TabLeader::None,
-                    tab_alignment: TabAlignment::Left,
-                    tab_stop_position: None,
-                    soft_hyphen_after: false,
-                });
-                start = idx + ch.len_utf8();
-                continue;
-            }
-            if is_math_fraction_rule {
-                output.push(FlowRun {
-                    dynamic_field: None,
-                    text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
-                    style: style.clone(),
-                    width: 0.0,
-                    line_height_points: 0.0,
-                    tab_leader: TabLeader::None,
-                    tab_alignment: TabAlignment::Left,
-                    tab_stop_position: None,
-                    soft_hyphen_after: false,
-                });
-                start = idx + ch.len_utf8();
-                continue;
-            }
-            if is_math_stack_anchor {
-                output.push(FlowRun {
-                    dynamic_field: None,
-                    text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
-                    style: style.clone(),
-                    width: 0.0,
-                    line_height_points: 0.0,
-                    tab_leader: TabLeader::None,
-                    tab_alignment: TabAlignment::Left,
-                    tab_stop_position: None,
-                    soft_hyphen_after: false,
-                });
-                start = idx + ch.len_utf8();
-                continue;
             }
             output.push(FlowRun {
                 dynamic_field: None,
@@ -365,9 +317,9 @@ pub(in crate::layout) fn apply_fit_text_scaling_to_segment(
     if target_twips <= 0
         || segment.text.is_empty()
         || layout_advance(segment.dynamic_field).is_some()
-        || is_passive_math_inline_lead_marker(&segment.text)
-        || is_passive_math_fraction_rule_marker(&segment.text)
-        || is_passive_math_stack_anchor_marker(&segment.text)
+        || is_passive_math_inline_lead_marker(segment.dynamic_field)
+        || is_passive_math_fraction_rule_marker(segment.dynamic_field)
+        || is_passive_math_stack_anchor_marker(segment.dynamic_field)
         || is_bookmark_page_kind(segment.dynamic_field)
     {
         return;
@@ -482,6 +434,16 @@ pub(in crate::layout) fn flow_run_line_height(
     document: &Document,
     font_provider: Option<&FontProvider>,
 ) -> f32 {
+    if is_passive_math_inline_lead_marker(run.dynamic_field) {
+        return 0.0;
+    }
+    if is_passive_math_fraction_rule_marker(run.dynamic_field) {
+        return (run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER)
+            + run.style.baseline_shift_points().abs();
+    }
+    if is_passive_math_stack_anchor_marker(run.dynamic_field) {
+        return 0.0;
+    }
     if run.text.is_empty() {
         return 0.0;
     }
@@ -489,16 +451,6 @@ pub(in crate::layout) fn flow_run_line_height(
         return 0.0;
     }
     if layout_advance(run.dynamic_field).is_some() {
-        return 0.0;
-    }
-    if is_passive_math_inline_lead_marker(&run.text) {
-        return 0.0;
-    }
-    if is_passive_math_fraction_rule_marker(&run.text) {
-        return (run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER)
-            + run.style.baseline_shift_points().abs();
-    }
-    if is_passive_math_stack_anchor_marker(&run.text) {
         return 0.0;
     }
     let border_extra = character_border_inset(&run.style) * 2.0;
@@ -605,13 +557,13 @@ pub(in crate::layout) fn measure_flow_run(
     if let Some(advance) = layout_advance(run.dynamic_field) {
         return twips_to_points(advance.horizontal_twips);
     }
-    if is_passive_math_inline_lead_marker(&run.text) {
+    if is_passive_math_inline_lead_marker(run.dynamic_field) {
         return passive_advance_width_points(&run.style);
     }
-    if is_passive_math_fraction_rule_marker(&run.text) {
+    if is_passive_math_fraction_rule_marker(run.dynamic_field) {
         return 0.0;
     }
-    if is_passive_math_stack_anchor_marker(&run.text) {
+    if is_passive_math_stack_anchor_marker(run.dynamic_field) {
         return 0.0;
     }
     if run.text == "\t" {
@@ -682,16 +634,16 @@ pub(in crate::layout) fn layout_advance(kind: Option<InlineKind>) -> Option<Layo
     }
 }
 
-pub(in crate::layout) fn is_passive_math_inline_lead_marker(text: &str) -> bool {
-    text == PASSIVE_MATH_INLINE_LEAD_MARKER
+pub(in crate::layout) fn is_passive_math_inline_lead_marker(kind: Option<InlineKind>) -> bool {
+    kind == Some(InlineKind::Math(MathInline::InlineLead))
 }
 
-pub(in crate::layout) fn is_passive_math_fraction_rule_marker(text: &str) -> bool {
-    text == PASSIVE_MATH_FRACTION_RULE_MARKER
+pub(in crate::layout) fn is_passive_math_fraction_rule_marker(kind: Option<InlineKind>) -> bool {
+    kind == Some(InlineKind::Math(MathInline::FractionRule))
 }
 
-pub(in crate::layout) fn is_passive_math_stack_anchor_marker(text: &str) -> bool {
-    text == PASSIVE_MATH_STACK_ANCHOR_MARKER
+pub(in crate::layout) fn is_passive_math_stack_anchor_marker(kind: Option<InlineKind>) -> bool {
+    kind == Some(InlineKind::Math(MathInline::StackAnchor))
 }
 
 pub(in crate::layout) fn inline_image_id(kind: Option<InlineKind>) -> Option<InlineImageId> {
@@ -948,9 +900,9 @@ pub(in crate::layout) fn push_line_with_rotation(
 
     let last_spaced_run_index = line.runs.iter().rposition(|run| {
         layout_advance(run.dynamic_field).is_none()
-            && !is_passive_math_inline_lead_marker(&run.text)
-            && !is_passive_math_fraction_rule_marker(&run.text)
-            && !is_passive_math_stack_anchor_marker(&run.text)
+            && !is_passive_math_inline_lead_marker(run.dynamic_field)
+            && !is_passive_math_fraction_rule_marker(run.dynamic_field)
+            && !is_passive_math_stack_anchor_marker(run.dynamic_field)
             && run.text != "\t"
             && !run.text.is_empty()
     });
@@ -960,6 +912,7 @@ pub(in crate::layout) fn push_line_with_rotation(
             && !is_bookmark_page_kind(run.dynamic_field)
             && !is_note_reference_kind(run.dynamic_field)
             && layout_advance(run.dynamic_field).is_none()
+            && !contains_inline_marker(run.dynamic_field)
         {
             cursor_advance += run.width;
             continue;
@@ -969,12 +922,12 @@ pub(in crate::layout) fn push_line_with_rotation(
             cursor_baseline_delta += passive_advance_baseline_delta_points(advance);
             continue;
         }
-        if is_passive_math_inline_lead_marker(&run.text) {
+        if is_passive_math_inline_lead_marker(run.dynamic_field) {
             cursor_advance += run.width;
             continue;
         }
-        if is_passive_math_fraction_rule_marker(&run.text) {
-            if run.style.passive_math_fraction_has_bar {
+        if is_passive_math_fraction_rule_marker(run.dynamic_field) {
+            if run.style.passive_math.fraction_has_bar {
                 let fraction_width = passive_math_fraction_width_points(&run.style);
                 let (x1, y1) = rotated_line_run_origin(
                     x,
@@ -1006,7 +959,7 @@ pub(in crate::layout) fn push_line_with_rotation(
             }
             continue;
         }
-        if is_passive_math_stack_anchor_marker(&run.text) {
+        if is_passive_math_stack_anchor_marker(run.dynamic_field) {
             continue;
         }
         if let Some(image) = inline_image_for_kind(document, run.dynamic_field) {
@@ -1146,7 +1099,11 @@ pub(in crate::layout) fn push_line_with_rotation(
                 y1: y,
                 x2: run_x + text_width,
                 y2: y,
-                width: if style.passive_math { 0.84 } else { 0.5 },
+                width: if style.passive_math.enabled {
+                    0.84
+                } else {
+                    0.5
+                },
                 color,
                 style: LineStyle::Solid,
             });
@@ -1234,7 +1191,7 @@ pub(in crate::layout) fn word_compatible_source_line_baseline_delta_points(
         .iter()
         .filter(|run| {
             !run.text.trim().is_empty()
-                && !contains_inline_marker(&run.text)
+                && !contains_inline_marker(run.dynamic_field)
                 && inline_image_id(run.dynamic_field).is_none()
         })
         .filter_map(|run| {
@@ -1270,7 +1227,7 @@ pub(in crate::layout) fn word_compatible_source_run_baseline_delta_points(
     style: &CharacterStyle,
     document: &Document,
 ) -> f32 {
-    let is_cambria_math_nary = style.passive_math_nary_id.is_some()
+    let is_cambria_math_nary = style.passive_math.nary_id.is_some()
         && font_for_style(document, style)
             .is_some_and(|font| font.name.trim().eq_ignore_ascii_case("cambria math"));
     if is_cambria_math_nary {
@@ -1683,7 +1640,7 @@ pub(in crate::layout) fn distributed_character_spacing(
         .iter()
         .filter(|run| {
             layout_advance(run.dynamic_field).is_none()
-                && !is_passive_math_inline_lead_marker(&run.text)
+                && !is_passive_math_inline_lead_marker(run.dynamic_field)
                 && run.text != "\t"
         })
         .map(|run| run.text.chars().filter(|ch| *ch != '\n').count())
@@ -2744,7 +2701,7 @@ pub(crate) fn source_word_compatible_advance_points(
         .or_else(|| source_aptos_advance_points(font, style, ch, size, font_provider))
         .or_else(|| source_dingbat_advance_points(font, ch, size))
         .or_else(|| {
-            (style.passive_math && style.passive_math_fraction_id.is_none())
+            (style.passive_math.enabled && style.passive_math.fraction_id.is_none())
                 .then(|| source_cambria_math_advance_points(font, ch, size))
                 .flatten()
         })

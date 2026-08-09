@@ -34,19 +34,18 @@ use crate::model::StaticImageWrapSide;
 use crate::model::{
     Alignment, Block, BookmarkId, BorderStyle, CharacterStyle, Document, DynamicField,
     EndnotePlacement, FontDef, FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat,
-    InlineImageId, InlineKind, LayoutAdvance, LineNumberRestart, ModelInvariantError,
-    NoteNumberRestart, NoteNumbering, PASSIVE_MATH_FRACTION_RULE_MARKER,
-    PASSIVE_MATH_INLINE_LEAD_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
-    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
-    ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart,
-    Run, ShadingPattern, StaticImage, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind,
-    StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
-    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellHorizontalMerge,
-    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
-    TableRowAlignment, TableRowWrapMargins, UnderlineStyle, validate_document_invariants,
+    InlineImageId, InlineKind, LayoutAdvance, LineNumberRestart, MathInline, ModelInvariantError,
+    NoteNumberRestart, NoteNumbering, PageNumberFormat, PageSettings, PageVerticalAlignment,
+    Paragraph, ParagraphBorders, ParagraphFrameVerticalAlignment, ParagraphStyle,
+    PassiveMathFractionPart, PassiveMathLimitPart, Run, ShadingPattern, StaticImage,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TabAlignment, TabLeader, Table, TableCell,
+    TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
+    validate_document_invariants,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -1663,10 +1662,10 @@ impl LayoutEngine {
 mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProviderLimits};
     use crate::model::{
-        Block, Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat, PageNumberFormat,
-        PageSettings, Paragraph, Run, StaticImagePlacement, StaticShape, StaticShapeKind,
-        StaticShapePoint, Table, TableCell, TableCellBorder, TableCellBorders, TableCellPadding,
-        TableCellSpacing, TableCellVerticalMerge, TableRow, TableRowWrapMargins,
+        Block, Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat, MathGroupId,
+        PageNumberFormat, PageSettings, Paragraph, Run, StaticImagePlacement, StaticShape,
+        StaticShapeKind, StaticShapePoint, Table, TableCell, TableCellBorder, TableCellBorders,
+        TableCellPadding, TableCellSpacing, TableCellVerticalMerge, TableRow, TableRowWrapMargins,
     };
     use crate::rtf::parse_rtf;
 

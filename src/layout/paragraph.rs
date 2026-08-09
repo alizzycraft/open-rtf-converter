@@ -1745,7 +1745,7 @@ pub(in crate::layout) fn line_has_visible_text(line: &Line) -> bool {
     line.runs.iter().any(|run| {
         !run.style.hidden
             && layout_advance(run.dynamic_field).is_none()
-            && !is_passive_math_inline_lead_marker(&run.text)
+            && !is_passive_math_inline_lead_marker(run.dynamic_field)
             && !run.text.trim().is_empty()
             && !is_bookmark_page_kind(run.dynamic_field)
     })

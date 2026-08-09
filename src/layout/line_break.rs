@@ -121,7 +121,7 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                 is_first_line = false;
                 continue;
             }
-            if is_passive_math_inline_lead_marker(&segment.text) {
+            if is_passive_math_inline_lead_marker(segment.dynamic_field) {
                 if current.width > 0.01 {
                     // Word leaves the invisible object lead-in on the preceding line
                     // when the following atomic equation wraps.
@@ -164,14 +164,14 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                     font_provider,
                 );
             }
-            if is_passive_math_fraction_rule_marker(&segment.text) {
+            if is_passive_math_fraction_rule_marker(segment.dynamic_field) {
                 fit_width = passive_math_fraction_width_points(&segment.style);
             }
-            if is_passive_math_stack_anchor_marker(&segment.text) {
+            if is_passive_math_stack_anchor_marker(segment.dynamic_field) {
                 fit_width = passive_math_stack_width_points(&segment.style);
             }
             let interval_fit_width = if segment.text.ends_with(char::is_whitespace)
-                && !contains_inline_marker(&segment.text)
+                && !contains_inline_marker(segment.dynamic_field)
             {
                 let mut visible_segment = segment.clone();
                 visible_segment.text = visible_segment
@@ -261,8 +261,8 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                 && segment.style.fit_text_width_twips.is_none()
                 && segment.tab_stop_position.is_none()
                 && segment.text != "\t"
-                && segment.style.passive_math_fraction_id.is_none()
-                && !contains_inline_marker(&segment.text)
+                && segment.style.passive_math.fraction_id.is_none()
+                && !contains_inline_marker(segment.dynamic_field)
                 && dynamic_word.chars().count() >= 2
                 && !dynamic_word.chars().any(char::is_whitespace)
             {
@@ -341,7 +341,7 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
             }
             let boundary_fit_width = if ignore_trailing_space_for_fit
                 && segment.text.ends_with(char::is_whitespace)
-                && !contains_inline_marker(&segment.text)
+                && !contains_inline_marker(segment.dynamic_field)
             {
                 let mut visible_segment = segment.clone();
                 visible_segment.text = visible_segment
@@ -539,7 +539,7 @@ pub(in crate::layout) fn character_spacing_boundary_after_run(
         .find(|ch| !is_zero_width_format_char(*ch));
     if run.style.hidden
         || run.style.character_spacing_twips == 0
-        || contains_inline_marker(&run.text)
+        || contains_inline_marker(run.dynamic_field)
         || !last.is_some_and(is_character_spacing_boundary_char)
     {
         return 0.0;
@@ -552,7 +552,7 @@ pub(in crate::layout) fn character_spacing_boundary_after_run(
                 .any(|ch| !is_zero_width_format_char(ch))
     });
     let first = following.and_then(|following| {
-        (!contains_inline_marker(&following.text))
+        (!contains_inline_marker(following.dynamic_field))
             .then(|| {
                 following
                     .text
@@ -575,7 +575,7 @@ pub(in crate::layout) fn apply_passive_math_operator_spacing(
     paragraph: &Paragraph,
 ) -> Option<Paragraph> {
     let has_spaced_operator = paragraph.runs.iter().any(|run| {
-        run.style.passive_math
+        run.style.passive_math.enabled
             && !run.style.overline
             && run.style.underline == UnderlineStyle::None
             && run.text.char_indices().any(|(index, ch)| {
@@ -592,7 +592,7 @@ pub(in crate::layout) fn apply_passive_math_operator_spacing(
         runs: Vec::with_capacity(paragraph.runs.len().saturating_add(8)),
     };
     for run in &paragraph.runs {
-        if !run.style.passive_math
+        if !run.style.passive_math.enabled
             || run.style.overline
             || run.style.underline != UnderlineStyle::None
         {
@@ -668,7 +668,7 @@ pub(in crate::layout) fn apply_passive_math_nary_base_spacing(
     if !paragraph
         .runs
         .iter()
-        .any(|run| run.style.passive_math_nary_base_id.is_some())
+        .any(|run| run.style.passive_math.nary_base_id.is_some())
     {
         return None;
     }
@@ -679,7 +679,7 @@ pub(in crate::layout) fn apply_passive_math_nary_base_spacing(
     };
     let mut active_base_id = None;
     for run in &paragraph.runs {
-        let base_id = run.style.passive_math_nary_base_id;
+        let base_id = run.style.passive_math.nary_base_id;
         if let Some(base_id) = base_id
             && active_base_id != Some(base_id)
         {
@@ -700,7 +700,7 @@ pub(in crate::layout) fn group_word_compatible_passive_math_nary_runs(
     if !paragraph
         .runs
         .iter()
-        .any(|run| run.style.passive_math_nary_id.is_some())
+        .any(|run| run.style.passive_math.nary_id.is_some())
     {
         return None;
     }
@@ -711,14 +711,14 @@ pub(in crate::layout) fn group_word_compatible_passive_math_nary_runs(
     };
     let mut start = 0usize;
     while start < paragraph.runs.len() {
-        let Some(nary_id) = paragraph.runs[start].style.passive_math_nary_id else {
+        let Some(nary_id) = paragraph.runs[start].style.passive_math.nary_id else {
             output.runs.push(paragraph.runs[start].clone());
             start += 1;
             continue;
         };
         let mut end = start + 1;
         while end < paragraph.runs.len()
-            && paragraph.runs[end].style.passive_math_nary_id == Some(nary_id)
+            && paragraph.runs[end].style.passive_math.nary_id == Some(nary_id)
         {
             end += 1;
         }
@@ -728,32 +728,32 @@ pub(in crate::layout) fn group_word_compatible_passive_math_nary_runs(
                 .max(0.1);
         let spacing_run_index = nary_runs
             .iter()
-            .position(|run| run.style.passive_math_nary_base_id.is_some())
+            .position(|run| run.style.passive_math.nary_base_id.is_some())
             .or((nary_runs.len() > 1).then_some(1));
         if let Some(spacing_run_index) = spacing_run_index {
             nary_width +=
                 nary_runs[spacing_run_index].style.font_size_points() * WORD_NARY_OPERATOR_GAP_EM;
         }
         let mut marker_style = nary_runs[0].style.clone();
-        marker_style.passive_math_nary_id = None;
+        marker_style.passive_math.nary_id = None;
         let mut lead_style = marker_style.clone();
         lead_style.character_spacing_twips =
             points_to_bounded_twips(WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS);
         output.runs.push(Run {
-            dynamic_field: None,
-            text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
+            dynamic_field: Some(InlineKind::Math(MathInline::InlineLead)),
+            text: String::new(),
             style: lead_style,
         });
         marker_style.character_spacing_twips = points_to_bounded_twips(nary_width);
         output.runs.push(Run {
-            dynamic_field: None,
-            text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
+            dynamic_field: Some(InlineKind::Math(MathInline::StackAnchor)),
+            text: String::new(),
             style: marker_style,
         });
         for (index, run) in nary_runs.iter().enumerate() {
             let mut run = run.clone();
-            if Some(index) == spacing_run_index && run.style.passive_math_nary_base_id.is_none() {
-                run.style.passive_math_nary_base_id = Some(nary_id);
+            if Some(index) == spacing_run_index && run.style.passive_math.nary_base_id.is_none() {
+                run.style.passive_math.nary_base_id = Some(nary_id);
             }
             output.runs.push(run);
         }
@@ -770,7 +770,7 @@ pub(in crate::layout) fn stack_passive_math_limits(
     if !paragraph
         .runs
         .iter()
-        .any(|run| run.style.passive_math_limit_id.is_some())
+        .any(|run| run.style.passive_math.limit_id.is_some())
     {
         return None;
     }
@@ -781,28 +781,28 @@ pub(in crate::layout) fn stack_passive_math_limits(
     };
     let mut start = 0usize;
     while start < paragraph.runs.len() {
-        let Some(limit_id) = paragraph.runs[start].style.passive_math_limit_id else {
+        let Some(limit_id) = paragraph.runs[start].style.passive_math.limit_id else {
             output.runs.push(paragraph.runs[start].clone());
             start += 1;
             continue;
         };
         let mut end = start + 1;
         while end < paragraph.runs.len()
-            && paragraph.runs[end].style.passive_math_limit_id == Some(limit_id)
+            && paragraph.runs[end].style.passive_math.limit_id == Some(limit_id)
         {
             end += 1;
         }
         let limit_runs = &paragraph.runs[start..end];
         let base = limit_runs
             .iter()
-            .filter(|run| run.style.passive_math_limit_part == PassiveMathLimitPart::Base)
+            .filter(|run| run.style.passive_math.limit_part == PassiveMathLimitPart::Base)
             .cloned()
             .collect::<Vec<_>>();
         let script = limit_runs
             .iter()
             .filter(|run| {
                 matches!(
-                    run.style.passive_math_limit_part,
+                    run.style.passive_math.limit_part,
                     PassiveMathLimitPart::Lower | PassiveMathLimitPart::Upper
                 )
             })
@@ -820,13 +820,13 @@ pub(in crate::layout) fn stack_passive_math_limits(
             passive_math_model_runs_width(&script, &paragraph.style, document, font_provider);
         let stack_width = base_width.max(script_width).max(0.1);
         let mut marker_style = limit_runs[0].style.clone();
-        marker_style.passive_math_limit_part = PassiveMathLimitPart::None;
+        marker_style.passive_math.limit_part = PassiveMathLimitPart::None;
         marker_style.baseline_shift_half_points = 0;
         marker_style.font_size_scale_percent = 100;
         marker_style.character_spacing_twips = points_to_bounded_twips(stack_width);
         output.runs.push(Run {
-            dynamic_field: None,
-            text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
+            dynamic_field: Some(InlineKind::Math(MathInline::StackAnchor)),
+            text: String::new(),
             style: marker_style.clone(),
         });
 
@@ -858,7 +858,7 @@ pub(in crate::layout) fn stack_passive_math_fractions(
     if !paragraph
         .runs
         .iter()
-        .any(|run| run.style.passive_math_fraction_id.is_some())
+        .any(|run| run.style.passive_math.fraction_id.is_some())
     {
         return None;
     }
@@ -869,14 +869,14 @@ pub(in crate::layout) fn stack_passive_math_fractions(
     };
     let mut start = 0usize;
     while start < paragraph.runs.len() {
-        let Some(fraction_id) = paragraph.runs[start].style.passive_math_fraction_id else {
+        let Some(fraction_id) = paragraph.runs[start].style.passive_math.fraction_id else {
             output.runs.push(paragraph.runs[start].clone());
             start += 1;
             continue;
         };
         let mut end = start + 1;
         while end < paragraph.runs.len()
-            && paragraph.runs[end].style.passive_math_fraction_id == Some(fraction_id)
+            && paragraph.runs[end].style.passive_math.fraction_id == Some(fraction_id)
         {
             end += 1;
         }
@@ -884,14 +884,14 @@ pub(in crate::layout) fn stack_passive_math_fractions(
         let numerator = fraction_runs
             .iter()
             .filter(|run| {
-                run.style.passive_math_fraction_part == PassiveMathFractionPart::Numerator
+                run.style.passive_math.fraction_part == PassiveMathFractionPart::Numerator
             })
             .cloned()
             .collect::<Vec<_>>();
         let denominator = fraction_runs
             .iter()
             .filter(|run| {
-                run.style.passive_math_fraction_part == PassiveMathFractionPart::Denominator
+                run.style.passive_math.fraction_part == PassiveMathFractionPart::Denominator
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -907,21 +907,21 @@ pub(in crate::layout) fn stack_passive_math_fractions(
             passive_math_model_runs_width(&denominator, &paragraph.style, document, font_provider);
         let fraction_width = numerator_width.max(denominator_width).max(0.1);
         let mut marker_style = fraction_runs[0].style.clone();
-        marker_style.passive_math_fraction_part = PassiveMathFractionPart::None;
+        marker_style.passive_math.fraction_part = PassiveMathFractionPart::None;
         marker_style.baseline_shift_half_points = 0;
         marker_style.font_size_scale_percent = 100;
         let mut lead_style = marker_style.clone();
         lead_style.character_spacing_twips =
             points_to_bounded_twips(WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS);
         output.runs.push(Run {
-            dynamic_field: None,
-            text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
+            dynamic_field: Some(InlineKind::Math(MathInline::InlineLead)),
+            text: String::new(),
             style: lead_style,
         });
         marker_style.character_spacing_twips = points_to_bounded_twips(fraction_width);
         output.runs.push(Run {
-            dynamic_field: None,
-            text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
+            dynamic_field: Some(InlineKind::Math(MathInline::FractionRule)),
+            text: String::new(),
             style: marker_style.clone(),
         });
 
@@ -953,7 +953,7 @@ pub(in crate::layout) fn stack_passive_math_equation_arrays(
     if !paragraph
         .runs
         .iter()
-        .any(|run| run.style.passive_math_equation_array_id.is_some())
+        .any(|run| run.style.passive_math.equation_array_id.is_some())
     {
         return None;
     }
@@ -964,21 +964,21 @@ pub(in crate::layout) fn stack_passive_math_equation_arrays(
     };
     let mut start = 0usize;
     while start < paragraph.runs.len() {
-        let Some(array_id) = paragraph.runs[start].style.passive_math_equation_array_id else {
+        let Some(array_id) = paragraph.runs[start].style.passive_math.equation_array_id else {
             output.runs.push(paragraph.runs[start].clone());
             start += 1;
             continue;
         };
         let mut end = start + 1;
         while end < paragraph.runs.len()
-            && paragraph.runs[end].style.passive_math_equation_array_id == Some(array_id)
+            && paragraph.runs[end].style.passive_math.equation_array_id == Some(array_id)
         {
             end += 1;
         }
         let array_runs = &paragraph.runs[start..end];
         let row_count = array_runs
             .iter()
-            .map(|run| run.style.passive_math_equation_array_row)
+            .map(|run| run.style.passive_math.equation_array_row)
             .max()
             .unwrap_or(0)
             .saturating_add(1)
@@ -987,7 +987,8 @@ pub(in crate::layout) fn stack_passive_math_equation_arrays(
         for run in array_runs {
             let row_index = run
                 .style
-                .passive_math_equation_array_row
+                .passive_math
+                .equation_array_row
                 .min(row_count.saturating_sub(1));
             let mut row_run = run.clone();
             row_run.text.retain(|ch| ch != '\n' && ch != '\r');
@@ -1009,14 +1010,14 @@ pub(in crate::layout) fn stack_passive_math_equation_arrays(
             .collect::<Vec<_>>();
         let array_width = row_widths.iter().copied().fold(0.1_f32, f32::max);
         let mut marker_style = array_runs[0].style.clone();
-        marker_style.passive_math_equation_array_id = None;
-        marker_style.passive_math_equation_array_row = 0;
+        marker_style.passive_math.equation_array_id = None;
+        marker_style.passive_math.equation_array_row = 0;
         marker_style.baseline_shift_half_points = 0;
         marker_style.font_size_scale_percent = 100;
         marker_style.character_spacing_twips = points_to_bounded_twips(array_width);
         output.runs.push(Run {
-            dynamic_field: None,
-            text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
+            dynamic_field: Some(InlineKind::Math(MathInline::StackAnchor)),
+            text: String::new(),
             style: marker_style.clone(),
         });
 
@@ -1040,16 +1041,16 @@ pub(in crate::layout) fn stack_passive_math_equation_arrays(
                 as i32;
             for mut run in row {
                 if layout_advance(run.dynamic_field).is_none()
-                    && !is_passive_math_inline_lead_marker(&run.text)
-                    && !is_passive_math_stack_anchor_marker(&run.text)
+                    && !is_passive_math_inline_lead_marker(run.dynamic_field)
+                    && !is_passive_math_stack_anchor_marker(run.dynamic_field)
                 {
                     run.style.baseline_shift_half_points = run
                         .style
                         .baseline_shift_half_points
                         .saturating_add(row_shift_half_points);
                 }
-                run.style.passive_math_equation_array_id = None;
-                run.style.passive_math_equation_array_row = 0;
+                run.style.passive_math.equation_array_id = None;
+                run.style.passive_math.equation_array_row = 0;
                 output.runs.push(run);
             }
             cursor += row_width;
@@ -1316,7 +1317,7 @@ pub(in crate::layout) fn segment_can_auto_hyphenate(
     segment.tab_stop_position.is_none()
         && segment.text != "\t"
         && segment.text != "\n"
-        && !contains_inline_marker(&segment.text)
+        && !contains_inline_marker(segment.dynamic_field)
         && !segment.text.contains('\u{00ad}')
         && segment.text.chars().count() >= 10
         && segment.text.chars().all(|ch| ch.is_alphabetic())
@@ -1338,7 +1339,7 @@ pub(in crate::layout) fn apply_emergency_word_wrapping(
         if segment.tab_stop_position.is_some()
             || segment.text == "\t"
             || segment.text == "\n"
-            || contains_inline_marker(&segment.text)
+            || contains_inline_marker(segment.dynamic_field)
             || segment.text.chars().count() < 2
             || segment.text.chars().any(char::is_whitespace)
         {
@@ -1403,7 +1404,7 @@ pub(in crate::layout) fn apply_no_wrap_emergency_boundaries(
             || segment.tab_stop_position.is_some()
             || segment.text == "\t"
             || segment.text == "\n"
-            || contains_inline_marker(&segment.text)
+            || contains_inline_marker(segment.dynamic_field)
             || segment.text.chars().count() < 2
         {
             output.push(segment);
@@ -1459,10 +1460,10 @@ pub(in crate::layout) fn natural_line_height_for_runs(
             .filter(|run| {
                 inline_image_id(run.dynamic_field).is_none()
                     && layout_advance(run.dynamic_field).is_none()
-                    && !is_passive_math_inline_lead_marker(&run.text)
+                    && !is_passive_math_inline_lead_marker(run.dynamic_field)
             })
             .map(|run| {
-                if is_passive_math_fraction_rule_marker(&run.text) {
+                if is_passive_math_fraction_rule_marker(run.dynamic_field) {
                     run.style.font_size_points() * PASSIVE_MATH_FRACTION_LINE_HEIGHT_MULTIPLIER
                 } else {
                     (run.line_height_points * 1.15)
@@ -1595,7 +1596,7 @@ pub(in crate::layout) fn split_run_for_wrapping(
     // from drawing a separate border around every word. Oversized boxes still
     // pass through the bounded emergency-splitting path during wrapping.
     if run.style.border.visible
-        && !contains_inline_marker(text)
+        && !contains_inline_marker(run.dynamic_field)
         && !text.contains(['\t', '\n', '\r'])
     {
         push_display_text_segment(&mut output, text, &run.style, false);
@@ -1697,8 +1698,6 @@ pub(in crate::layout) fn marker_context(
     }
 }
 
-pub(in crate::layout) fn contains_inline_marker(text: &str) -> bool {
-    text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
-        || text.contains(PASSIVE_MATH_INLINE_LEAD_MARKER)
-        || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
+pub(in crate::layout) fn contains_inline_marker(kind: Option<InlineKind>) -> bool {
+    matches!(kind, Some(InlineKind::Math(_)))
 }

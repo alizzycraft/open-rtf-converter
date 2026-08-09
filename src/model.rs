@@ -8,10 +8,6 @@ pub(crate) use invariants::{
 
 use std::ops::{Deref, DerefMut};
 
-pub const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
-pub const PASSIVE_MATH_STACK_ANCHOR_MARKER: &str = "\u{f0012}";
-pub const PASSIVE_MATH_INLINE_LEAD_MARKER: &str = "\u{f0013}";
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum DynamicField {
     PageNumber,
@@ -46,6 +42,7 @@ typed_index!(FootnoteId);
 typed_index!(EndnoteId);
 typed_index!(InlineImageId);
 typed_index!(BookmarkId);
+typed_index!(MathGroupId);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct LayoutAdvance {
@@ -63,7 +60,15 @@ pub enum InlineKind {
     BookmarkPageAnchor(BookmarkId),
     BookmarkPageReference(BookmarkId),
     LayoutAdvance(LayoutAdvance),
+    Math(MathInline),
     NestedTableAnchor,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum MathInline {
+    FractionRule,
+    StackAnchor,
+    InlineLead,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1394,18 +1399,7 @@ pub struct CharacterStyle {
     pub right_to_left: bool,
     pub hidden: bool,
     pub form_field_shading: bool,
-    pub passive_math: bool,
-    pub passive_math_fraction_id: Option<usize>,
-    pub passive_math_fraction_part: PassiveMathFractionPart,
-    pub passive_math_fraction_has_bar: bool,
-    pub passive_math_limit_id: Option<usize>,
-    pub passive_math_limit_part: PassiveMathLimitPart,
-    pub passive_math_equation_array_id: Option<usize>,
-    pub passive_math_equation_array_row: usize,
-    /// Word-compatible atomic inline grouping for one visible n-ary expression.
-    pub passive_math_nary_id: Option<usize>,
-    pub passive_math_nary_base_id: Option<usize>,
-    pub passive_math_phantom_id: Option<usize>,
+    pub passive_math: PassiveMathRun,
     pub baseline_shift_half_points: i32,
     pub font_size_scale_percent: i32,
     pub character_spacing_twips: i32,
@@ -1439,17 +1433,7 @@ impl Default for CharacterStyle {
             right_to_left: false,
             hidden: false,
             form_field_shading: false,
-            passive_math: false,
-            passive_math_fraction_id: None,
-            passive_math_fraction_part: PassiveMathFractionPart::None,
-            passive_math_fraction_has_bar: false,
-            passive_math_limit_id: None,
-            passive_math_limit_part: PassiveMathLimitPart::None,
-            passive_math_equation_array_id: None,
-            passive_math_equation_array_row: 0,
-            passive_math_nary_id: None,
-            passive_math_nary_base_id: None,
-            passive_math_phantom_id: None,
+            passive_math: PassiveMathRun::default(),
             baseline_shift_half_points: 0,
             font_size_scale_percent: 100,
             character_spacing_twips: 0,
@@ -1470,6 +1454,22 @@ impl Default for CharacterStyle {
             },
         }
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub struct PassiveMathRun {
+    pub enabled: bool,
+    pub fraction_id: Option<MathGroupId>,
+    pub fraction_part: PassiveMathFractionPart,
+    pub fraction_has_bar: bool,
+    pub limit_id: Option<MathGroupId>,
+    pub limit_part: PassiveMathLimitPart,
+    pub equation_array_id: Option<MathGroupId>,
+    pub equation_array_row: usize,
+    /// Word-compatible atomic inline grouping for one visible n-ary expression.
+    pub nary_id: Option<MathGroupId>,
+    pub nary_base_id: Option<MathGroupId>,
+    pub phantom_id: Option<MathGroupId>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]

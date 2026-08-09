@@ -619,9 +619,7 @@ pub(in crate::layout) fn push_paragraph_stats(
 }
 
 pub(in crate::layout) fn remove_internal_stat_markers(text: &str) -> String {
-    text.replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "")
-        .replace(PASSIVE_MATH_INLINE_LEAD_MARKER, "")
-        .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "")
+    text.to_string()
 }
 
 pub(in crate::layout) fn format_page_number(value: usize, format: PageNumberFormat) -> String {

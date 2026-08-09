@@ -11,7 +11,7 @@ use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineJoin, LineStyle};
 use open_rtf_converter::model::{
     Alignment, Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DynamicField,
     EndnotePlacement, FontFamilyHint, FontPitch, ImageFormat, ImageToneAdjustment, InlineKind,
-    PageVerticalAlignment, ParagraphFrameVerticalAlignment, PassiveMathFractionPart,
+    MathInline, PageVerticalAlignment, ParagraphFrameVerticalAlignment, PassiveMathFractionPart,
     PassiveMathLimitPart, ShadingPattern, StaticImageTextHorizontalAlign,
     StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
     StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead,
@@ -37,6 +37,9 @@ const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
 const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
 const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
 const NESTED_TABLE_ANCHOR_MARKER: &str = "\u{f0010}";
+const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
+const PASSIVE_MATH_STACK_ANCHOR_MARKER: &str = "\u{f0012}";
+const PASSIVE_MATH_INLINE_LEAD_MARKER: &str = "\u{f0013}";
 const INLINE_IMAGE_MARKER_BASE: u32 = 0xF1000;
 
 fn inline_image_marker(index: usize) -> Option<char> {
@@ -2951,6 +2954,11 @@ fn append_paragraph_text(text: &mut String, paragraph: &open_rtf_converter::mode
                 id.get()
             )),
             Some(InlineKind::LayoutAdvance(_)) => text.push_str(PASSIVE_ADVANCE_MARKER),
+            Some(InlineKind::Math(kind)) => text.push_str(match kind {
+                MathInline::FractionRule => PASSIVE_MATH_FRACTION_RULE_MARKER,
+                MathInline::StackAnchor => PASSIVE_MATH_STACK_ANCHOR_MARKER,
+                MathInline::InlineLead => PASSIVE_MATH_INLINE_LEAD_MARKER,
+            }),
             Some(InlineKind::NestedTableAnchor) => text.push_str(NESTED_TABLE_ANCHOR_MARKER),
             None => text.push_str(&run.text),
         }
