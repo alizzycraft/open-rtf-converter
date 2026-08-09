@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -301,6 +302,203 @@ pub(crate) struct PreparedFontCatalog {
     fallback_assets: Vec<usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SelectionKey {
+    family: NormalizedFamilyName,
+    style: FontAssetStyle,
+    exact_only: bool,
+    ch: char,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct KerningKey {
+    family: NormalizedFamilyName,
+    style: FontAssetStyle,
+    exact_only: bool,
+    left: char,
+    right: char,
+    font_size_bits: u32,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct FontCacheLimits {
+    selection: usize,
+    glyph: usize,
+    #[allow(dead_code)]
+    kerning: usize,
+}
+
+impl FontCacheLimits {
+    fn for_provider(limits: &FontProviderLimits) -> Self {
+        Self {
+            selection: limits.max_assets.saturating_mul(32).min(4_096),
+            glyph: limits.max_assets.saturating_mul(256).min(32_768),
+            kerning: limits.max_assets.saturating_mul(512).min(65_536),
+        }
+    }
+}
+
+/// Bounded mutable font computations isolated to one conversion.
+pub(crate) struct FontSession<'a> {
+    catalog: &'a PreparedFontCatalog,
+    selection_cache: RefCell<HashMap<SelectionKey, Option<usize>>>,
+    glyph_cache: RefCell<HashMap<SelectionKey, Option<FontGlyphMetrics>>>,
+    #[allow(dead_code)]
+    kerning_cache: RefCell<HashMap<KerningKey, Option<f32>>>,
+    limits: FontCacheLimits,
+}
+
+impl<'a> FontSession<'a> {
+    pub(crate) fn new(catalog: &'a PreparedFontCatalog) -> Self {
+        Self {
+            catalog,
+            selection_cache: RefCell::new(HashMap::new()),
+            glyph_cache: RefCell::new(HashMap::new()),
+            kerning_cache: RefCell::new(HashMap::new()),
+            limits: FontCacheLimits::for_provider(&catalog.provider.limits),
+        }
+    }
+
+    pub(crate) fn provider(&self) -> &FontProvider {
+        self.catalog.provider()
+    }
+
+    pub(crate) fn has_asset_for_family(&self, family_name: &str) -> bool {
+        self.catalog.has_asset_for_family(family_name)
+    }
+
+    pub(crate) fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
+        if self
+            .glyph_metrics(family_name, FontAssetStyle::default(), false, ch)
+            .is_some()
+        {
+            FontCoverage::Covered
+        } else if self.has_asset_for_family(family_name) {
+            FontCoverage::MissingGlyph
+        } else {
+            FontCoverage::NoAsset
+        }
+    }
+
+    pub(crate) fn glyph_metrics(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        exact_only: bool,
+        ch: char,
+    ) -> Option<FontGlyphMetrics> {
+        let key = SelectionKey {
+            family: NormalizedFamilyName::new(family_name)?,
+            style,
+            exact_only,
+            ch,
+        };
+        if let Some(cached) = self.glyph_cache.borrow().get(&key).copied() {
+            return cached;
+        }
+        let value = if exact_only {
+            self.provider()
+                .exact_glyph_metrics_for_char_with_style(family_name, style, ch)
+        } else {
+            self.provider()
+                .glyph_metrics_for_char_with_style(family_name, style, ch)
+        };
+        self.cache_glyph(key.clone(), value);
+        if !self.selection_cache.borrow().contains_key(&key) {
+            let selected =
+                value.and_then(|_| self.selected_asset_index(family_name, style, exact_only, ch));
+            self.cache_selection(key, selected);
+        }
+        value
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn pair_kerning_points(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        exact_only: bool,
+        left: char,
+        right: char,
+        font_size_points: f32,
+    ) -> Option<f32> {
+        let key = KerningKey {
+            family: NormalizedFamilyName::new(family_name)?,
+            style,
+            exact_only,
+            left,
+            right,
+            font_size_bits: font_size_points.to_bits(),
+        };
+        if let Some(cached) = self.kerning_cache.borrow().get(&key).copied() {
+            return cached;
+        }
+        let value = if exact_only {
+            self.provider()
+                .exact_pair_kerning_points_for_chars_with_style(
+                    family_name,
+                    style,
+                    left,
+                    right,
+                    font_size_points,
+                )
+        } else {
+            self.provider().pair_kerning_points_for_chars_with_style(
+                family_name,
+                style,
+                left,
+                right,
+                font_size_points,
+            )
+        };
+        let mut cache = self.kerning_cache.borrow_mut();
+        if cache.len() < self.limits.kerning {
+            cache.insert(key, value);
+        }
+        value
+    }
+
+    fn selected_asset_index(
+        &self,
+        family_name: &str,
+        style: FontAssetStyle,
+        exact_only: bool,
+        ch: char,
+    ) -> Option<usize> {
+        self.provider()
+            .best_asset_value_for_family_style(family_name, style, exact_only, |asset| {
+                glyph_metrics_for_asset(asset, ch)
+            })
+            .and_then(|(selected, _)| {
+                self.provider()
+                    .assets
+                    .iter()
+                    .position(|asset| std::ptr::eq(asset, selected))
+            })
+    }
+
+    fn cache_glyph(&self, key: SelectionKey, value: Option<FontGlyphMetrics>) {
+        let mut cache = self.glyph_cache.borrow_mut();
+        if cache.len() < self.limits.glyph {
+            cache.insert(key, value);
+        }
+    }
+
+    fn cache_selection(&self, key: SelectionKey, value: Option<usize>) {
+        let mut cache = self.selection_cache.borrow_mut();
+        if cache.len() < self.limits.selection {
+            cache.insert(key, value);
+        }
+    }
+
+    #[cfg(test)]
+    fn with_limits(catalog: &'a PreparedFontCatalog, limits: FontCacheLimits) -> Self {
+        let mut session = Self::new(catalog);
+        session.limits = limits;
+        session
+    }
+}
+
 impl PreparedFontCatalog {
     pub(crate) fn prepare(provider: &FontProvider) -> Result<Self, FontProviderError> {
         provider.validate()?;
@@ -343,29 +541,12 @@ impl PreparedFontCatalog {
             || !self.fallback_assets.is_empty()
     }
 
-    pub(crate) fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
-        let mut found_asset = false;
-        for asset_index in self.candidate_asset_indexes(family_name) {
-            found_asset = true;
-            let asset = &self.provider.assets[asset_index];
-            if let Ok(face) = Face::parse(&asset.bytes, 0)
-                && face.glyph_index(ch).is_some()
-            {
-                return FontCoverage::Covered;
-            }
-        }
-        if found_asset {
-            FontCoverage::MissingGlyph
-        } else {
-            FontCoverage::NoAsset
-        }
-    }
-
     fn exact_asset_indexes(&self, family_name: &str) -> Option<&[usize]> {
         let normalized = NormalizedFamilyName::new(family_name)?;
         self.family_index.get(&normalized).map(Vec::as_slice)
     }
 
+    #[cfg(test)]
     fn candidate_asset_indexes<'a>(
         &'a self,
         family_name: &str,
@@ -612,7 +793,7 @@ fn validate_font_asset_input(
     Ok(())
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct FontAssetStyle {
     pub bold: bool,
     pub italic: bool,
@@ -928,7 +1109,48 @@ mod tests {
             vec![0]
         );
         assert!(!prepared.has_asset_for_family("  "));
-        assert_eq!(prepared.coverage_for_char("", 'A'), FontCoverage::NoAsset);
+        assert_eq!(
+            FontSession::new(&prepared).coverage_for_char("", 'A'),
+            FontCoverage::NoAsset
+        );
+    }
+
+    #[test]
+    fn font_session_stops_inserting_at_bounds_without_changing_results() {
+        let provider = tuffy_provider();
+        let catalog = PreparedFontCatalog::prepare(&provider).unwrap();
+        let session = FontSession::with_limits(
+            &catalog,
+            FontCacheLimits {
+                selection: 1,
+                glyph: 1,
+                kerning: 1,
+            },
+        );
+        let style = FontAssetStyle::default();
+
+        for ch in ['A', 'B'] {
+            assert_eq!(
+                session.glyph_metrics("Times New Roman", style, false, ch),
+                provider.glyph_metrics_for_char_with_style("Times New Roman", style, ch)
+            );
+        }
+        for (left, right) in [('A', 'V'), ('T', 'o')] {
+            assert_eq!(
+                session.pair_kerning_points("Times New Roman", style, false, left, right, 12.0,),
+                provider.pair_kerning_points_for_chars_with_style(
+                    "Times New Roman",
+                    style,
+                    left,
+                    right,
+                    12.0,
+                )
+            );
+        }
+
+        assert_eq!(session.selection_cache.borrow().len(), 1);
+        assert_eq!(session.glyph_cache.borrow().len(), 1);
+        assert_eq!(session.kerning_cache.borrow().len(), 1);
     }
 
     #[test]

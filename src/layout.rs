@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
-use crate::fonts::{FontAssetStyle, FontProvider, PreparedFontCatalog};
+use crate::fonts::{FontAssetStyle, FontProvider, FontSession};
 use crate::model::StaticImageWrapSide;
 use crate::model::{
     Alignment, Block, BookmarkId, BorderStyle, CharacterStyle, Document, DynamicField,
@@ -1011,11 +1011,11 @@ impl LayoutEngine {
         output
     }
 
-    pub(crate) fn layout_with_prepared_font_catalog(
+    pub(crate) fn layout_with_font_session(
         document: &Document,
-        font_catalog: &PreparedFontCatalog,
+        font_session: &FontSession<'_>,
     ) -> LayoutDocument {
-        Self::layout_with_font_provider(document, Some(font_catalog.provider()))
+        Self::layout_with_font_provider(document, Some(font_session.provider()))
     }
 
     fn layout_pass(
