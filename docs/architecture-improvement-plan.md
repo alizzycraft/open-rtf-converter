@@ -1142,7 +1142,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | DEC-01 | Split integration/unit test files into domain modules without changing assertions | BASE-02 | 2,425 source tests/2,428 harness tests preserved across 45 domain files; inventory guard, full native/security/reference/fuzz, Clippy, WASM, and unchanged sample hash passed on 2026-08-09 |
 | [x] | DEC-02 | Extract PDF audit module | BASE-03 | Renderer-independent standalone compile, 18 audit tests, public facade, 1,043 security tests, full regression/Clippy/WASM gates, and unchanged sample hash passed on 2026-08-09 |
 | [x] | DEC-03 | Extract parser JPEG, PNG, and DIB modules | BASE-03, DEC-01 | Three independently limit-tested media modules, 57 existing raster tests, full native/security/reference/fuzz/Clippy/WASM gates, and unchanged sample hash passed on 2026-08-09 |
-| [ ] | DEC-04 | Extract parser EMF and WMF modules | DEC-03 | Vector recovery/security fixtures remain stable |
+| [x] | DEC-04 | Extract parser EMF and WMF modules | DEC-03 | Explicit active-limit plumbing, 187 EMF/71 WMF tests, full native/security/reference/fuzz/Clippy/WASM gates, and unchanged sample hash passed on 2026-08-09 |
 | [ ] | DEC-05 | Extract parser formula, formatting, text, and shape helpers | DEC-03 | Field/formula/shape tests pass unchanged |
 | [ ] | DEC-06 | Extract layout notes, tables, wrapping, metrics, page, and late-field modules | DEC-01 | Layout/reference fixtures remain stable |
 | [ ] | DEC-07 | Extract PDF images, fonts, vector, text, and writer modules | DEC-02 | Emitted PDFs remain byte-identical |

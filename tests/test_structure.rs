@@ -25,7 +25,7 @@ fn decomposed_targets_preserve_the_recorded_test_inventory() {
     assert_eq!(module_test_count("tests/conversion"), 44);
     assert_eq!(module_test_count("tests/reference"), 4);
     assert_eq!(module_test_count("src/rtf/parser_tests"), 845);
-    assert_eq!(module_test_count("src/rtf/parser/media"), 3);
+    assert_eq!(module_test_count("src/rtf/parser/media"), 5);
     assert_eq!(module_test_count("src/layout_tests"), 319);
     assert_eq!(module_test_count("src/pdf_tests"), 78);
     assert_eq!(
