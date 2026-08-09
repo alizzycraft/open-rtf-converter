@@ -233,54 +233,17 @@ fn bundled_fonts_cover_greek_text_without_control_leakage() {
 }
 
 #[test]
-fn invalid_caller_font_assets_are_rejected_before_pdf_rendering() {
-    let input = rtf(&[
-        "{",
-        "\\",
-        "rtf1",
-        "\\",
-        "ansi{",
-        "\\",
-        "fonttbl{",
-        "\\",
-        "f38",
-        "\\",
-        "fcharset204 Times New Roman Cyr;}}",
-        "\\",
-        "f38 ",
-        "\\",
-        "'cf",
-        "\\",
-        "'f0",
-        "\\",
-        "'e8",
-        "\\",
-        "'e2",
-        "\\",
-        "'e5",
-        "\\",
-        "'f2",
-        "\\",
-        "par}",
-    ]);
+fn invalid_caller_font_assets_are_rejected_during_construction() {
     let font_bytes = b"not-a-real-font-but-hostile-private-data".to_vec();
-    let mut options = ConvertOptions::browser_safe_defaults();
-    options.diagnostics = true;
-    options.font_provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Times New Roman Cyr".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: font_bytes.clone(),
-        }],
-        ..FontProvider::browser_safe_defaults()
-    };
-
-    let error = convert_rtf_to_pdf(&input, &options).unwrap_err();
+    let error = FontAsset::from_bytes(
+        vec!["Times New Roman Cyr".to_string()],
+        FontAssetStyle::default(),
+        font_bytes,
+    )
+    .unwrap_err();
     assert!(matches!(
         error,
-        open_rtf_converter::ConvertError::FontProvider(
-            open_rtf_converter::FontProviderError::InvalidAsset { .. }
-        )
+        open_rtf_converter::FontProviderError::InvalidAsset { .. }
     ));
 }
 

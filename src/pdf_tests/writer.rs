@@ -219,13 +219,13 @@
 
         assert!(
             best_asset(&roman)
-                .family_names
+                .family_names()
                 .iter()
                 .any(|name| name == "Times New Roman")
         );
         assert!(
             best_asset(&modern)
-                .family_names
+                .family_names()
                 .iter()
                 .any(|name| name == "Calibri")
         );

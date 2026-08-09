@@ -46,7 +46,7 @@
             assets: vec![FontAsset {
                 family_names: vec!["Tuffy".to_string()],
                 style: FontAssetStyle::default(),
-                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec().into(),
             }],
             limits: Default::default(),
         };

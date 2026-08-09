@@ -1,15 +1,71 @@
 use super::*;
 
+fn tuffy_asset(family_names: Vec<String>, style: FontAssetStyle) -> FontAsset {
+    FontAsset::from_bytes(
+        family_names,
+        style,
+        include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn font_asset_constructors_validate_inputs_and_expose_read_only_data() {
+    let style = FontAssetStyle {
+        bold: true,
+        italic: false,
+    };
+    let shared: std::sync::Arc<[u8]> =
+        std::sync::Arc::from(include_bytes!("../../fixtures/fonts/Tuffy.ttf").as_slice());
+    let asset = FontAsset::from_shared_bytes(
+        vec!["Tuffy".to_string(), "Tuffy Alias".to_string()],
+        style,
+        shared.clone(),
+    )
+    .unwrap();
+
+    assert_eq!(asset.family_names(), ["Tuffy", "Tuffy Alias"]);
+    assert_eq!(asset.style(), style);
+    assert_eq!(asset.bytes().as_ptr(), shared.as_ptr());
+    assert!(matches!(
+        FontAsset::from_bytes(Vec::new(), style, vec![1]),
+        Err(open_rtf_converter::FontProviderError::MissingFamilyName { .. })
+    ));
+    assert!(matches!(
+        FontAsset::from_bytes(vec!["Tuffy".to_string()], style, Vec::new()),
+        Err(open_rtf_converter::FontProviderError::EmptyAsset { .. })
+    ));
+    assert!(matches!(
+        FontAsset::from_bytes(vec!["Tuffy".to_string()], style, vec![1, 2, 3]),
+        Err(open_rtf_converter::FontProviderError::InvalidAsset { .. })
+    ));
+}
+
+#[test]
+fn cloning_browser_defaults_shares_every_bundled_font_allocation() {
+    let options = ConvertOptions::browser_safe_defaults();
+    let clone = options.clone();
+    let provider = &options.font_provider;
+    let cloned_provider = &clone.font_provider;
+
+    assert_eq!(provider.assets.len(), cloned_provider.assets.len());
+    for (original, cloned) in provider.assets.iter().zip(&cloned_provider.assets) {
+        assert_eq!(original.bytes().as_ptr(), cloned.bytes().as_ptr());
+        assert_eq!(original.bytes().len(), cloned.bytes().len());
+    }
+}
+
 #[test]
 fn conversion_validates_fonts_before_lexing_input() {
     let mut options = ConvertOptions::default();
-    options.font_provider.assets[0].bytes.clear();
+    options.font_provider.limits.max_asset_bytes = 1;
 
     let error = convert_rtf_to_pdf(b"}", &options).unwrap_err();
     assert!(matches!(
         error,
-        ConvertError::FontProvider(open_rtf_converter::FontProviderError::EmptyAsset {
-            asset_index: 0
+        ConvertError::FontProvider(open_rtf_converter::FontProviderError::AssetTooLarge {
+            asset_index: 0,
+            ..
         })
     ));
 }
@@ -43,11 +99,10 @@ fn conversion_rejects_font_assets_over_configured_limits() {
         input,
         &ConvertOptions {
             font_provider: FontProvider {
-                assets: vec![FontAsset {
-                    family_names: vec!["Bounded Font".to_string()],
-                    style: FontAssetStyle::default(),
-                    bytes: vec![0; 4],
-                }],
+                assets: vec![tuffy_asset(
+                    vec!["Bounded Font".to_string()],
+                    FontAssetStyle::default(),
+                )],
                 limits: FontProviderLimits {
                     max_asset_bytes: 3,
                     ..FontProviderLimits::default()
@@ -61,7 +116,6 @@ fn conversion_rejects_font_assets_over_configured_limits() {
     assert!(matches!(
         error,
         ConvertError::FontProvider(open_rtf_converter::FontProviderError::AssetTooLarge {
-            size: 4,
             limit: 3,
             ..
         })
@@ -71,11 +125,10 @@ fn conversion_rejects_font_assets_over_configured_limits() {
 #[test]
 fn valid_memory_font_assets_report_coverage_and_metrics_without_system_fonts() {
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -114,11 +167,10 @@ fn valid_memory_font_assets_report_coverage_and_metrics_without_system_fonts() {
 fn caller_provided_font_asset_embeds_passive_type0_font_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuffy;}}\f0 AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -175,19 +227,14 @@ fn caller_provided_font_assets_prefer_matching_run_style() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuffy;}}\f0 Regular {\b Bold}\par}";
     let provider = FontProvider {
         assets: vec![
-            FontAsset {
-                family_names: vec!["Tuffy".to_string()],
-                style: FontAssetStyle::default(),
-                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-            },
-            FontAsset {
-                family_names: vec!["Tuffy".to_string()],
-                style: FontAssetStyle {
+            tuffy_asset(vec!["Tuffy".to_string()], FontAssetStyle::default()),
+            tuffy_asset(
+                vec!["Tuffy".to_string()],
+                FontAssetStyle {
                     bold: true,
                     italic: false,
                 },
-                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-            },
+            ),
         ],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
@@ -260,11 +307,10 @@ fn caller_provided_font_assets_prefer_matching_run_style() {
 fn caller_base_font_asset_matches_word_charset_suffixed_font_names() {
     let input = br"{\rtf1\ansi{\fonttbl{\f38\fcharset204 Times New Roman Cyr;}}\f38 Alias AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Times New Roman".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Times New Roman".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -467,15 +513,14 @@ fn unused_header_footer_variants_do_not_emit_hidden_font_or_glyph_diagnostics() 
 fn caller_font_asset_aliases_embed_passive_font_for_multiple_word_names() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Arial Narrow;}{\f1 Book Antiqua;}}\f0 Narrow AB\par\f1 Serif CD\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec![
+        assets: vec![tuffy_asset(
+            vec![
                 "Arial Narrow".to_string(),
                 "Book Antiqua".to_string(),
                 "Times New Roman".to_string(),
             ],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -548,11 +593,10 @@ fn caller_font_asset_aliases_embed_passive_font_for_multiple_word_names() {
 fn caller_wildcard_font_asset_embeds_unmatched_word_font_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f7\froman Unknown Word Serif;}}\f7 Wildcard AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["*".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["*".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -969,11 +1013,10 @@ fn browser_safe_defaults_embed_bundled_metric_fonts_for_office_theme_families() 
 fn caller_font_asset_matches_rtf_alternate_font_name_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;};}}\f0 Alternate AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -1228,11 +1271,10 @@ fn caller_font_asset_matches_terminated_rtf_alternate_font_name_without_system_f
     let input =
         br"{\rtf1\ansi{\fonttbl{\f0 Mystery Sans{\*\falt Tuffy;Ignored Asset;};}}\f0 Alternate terminated AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -1302,11 +1344,10 @@ fn caller_font_asset_matches_terminated_rtf_alternate_font_name_without_system_f
 fn caller_font_asset_matches_unicode_rtf_font_name_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuff\u121?;}}\f0 Unicode font AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -1374,11 +1415,10 @@ fn caller_font_asset_matches_unicode_rtf_font_name_without_system_fonts() {
 fn caller_font_asset_matches_unicode_terminated_rtf_font_name_without_system_fonts() {
     let input = br"{\rtf1\ansi{\fonttbl{\f0 Tuff\u121?\u59?}}\f0 Unicode terminated font AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -1448,11 +1488,10 @@ fn caller_font_asset_matches_primary_font_name_before_trailing_metadata_without_
     let input =
         br"{\rtf1\ansi{\fonttbl{\f0 Tuffy;Ignored Asset;}}\f0 Primary terminated font AB\par}";
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,
@@ -1519,11 +1558,10 @@ fn caller_font_asset_matches_primary_font_name_before_trailing_metadata_without_
 fn caller_font_asset_embeds_for_z_ordered_shape_text_without_system_fonts() {
     let input = br#"{\rtf1\ansi{\fonttbl{\f0 Tuffy;}}{\shp{\*\shpinst\shpleft720\shptop720\shpright4320\shpbottom1800\shpz12{\sp{\sn shapeType}{\sv 1}}{\sp{\sn pFragments}{\sv hidden-font-payload}}}{\shptxt\f0 Layered AB\par}}}"#;
     let provider = FontProvider {
-        assets: vec![FontAsset {
-            family_names: vec!["Tuffy".to_string()],
-            style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
-        }],
+        assets: vec![tuffy_asset(
+            vec!["Tuffy".to_string()],
+            FontAssetStyle::default(),
+        )],
         limits: FontProviderLimits {
             max_asset_bytes: 256 * 1024,
             max_total_bytes: 256 * 1024,

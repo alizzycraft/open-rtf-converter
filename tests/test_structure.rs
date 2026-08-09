@@ -32,7 +32,7 @@ fn production_source(relative_path: &str) -> String {
 #[test]
 fn decomposed_targets_preserve_the_recorded_test_inventory() {
     assert_eq!(module_test_count("tests/security"), 1_044);
-    assert_eq!(module_test_count("tests/conversion"), 44);
+    assert_eq!(module_test_count("tests/conversion"), 46);
     assert_eq!(module_test_count("tests/reference"), 4);
     assert_eq!(module_test_count("src/rtf/parser_tests"), 845);
     assert_eq!(module_test_count("src/rtf/parser/media"), 5);

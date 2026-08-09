@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
 use ttf_parser::Face;
 
@@ -49,11 +50,11 @@ impl FontProvider {
 
     pub fn browser_safe_with_bundled_fallback() -> Self {
         Self {
-            assets: vec![FontAsset {
-                family_names: vec!["*".to_string(), "Tuffy".to_string()],
-                style: FontAssetStyle::default(),
-                bytes: BUNDLED_BROWSER_SAFE_FALLBACK_FONT.to_vec(),
-            }],
+            assets: vec![FontAsset::from_bundled_bytes(
+                vec!["*".to_string(), "Tuffy".to_string()],
+                FontAssetStyle::default(),
+                BUNDLED_BROWSER_SAFE_FALLBACK_FONT,
+            )],
             limits: FontProviderLimits::browser_defaults(),
         }
     }
@@ -308,52 +309,48 @@ fn bundled_browser_safe_metric_assets() -> Vec<FontAsset> {
         BUNDLED_BROWSER_SAFE_MONO_ITALIC_FONT,
         BUNDLED_BROWSER_SAFE_MONO_BOLD_ITALIC_FONT,
     );
-    assets.push(FontAsset {
-        family_names: bundled_browser_safe_symbol_aliases(),
-        style: FontAssetStyle::default(),
-        bytes: BUNDLED_BROWSER_SAFE_FALLBACK_FONT.to_vec(),
-    });
+    assets.push(FontAsset::from_bundled_bytes(
+        bundled_browser_safe_symbol_aliases(),
+        FontAssetStyle::default(),
+        BUNDLED_BROWSER_SAFE_FALLBACK_FONT,
+    ));
     assets
 }
 
 fn push_bundled_browser_safe_style_set(
     assets: &mut Vec<FontAsset>,
     aliases: Vec<String>,
-    regular: &[u8],
-    bold: &[u8],
-    italic: &[u8],
-    bold_italic: &[u8],
+    regular: &'static [u8],
+    bold: &'static [u8],
+    italic: &'static [u8],
+    bold_italic: &'static [u8],
 ) {
     assets.extend([
-        FontAsset {
-            family_names: aliases.clone(),
-            style: FontAssetStyle::default(),
-            bytes: regular.to_vec(),
-        },
-        FontAsset {
-            family_names: aliases.clone(),
-            style: FontAssetStyle {
+        FontAsset::from_bundled_bytes(aliases.clone(), FontAssetStyle::default(), regular),
+        FontAsset::from_bundled_bytes(
+            aliases.clone(),
+            FontAssetStyle {
                 bold: true,
                 italic: false,
             },
-            bytes: bold.to_vec(),
-        },
-        FontAsset {
-            family_names: aliases.clone(),
-            style: FontAssetStyle {
+            bold,
+        ),
+        FontAsset::from_bundled_bytes(
+            aliases.clone(),
+            FontAssetStyle {
                 bold: false,
                 italic: true,
             },
-            bytes: italic.to_vec(),
-        },
-        FontAsset {
-            family_names: aliases,
-            style: FontAssetStyle {
+            italic,
+        ),
+        FontAsset::from_bundled_bytes(
+            aliases,
+            FontAssetStyle {
                 bold: true,
                 italic: true,
             },
-            bytes: bold_italic.to_vec(),
-        },
+            bold_italic,
+        ),
     ]);
 }
 
@@ -416,13 +413,64 @@ fn bundled_browser_safe_symbol_aliases() -> Vec<String> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// A validated in-memory font face and the family aliases it can satisfy.
 pub struct FontAsset {
-    pub family_names: Vec<String>,
-    pub style: FontAssetStyle,
-    pub bytes: Vec<u8>,
+    pub(crate) family_names: Vec<String>,
+    pub(crate) style: FontAssetStyle,
+    pub(crate) bytes: Arc<[u8]>,
 }
 
 impl FontAsset {
+    /// Validates and adopts an owned OpenType or TrueType font buffer.
+    pub fn from_bytes(
+        family_names: Vec<String>,
+        style: FontAssetStyle,
+        bytes: Vec<u8>,
+    ) -> Result<Self, FontProviderError> {
+        Self::from_shared_bytes(family_names, style, bytes.into())
+    }
+
+    /// Validates a font buffer that may be shared across providers or conversions.
+    pub fn from_shared_bytes(
+        family_names: Vec<String>,
+        style: FontAssetStyle,
+        bytes: Arc<[u8]>,
+    ) -> Result<Self, FontProviderError> {
+        validate_font_asset_input(&family_names, &bytes)?;
+        Ok(Self {
+            family_names,
+            style,
+            bytes,
+        })
+    }
+
+    /// Returns the configured family names in stable matching order.
+    pub fn family_names(&self) -> &[String] {
+        &self.family_names
+    }
+
+    /// Returns the face style advertised by this asset.
+    pub fn style(&self) -> FontAssetStyle {
+        self.style
+    }
+
+    /// Returns the validated font program bytes.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn from_bundled_bytes(
+        family_names: Vec<String>,
+        style: FontAssetStyle,
+        bytes: &'static [u8],
+    ) -> Self {
+        Self {
+            family_names,
+            style,
+            bytes: Arc::from(bytes),
+        }
+    }
+
     pub(crate) fn matches_family(&self, family_name: &str) -> bool {
         let family_name = family_name.trim();
         !family_name.is_empty()
@@ -448,6 +496,23 @@ impl FontAsset {
         }
         wildcard.then_some(1)
     }
+}
+
+fn validate_font_asset_input(
+    family_names: &[String],
+    bytes: &[u8],
+) -> Result<(), FontProviderError> {
+    if family_names.is_empty() || family_names.iter().any(|family| family.trim().is_empty()) {
+        return Err(FontProviderError::MissingFamilyName { asset_index: 0 });
+    }
+    if bytes.is_empty() {
+        return Err(FontProviderError::EmptyAsset { asset_index: 0 });
+    }
+    Face::parse(bytes, 0).map_err(|error| FontProviderError::InvalidAsset {
+        asset_index: 0,
+        reason: error.to_string(),
+    })?;
+    Ok(())
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -716,7 +781,9 @@ mod tests {
             assets: vec![FontAsset {
                 family_names: vec!["Times New Roman".to_string()],
                 style: FontAssetStyle::default(),
-                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf")
+                    .to_vec()
+                    .into(),
             }],
             limits: FontProviderLimits {
                 max_asset_bytes: 256 * 1024,
@@ -774,7 +841,9 @@ mod tests {
             assets: vec![FontAsset {
                 family_names: vec!["*".to_string()],
                 style: FontAssetStyle::default(),
-                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+                bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf")
+                    .to_vec()
+                    .into(),
             }],
             limits: FontProviderLimits {
                 max_asset_bytes: 256 * 1024,
@@ -802,12 +871,16 @@ mod tests {
         let wildcard = FontAsset {
             family_names: vec!["*".to_string()],
             style: FontAssetStyle::default(),
-            bytes: include_bytes!("../fixtures/fonts/LiberationSans-Regular.ttf").to_vec(),
+            bytes: include_bytes!("../fixtures/fonts/LiberationSans-Regular.ttf")
+                .to_vec()
+                .into(),
         };
         let exact = FontAsset {
             family_names: vec!["Times New Roman".to_string()],
             style: FontAssetStyle::default(),
-            bytes: include_bytes!("../fixtures/fonts/Tinos-Regular.ttf").to_vec(),
+            bytes: include_bytes!("../fixtures/fonts/Tinos-Regular.ttf")
+                .to_vec()
+                .into(),
         };
         let provider = FontProvider {
             assets: vec![wildcard, exact],
@@ -927,7 +1000,9 @@ mod tests {
         let regular = FontAsset {
             family_names: vec!["Tuffy".to_string()],
             style: FontAssetStyle::default(),
-            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf")
+                .to_vec()
+                .into(),
         };
         let bold = FontAsset {
             family_names: vec!["Tuffy".to_string()],
@@ -935,7 +1010,9 @@ mod tests {
                 bold: true,
                 italic: false,
             },
-            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf")
+                .to_vec()
+                .into(),
         };
         let bold_italic = FontAsset {
             family_names: vec!["Tuffy".to_string()],
@@ -943,7 +1020,9 @@ mod tests {
                 bold: true,
                 italic: true,
             },
-            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf")
+                .to_vec()
+                .into(),
         };
         let provider = FontProvider {
             assets: vec![regular, bold, bold_italic],
@@ -987,7 +1066,9 @@ mod tests {
         let regular = FontAsset {
             family_names: vec!["Tuffy".to_string()],
             style: FontAssetStyle::default(),
-            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf")
+                .to_vec()
+                .into(),
         };
         let bold = FontAsset {
             family_names: vec!["Tuffy".to_string()],
@@ -995,7 +1076,9 @@ mod tests {
                 bold: true,
                 italic: false,
             },
-            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+            bytes: include_bytes!("../fixtures/fonts/Tuffy.ttf")
+                .to_vec()
+                .into(),
         };
         let provider = FontProvider {
             assets: vec![regular, bold],

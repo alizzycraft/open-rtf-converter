@@ -36,7 +36,7 @@
                 FontAsset {
                     family_names: vec!["Tuffy".to_string()],
                     style: FontAssetStyle::default(),
-                    bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+                    bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec().into(),
                 },
                 FontAsset {
                     family_names: vec!["Tuffy".to_string()],
@@ -44,7 +44,7 @@
                         bold: true,
                         italic: false,
                     },
-                    bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+                    bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec().into(),
                 },
             ],
             limits: Default::default(),
@@ -108,7 +108,7 @@
             assets: vec![FontAsset {
                 family_names: vec!["Tuffy".to_string()],
                 style: FontAssetStyle::default(),
-                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec().into(),
             }],
             limits: Default::default(),
         };
@@ -156,7 +156,7 @@
         let asset = FontAsset {
             family_names: vec!["Tuffy".to_string()],
             style: FontAssetStyle::default(),
-            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+            bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec().into(),
         };
 
         assert_eq!(
@@ -651,7 +651,7 @@
             assets: vec![FontAsset {
                 family_names: vec!["Symbol".to_string()],
                 style: FontAssetStyle::default(),
-                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec().into(),
             }],
             limits: Default::default(),
         };
@@ -715,7 +715,7 @@
             assets: vec![FontAsset {
                 family_names: vec!["ZapfDingbats".to_string()],
                 style: FontAssetStyle::default(),
-                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec(),
+                bytes: include_bytes!("../../fixtures/fonts/Tuffy.ttf").to_vec().into(),
             }],
             limits: Default::default(),
         };

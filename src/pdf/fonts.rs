@@ -75,7 +75,7 @@ pub(in crate::pdf) fn write_supplied_pdf_fonts(
         let Some(asset) = font_provider.assets.get(supplied.asset_index) else {
             continue;
         };
-        let Ok(face) = Face::parse(&asset.bytes, 0) else {
+        let Ok(face) = Face::parse(asset.bytes(), 0) else {
             continue;
         };
         let system_info = supplied_cid_system_info();
@@ -109,10 +109,10 @@ pub(in crate::pdf) fn write_supplied_pdf_fonts(
         let scale = |value: i16| f32::from(value) * 1000.0 / units_per_em;
         let bbox = face.global_bounding_box();
         let mut flags = FontFlags::NON_SYMBOLIC;
-        if asset.style.italic {
+        if asset.style().italic {
             flags |= FontFlags::ITALIC;
         }
-        if asset.style.bold {
+        if asset.style().bold {
             flags |= FontFlags::FORCE_BOLD;
         }
         pdf.font_descriptor(supplied.descriptor_ref)
@@ -124,18 +124,18 @@ pub(in crate::pdf) fn write_supplied_pdf_fonts(
                 scale(bbox.x_max),
                 scale(bbox.y_max),
             ))
-            .italic_angle(if asset.style.italic { -12.0 } else { 0.0 })
+            .italic_angle(if asset.style().italic { -12.0 } else { 0.0 })
             .ascent(scale(face.ascender()))
             .descent(scale(face.descender()))
             .cap_height(scale(face.ascender()))
-            .stem_v(if asset.style.bold { 120.0 } else { 80.0 })
+            .stem_v(if asset.style().bold { 120.0 } else { 80.0 })
             .font_file2(supplied.font_file_ref);
 
         {
-            let compressed_font = compress_to_vec_zlib(&asset.bytes, 6);
+            let compressed_font = compress_to_vec_zlib(asset.bytes(), 6);
             let mut font_file = pdf.stream(supplied.font_file_ref, &compressed_font);
             font_file.filter(Filter::FlateDecode);
-            font_file.pair(Name(b"Length1"), asset.bytes.len() as i32);
+            font_file.pair(Name(b"Length1"), asset.bytes().len() as i32);
         }
 
         pdf.stream(

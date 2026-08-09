@@ -538,7 +538,7 @@ mod tests {
     #[test]
     fn option_validation_composes_font_errors() {
         let mut options = ConvertOptions::default();
-        options.font_provider.assets[0].bytes.clear();
+        options.font_provider.assets[0].bytes = Default::default();
 
         assert_eq!(
             options.validate(),

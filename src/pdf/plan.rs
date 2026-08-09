@@ -377,7 +377,7 @@ pub(in crate::pdf) fn supplied_text_encoding_parts_for_text(
         let Some(family_priority) = supplied_font_asset_match_priority(asset, source_font) else {
             continue;
         };
-        let style_score = supplied_font_style_mismatch_score(asset.style, &fragment.style);
+        let style_score = supplied_font_style_mismatch_score(asset.style(), &fragment.style);
         let key = (family_priority, style_score, asset_index);
         if key >= best_key {
             continue;
@@ -442,7 +442,7 @@ pub(in crate::pdf) fn supplied_pdf_font_fallback_base_name(font_index: usize) ->
 }
 
 pub(in crate::pdf) fn supplied_pdf_font_postscript_name(asset: &FontAsset) -> Option<String> {
-    let face = Face::parse(&asset.bytes, 0).ok()?;
+    let face = Face::parse(asset.bytes(), 0).ok()?;
     for name in face.names() {
         if name.name_id != name_id::POST_SCRIPT_NAME {
             continue;
@@ -499,7 +499,7 @@ pub(in crate::pdf) fn encode_text_with_font_asset(
     text: &str,
     asset: &FontAsset,
 ) -> Option<(Vec<SuppliedGlyph>, Vec<u8>)> {
-    let face = Face::parse(&asset.bytes, 0).ok()?;
+    let face = Face::parse(asset.bytes(), 0).ok()?;
     let units_per_em = f32::from(face.units_per_em()).max(1.0);
     let mut glyphs = Vec::new();
     let mut encoded = Vec::new();

@@ -52,7 +52,7 @@ use open_rtf_converter::rtf::{
 };
 use open_rtf_converter::{
     ActiveContentPolicy, CompatibilityMode, ConvertOptions, Diagnostic, FontAsset, FontAssetStyle,
-    FontProvider, PdfLinkPolicy, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
+    PdfLinkPolicy, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
 };
 #[cfg(not(feature = "cli"))]
 use open_rtf_converter::{ConvertError, ConvertReport};

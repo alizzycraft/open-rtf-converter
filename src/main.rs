@@ -344,7 +344,7 @@ fn load_cli_font_provider(
     }
     let mut total_bytes = provider.assets.iter().try_fold(0usize, |total, asset| {
         total
-            .checked_add(asset.bytes.len())
+            .checked_add(asset.bytes().len())
             .ok_or(CliFontError::Provider(
                 FontProviderError::TotalBytesTooLarge {
                     size: usize::MAX,
@@ -356,11 +356,9 @@ fn load_cli_font_provider(
         let (families, style, path) = parse_font_spec(spec)?;
         let bytes = read_bounded_font_file(path, provider.limits.max_asset_bytes)?;
         total_bytes = checked_add_font_asset_bytes(total_bytes, bytes.len(), &provider)?;
-        provider.assets.push(FontAsset {
-            family_names: families,
-            style,
-            bytes,
-        });
+        provider
+            .assets
+            .push(FontAsset::from_bytes(families, style, bytes).map_err(CliFontError::Provider)?);
     }
     for font_dir in font_dirs {
         total_bytes = load_cli_font_dir(
@@ -388,7 +386,7 @@ fn append_bundled_cli_fallback_assets(provider: &mut FontProvider, total_bytes: 
         if provider.assets.len() >= provider.limits.max_assets {
             break;
         }
-        let Some(next_total) = total_bytes.checked_add(asset.bytes.len()) else {
+        let Some(next_total) = total_bytes.checked_add(asset.bytes().len()) else {
             break;
         };
         if next_total > provider.limits.max_total_bytes {
@@ -673,11 +671,9 @@ fn load_cli_font_file_from_dir(
         }));
     }
     total_bytes = checked_add_font_asset_bytes(total_bytes, bytes.len(), provider)?;
-    provider.assets.push(FontAsset {
-        family_names,
-        style,
-        bytes,
-    });
+    provider
+        .assets
+        .push(FontAsset::from_bytes(family_names, style, bytes).map_err(CliFontError::Provider)?);
     Ok(total_bytes)
 }
 
@@ -1241,19 +1237,19 @@ mod tests {
 
         assert_eq!(provider.assets.len(), 3);
         assert_eq!(
-            provider.assets[0].family_names,
+            provider.assets[0].family_names(),
             vec!["Tuffy", "Tuffy Alias"]
         );
-        assert_eq!(provider.assets[0].style, FontAssetStyle::default());
+        assert_eq!(provider.assets[0].style(), FontAssetStyle::default());
         assert_eq!(
-            provider.assets[1].style,
+            provider.assets[1].style(),
             FontAssetStyle {
                 bold: true,
                 italic: false
             }
         );
         assert_eq!(
-            provider.assets[2].style,
+            provider.assets[2].style(),
             FontAssetStyle {
                 bold: false,
                 italic: true
@@ -1301,11 +1297,11 @@ mod tests {
         assert_eq!(provider.assets.len(), 1);
         assert!(
             provider.assets[0]
-                .family_names
+                .family_names()
                 .iter()
                 .any(|name| name == "Tuffy"),
             "metadata family names were {:?}",
-            provider.assets[0].family_names
+            provider.assets[0].family_names()
         );
         assert_eq!(
             provider.coverage_for_char("Tuffy", 'A'),
@@ -1375,7 +1371,7 @@ mod tests {
             provider
                 .assets
                 .iter()
-                .all(|asset| { !asset.family_names.iter().any(|family| family == "Tuffy") }),
+                .all(|asset| { !asset.family_names().iter().any(|family| family == "Tuffy") }),
             "unrequested directory font should not be loaded"
         );
         assert_eq!(
