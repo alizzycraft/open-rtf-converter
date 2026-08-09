@@ -75,6 +75,33 @@ pub struct ConversionOutput {
     pub pages: usize,
 }
 
+/// Reusable validated conversion configuration.
+#[derive(Debug)]
+pub struct Converter {
+    options: ConvertOptions,
+    font_catalog: PreparedFontCatalog,
+}
+
+impl Converter {
+    /// Validates configuration and prepares its font catalog once.
+    pub fn new(options: ConvertOptions) -> Result<Self, ConvertError> {
+        options
+            .parse_options
+            .validate()
+            .map_err(ParseError::InvalidLimits)?;
+        let font_catalog = PreparedFontCatalog::prepare(&options.font_provider)?;
+        Ok(Self {
+            options,
+            font_catalog,
+        })
+    }
+
+    /// Converts one RTF input with isolated per-call mutable font state.
+    pub fn convert(&self, input: &[u8]) -> Result<ConversionOutput, ConvertError> {
+        convert_rtf_with_prepared_fonts(input, &self.options, &self.font_catalog)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ConvertError {
     #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
@@ -119,7 +146,15 @@ pub fn convert_rtf_to_pdf(
         .validate()
         .map_err(ParseError::InvalidLimits)?;
     let font_catalog = PreparedFontCatalog::prepare(&options.font_provider)?;
-    let font_session = FontSession::new(&font_catalog);
+    convert_rtf_with_prepared_fonts(input, options, &font_catalog)
+}
+
+fn convert_rtf_with_prepared_fonts(
+    input: &[u8],
+    options: &ConvertOptions,
+    font_catalog: &PreparedFontCatalog,
+) -> Result<ConversionOutput, ConvertError> {
+    let font_session = FontSession::new(font_catalog);
     let parsed = parse_rtf_bytes_with_options(input, &options.parse_options)?;
     let mut diagnostics = if options.diagnostics {
         parsed.diagnostics.clone()

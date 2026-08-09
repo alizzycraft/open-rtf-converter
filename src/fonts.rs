@@ -296,6 +296,7 @@ impl NormalizedFamilyName {
 }
 
 /// Validated, indexed font state used by one conversion.
+#[derive(Debug)]
 pub(crate) struct PreparedFontCatalog {
     provider: FontProvider,
     family_index: HashMap<NormalizedFamilyName, Vec<usize>>,

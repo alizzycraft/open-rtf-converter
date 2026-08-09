@@ -2,12 +2,40 @@ use std::error::Error;
 
 use open_rtf_converter::{
     ActiveContentPolicy, CompatibilityMode, ConvertError, ConvertOptions, ConvertOptionsError,
-    InspectError, LimitValidationError, ParseError, PassivePdfError, PdfLinkPolicy, RtfInspection,
-    RtfLimits, RtfParseOptions, audit_passive_pdf_bytes, convert_rtf_bytes_to_pdf,
+    Converter, InspectError, LimitValidationError, ParseError, PassivePdfError, PdfLinkPolicy,
+    RtfInspection, RtfLimits, RtfParseOptions, audit_passive_pdf_bytes, convert_rtf_bytes_to_pdf,
     convert_rtf_to_pdf, inspect_rtf,
 };
 
 fn assert_public_error<E: Error>() {}
+fn assert_send_sync<T: Send + Sync>() {}
+
+#[test]
+fn reusable_converter_preserves_output_and_is_send_sync() {
+    assert_send_sync::<Converter>();
+    let input = br"{\rtf1\ansi Reusable converter\par}";
+    let options = ConvertOptions::browser_safe_defaults();
+    let expected = convert_rtf_to_pdf(input, &options).unwrap();
+    let converter = Converter::new(options).unwrap();
+
+    let first = converter.convert(input).unwrap();
+    let second = converter.convert(input).unwrap();
+    assert_eq!(first.pdf, expected.pdf);
+    assert_eq!(second.pdf, expected.pdf);
+    assert_eq!(first.pages, expected.pages);
+    assert_eq!(second.diagnostics, expected.diagnostics);
+}
+
+#[test]
+fn reusable_converter_rejects_invalid_configuration_at_construction() {
+    let mut options = ConvertOptions::browser_safe_defaults();
+    options.font_provider.limits.max_asset_bytes = 1;
+
+    assert!(matches!(
+        Converter::new(options),
+        Err(ConvertError::FontProvider(_))
+    ));
+}
 
 #[test]
 fn supported_root_facade_converts_and_audits_passive_pdf() {
