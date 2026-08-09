@@ -192,15 +192,16 @@ fn convert_rtf_with_prepared_fonts(
             limit: page_limit,
         });
     }
-    let pdf_plan = plan_pdf(&layout, &font_session)?;
-    let object_count = pdf_plan.object_count();
     let object_limit = options.parse_options.limits.max_pdf_indirect_objects;
-    if object_count > object_limit {
-        return Err(ConvertError::TooManyPdfObjects {
-            objects: object_count,
-            limit: object_limit,
-        });
-    }
+    let pdf_plan = match plan_pdf(&layout, &font_session, object_limit) {
+        Err(PdfRenderError::TooManyObjects { count, limit }) => {
+            return Err(ConvertError::TooManyPdfObjects {
+                objects: count,
+                limit,
+            });
+        }
+        result => result?,
+    };
     let pdf = render_pdf_plan(&pdf_plan)?;
     let output_limit = options.parse_options.limits.max_pdf_output_bytes;
     if pdf.len() > output_limit {

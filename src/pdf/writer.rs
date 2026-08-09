@@ -305,5 +305,12 @@ fn try_render_pdf_with_font_provider(
 
 pub(crate) fn render_pdf_plan(plan: &PdfPlan<'_, '_>) -> Result<Vec<u8>, PdfRenderError> {
     plan.validate()?;
+    if estimate_passive_pdf_object_count(plan.layout(), Some(plan.font_session().provider()))
+        != plan.object_count()
+    {
+        return Err(PdfRenderError::InternalPlanMismatch {
+            context: "planned object count",
+        });
+    }
     try_render_pdf_with_font_provider(plan.layout(), Some(plan.font_session().provider()))
 }

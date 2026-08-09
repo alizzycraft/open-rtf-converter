@@ -55,7 +55,7 @@
         let prepared = PreparedFontCatalog::prepare(&provider).unwrap();
         let font_session = FontSession::new(&prepared);
         let layout = LayoutEngine::layout_with_font_session(&document, &font_session);
-        let plan = plan_pdf(&layout, &font_session).unwrap();
+        let plan = plan_pdf(&layout, &font_session, usize::MAX).unwrap();
 
         assert!(std::ptr::eq(plan.layout(), &layout));
         assert_eq!(font_bytes, plan.font_session().provider().assets[0].bytes.as_ptr());
@@ -69,7 +69,7 @@
         assert_eq!(plan.images()[0].format, ImageFormat::Rgb8);
         assert_eq!(plan.pages()[0].image_count, 1);
         assert!(
-            std::mem::size_of::<PlannedImage>() <= std::mem::size_of::<usize>() * 2,
+            std::mem::size_of::<PlannedImage>() <= std::mem::size_of::<usize>() * 4,
             "planned images must not own image payloads"
         );
         assert_eq!(
@@ -82,6 +82,11 @@
 
         assert_eq!(plan.object_count(), parsed.objects.len());
         assert_eq!(plan.object_count(), 11);
+        assert_eq!(plan.highest_object_id(), 11);
+        assert_eq!(
+            parsed.objects.keys().map(|object_id| object_id.0).max(),
+            Some(plan.highest_object_id() as u32)
+        );
         assert!(
             pdf.windows(b"/FontFile2".len())
                 .any(|window| window == b"/FontFile2")
@@ -98,7 +103,7 @@
         let prepared = PreparedFontCatalog::prepare(&FontProvider::browser_safe_defaults()).unwrap();
         let font_session = FontSession::new(&prepared);
         let layout = LayoutEngine::layout(&Document::default());
-        let mut plan = plan_pdf(&layout, &font_session).unwrap();
+        let mut plan = plan_pdf(&layout, &font_session, usize::MAX).unwrap();
         plan.corrupt_page_index_for_test(0, 1);
 
         assert_eq!(
@@ -106,6 +111,42 @@
             Err(PdfRenderError::InternalPlanMismatch {
                 context: "page resource metadata",
             })
+        );
+    }
+
+    #[test]
+    fn pdf_plan_enforces_the_exact_object_limit_before_rendering() {
+        let prepared = PreparedFontCatalog::prepare(&FontProvider::browser_safe_defaults()).unwrap();
+        let font_session = FontSession::new(&prepared);
+        let layout = LayoutEngine::layout(&Document::default());
+
+        assert_eq!(
+            plan_pdf(&layout, &font_session, 3).map(|_| ()),
+            Err(PdfRenderError::TooManyObjects { count: 4, limit: 3 })
+        );
+        let plan = plan_pdf(&layout, &font_session, 4).unwrap();
+        assert_eq!(plan.object_count(), 4);
+        assert_eq!(plan.highest_object_id(), 4);
+        assert_eq!(
+            lopdf::Document::load_mem(&render_pdf_plan(&plan).unwrap())
+                .unwrap()
+                .objects
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn pdf_object_allocator_returns_typed_overflow_before_constructing_a_ref() {
+        let mut allocator = ObjectAllocator::with_state_for_test(
+            i32::MAX as usize + 1,
+            i32::MAX as usize,
+            usize::MAX,
+        );
+
+        assert_eq!(
+            allocator.allocate_for_test(),
+            Err(PdfRenderError::ObjectIdOverflow)
         );
     }
 

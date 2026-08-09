@@ -5,28 +5,102 @@ use super::*;
 pub(crate) struct PdfPlan<'a, 'fonts> {
     layout: &'a LayoutDocument,
     font_session: &'a FontSession<'fonts>,
+    catalog_ref: Ref,
+    page_tree_ref: Ref,
     pages: Vec<PlannedPage>,
-    builtin_fonts: Vec<usize>,
+    builtin_fonts: Vec<PlannedBuiltinFont>,
     supplied_fonts: Vec<PlannedSuppliedFont>,
     images: Vec<PlannedImage>,
     object_count: usize,
+    highest_object_id: i32,
 }
 
 pub(crate) struct PlannedPage {
     pub(crate) page_index: usize,
+    pub(crate) page_ref: Ref,
+    pub(crate) content_ref: Ref,
     pub(crate) builtin_font_indexes: Vec<usize>,
     pub(crate) supplied_font_indexes: Vec<usize>,
     pub(crate) opacity_pairs: Vec<(u8, u8)>,
     pub(crate) image_count: usize,
 }
 
+pub(crate) struct PlannedBuiltinFont {
+    pub(crate) font_index: usize,
+    pub(crate) font_ref: Ref,
+    pub(crate) to_unicode_ref: Option<Ref>,
+}
+
 pub(crate) struct PlannedSuppliedFont {
     pub(crate) asset_index: usize,
+    pub(crate) type0_ref: Ref,
+    pub(crate) cid_ref: Ref,
+    pub(crate) descriptor_ref: Ref,
+    pub(crate) font_file_ref: Ref,
+    pub(crate) cid_to_gid_map_ref: Ref,
+    pub(crate) to_unicode_ref: Ref,
 }
 
 pub(crate) struct PlannedImage {
     pub(crate) page_index: usize,
     pub(crate) format: ImageFormat,
+    pub(crate) image_ref: Ref,
+    pub(crate) alpha_mask_ref: Option<Ref>,
+    pub(crate) is_vector_raster: bool,
+}
+
+pub(in crate::pdf) struct ObjectAllocator {
+    next: usize,
+    count: usize,
+    limit: usize,
+}
+
+impl ObjectAllocator {
+    fn new(limit: usize) -> Self {
+        Self {
+            next: 1,
+            count: 0,
+            limit,
+        }
+    }
+
+    fn allocate(&mut self) -> Result<Ref, PdfRenderError> {
+        let count = self
+            .count
+            .checked_add(1)
+            .ok_or(PdfRenderError::ObjectIdOverflow)?;
+        if count > self.limit {
+            return Err(PdfRenderError::TooManyObjects {
+                count,
+                limit: self.limit,
+            });
+        }
+        let id = i32::try_from(self.next).map_err(|_| PdfRenderError::ObjectIdOverflow)?;
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or(PdfRenderError::ObjectIdOverflow)?;
+        self.count = count;
+        Ok(Ref::new(id))
+    }
+
+    fn count(&self) -> usize {
+        self.count
+    }
+
+    fn highest_object_id(&self) -> i32 {
+        i32::try_from(self.count).unwrap_or(i32::MAX)
+    }
+
+    #[cfg(test)]
+    pub(in crate::pdf) fn with_state_for_test(next: usize, count: usize, limit: usize) -> Self {
+        Self { next, count, limit }
+    }
+
+    #[cfg(test)]
+    pub(in crate::pdf) fn allocate_for_test(&mut self) -> Result<Ref, PdfRenderError> {
+        self.allocate()
+    }
 }
 
 impl<'a, 'fonts> PdfPlan<'a, 'fonts> {
@@ -43,12 +117,17 @@ impl<'a, 'fonts> PdfPlan<'a, 'fonts> {
     }
 
     #[cfg(test)]
+    pub(crate) fn highest_object_id(&self) -> i32 {
+        self.highest_object_id
+    }
+
+    #[cfg(test)]
     pub(crate) fn pages(&self) -> &[PlannedPage] {
         &self.pages
     }
 
     #[cfg(test)]
-    pub(crate) fn builtin_fonts(&self) -> &[usize] {
+    pub(crate) fn builtin_fonts(&self) -> &[PlannedBuiltinFont] {
         &self.builtin_fonts
     }
 
@@ -93,7 +172,8 @@ impl<'a, 'fonts> PdfPlan<'a, 'fonts> {
             .sum::<usize>()
             != self.images.len()
             || self.images.iter().any(|image| {
-                image.page_index >= self.pages.len() || !image_format_uses_xobject(image.format)
+                image.page_index >= self.pages.len()
+                    || (!image.is_vector_raster && !image_format_uses_xobject(image.format))
             })
         {
             return Err(PdfRenderError::InternalPlanMismatch {
@@ -108,9 +188,55 @@ impl<'a, 'fonts> PdfPlan<'a, 'fonts> {
         {
             return Err(PdfRenderError::InvalidPreparedFontReference { asset_index });
         }
-        if self.builtin_fonts.iter().any(|font| *font >= 14) {
+        if self.builtin_fonts.iter().any(|font| font.font_index >= 14) {
             return Err(PdfRenderError::InternalPlanMismatch {
                 context: "built-in font resource metadata",
+            });
+        }
+        if self.object_count == 0
+            || self.highest_object_id != i32::try_from(self.object_count).unwrap_or(i32::MAX)
+        {
+            return Err(PdfRenderError::InternalPlanMismatch {
+                context: "object allocation summary",
+            });
+        }
+        let mut allocated = vec![false; self.object_count.saturating_add(1)];
+        let references_are_valid = {
+            let mut record = |reference: Ref| {
+                let Ok(id) = usize::try_from(reference.get()) else {
+                    return false;
+                };
+                if id == 0 || id > self.object_count || allocated[id] {
+                    return false;
+                }
+                allocated[id] = true;
+                true
+            };
+            record(self.catalog_ref)
+                && record(self.page_tree_ref)
+                && self.pages.iter().all(|page| record(page.page_ref))
+                && self.pages.iter().all(|page| record(page.content_ref))
+                && self.builtin_fonts.iter().all(|font| record(font.font_ref))
+                && self
+                    .builtin_fonts
+                    .iter()
+                    .filter_map(|font| font.to_unicode_ref)
+                    .all(&mut record)
+                && self.supplied_fonts.iter().all(|font| {
+                    record(font.type0_ref)
+                        && record(font.cid_ref)
+                        && record(font.descriptor_ref)
+                        && record(font.font_file_ref)
+                        && record(font.cid_to_gid_map_ref)
+                        && record(font.to_unicode_ref)
+                })
+                && self.images.iter().all(|image| {
+                    record(image.image_ref) && image.alpha_mask_ref.is_none_or(&mut record)
+                })
+        };
+        if !references_are_valid || allocated.iter().skip(1).any(|allocated| !allocated) {
+            return Err(PdfRenderError::InternalPlanMismatch {
+                context: "object reference allocation",
             });
         }
         Ok(())
@@ -120,41 +246,90 @@ impl<'a, 'fonts> PdfPlan<'a, 'fonts> {
 pub(crate) fn plan_pdf<'a, 'fonts>(
     layout: &'a LayoutDocument,
     font_session: &'a FontSession<'fonts>,
+    object_limit: usize,
 ) -> Result<PdfPlan<'a, 'fonts>, PdfRenderError> {
+    let mut allocator = ObjectAllocator::new(object_limit);
+    let catalog_ref = allocator.allocate()?;
+    let page_tree_ref = allocator.allocate()?;
+    let page_refs = (0..layout.pages.len())
+        .map(|_| allocator.allocate())
+        .collect::<Result<Vec<_>, _>>()?;
+    let content_refs = (0..layout.pages.len())
+        .map(|_| allocator.allocate())
+        .collect::<Result<Vec<_>, _>>()?;
     let provider = Some(font_session.provider());
     let page_font_indexes = collect_page_used_font_indexes(layout, provider);
-    let builtin_fonts = collect_used_font_indexes(&page_font_indexes);
-    let supplied_fonts = collect_used_supplied_font_asset_indexes(layout, provider)
+    let mut builtin_fonts = collect_used_font_indexes(&page_font_indexes)
         .into_iter()
-        .map(|asset_index| PlannedSuppliedFont { asset_index })
-        .collect::<Vec<_>>();
-    let mut images = Vec::new();
+        .map(|font_index| {
+            Ok(PlannedBuiltinFont {
+                font_index,
+                font_ref: allocator.allocate()?,
+                to_unicode_ref: None,
+            })
+        })
+        .collect::<Result<Vec<_>, PdfRenderError>>()?;
+    let extended_latin_usage = collect_extended_latin_font_usage(layout, provider);
+    for special_font in [SYMBOL_REGULAR, ZAPF_DINGBATS_REGULAR] {
+        if let Some(font_index) = font_index_for_resource(special_font)
+            && let Some(font) = builtin_fonts
+                .iter_mut()
+                .find(|font| font.font_index == font_index)
+        {
+            font.to_unicode_ref = Some(allocator.allocate()?);
+        }
+    }
+    for font in &mut builtin_fonts {
+        if font.to_unicode_ref.is_none() && !extended_latin_usage[font.font_index].is_empty() {
+            font.to_unicode_ref = Some(allocator.allocate()?);
+        }
+    }
+    let supplied_font_asset_indexes = collect_used_supplied_font_asset_indexes(layout, provider);
+    let mut supplied_fonts = Vec::with_capacity(supplied_font_asset_indexes.len());
+    for asset_index in supplied_font_asset_indexes {
+        supplied_fonts.push(PlannedSuppliedFont {
+            asset_index,
+            type0_ref: allocator.allocate()?,
+            cid_ref: allocator.allocate()?,
+            descriptor_ref: allocator.allocate()?,
+            font_file_ref: allocator.allocate()?,
+            cid_to_gid_map_ref: allocator.allocate()?,
+            to_unicode_ref: allocator.allocate()?,
+        });
+    }
+    let mut image_metadata = Vec::new();
     let pages = layout
         .pages
         .iter()
         .enumerate()
         .map(|(page_index, page)| {
-            let image_start = images.len();
+            let image_start = image_metadata.len();
             page.for_each_image_fragment(&mut |fragment| {
                 if image_format_uses_xobject(fragment.image.format) {
-                    images.push(PlannedImage {
+                    image_metadata.push((
                         page_index,
-                        format: fragment.image.format,
-                    });
+                        fragment.image.format,
+                        fragment.image.alpha_mask.is_some(),
+                        false,
+                    ));
                 }
-                for command in &fragment.image.vector_commands {
-                    if let StaticImageVectorCommand::RasterImage { image, .. } = command
-                        && image_format_uses_xobject(image.format)
-                    {
-                        images.push(PlannedImage {
-                            page_index,
-                            format: image.format,
-                        });
+                if fragment.image.format == ImageFormat::WmfVector {
+                    for command in &fragment.image.vector_commands {
+                        if let StaticImageVectorCommand::RasterImage { image, .. } = command {
+                            image_metadata.push((
+                                page_index,
+                                image.format,
+                                image.alpha_mask.is_some(),
+                                true,
+                            ));
+                        }
                     }
                 }
             });
             PlannedPage {
                 page_index,
+                page_ref: page_refs[page_index],
+                content_ref: content_refs[page_index],
                 builtin_font_indexes: page_font_indexes[page_index].clone(),
                 supplied_font_indexes: collect_used_supplied_font_asset_indexes_for_page(
                     layout, page, provider,
@@ -167,19 +342,33 @@ pub(crate) fn plan_pdf<'a, 'fonts>(
                 })
                 .collect(),
                 opacity_pairs: collect_page_opacity_pairs(page),
-                image_count: images.len() - image_start,
+                image_count: image_metadata.len() - image_start,
             }
         })
         .collect::<Vec<_>>();
-    let object_count = super::writer::estimate_passive_pdf_object_count(layout, provider);
+    let mut images = Vec::with_capacity(image_metadata.len());
+    for (page_index, format, has_alpha_mask, is_vector_raster) in image_metadata {
+        images.push(PlannedImage {
+            page_index,
+            format,
+            image_ref: allocator.allocate()?,
+            alpha_mask_ref: has_alpha_mask.then(|| allocator.allocate()).transpose()?,
+            is_vector_raster,
+        });
+    }
+    let object_count = allocator.count();
+    let highest_object_id = allocator.highest_object_id();
     Ok(PdfPlan {
         layout,
         font_session,
+        catalog_ref,
+        page_tree_ref,
         pages,
         builtin_fonts,
         supplied_fonts,
         images,
         object_count,
+        highest_object_id,
     })
 }
 
