@@ -46,42 +46,6 @@ pub enum ModelInvariantError {
 /// Validate invariants that remain implicit while the model is migrated to
 /// typed inline nodes and aggregate note/image records.
 pub(crate) fn validate_document_invariants(document: &Document) -> Result<(), ModelInvariantError> {
-    validate_parallel_len(
-        "footnote_section_indices",
-        document.footnotes.len(),
-        document.footnote_section_indices.len(),
-    )?;
-    validate_parallel_len(
-        "footnote_block_indices",
-        document.footnotes.len(),
-        document.footnote_block_indices.len(),
-    )?;
-    validate_parallel_len(
-        "endnote_section_indices",
-        document.endnotes.len(),
-        document.endnote_section_indices.len(),
-    )?;
-    validate_parallel_len(
-        "endnote_placements",
-        document.endnotes.len(),
-        document.endnote_placements.len(),
-    )?;
-    validate_parallel_len(
-        "inline_image_block_indices",
-        document.inline_images.len(),
-        document.inline_image_block_indices.len(),
-    )?;
-    validate_parallel_prefix_len(
-        "footnote_numbering",
-        document.footnotes.len(),
-        document.footnote_numbering.len(),
-    )?;
-    validate_parallel_prefix_len(
-        "endnote_numbering",
-        document.endnotes.len(),
-        document.endnote_numbering.len(),
-    )?;
-
     let section_count = 1usize.saturating_add(
         document
             .blocks
@@ -97,44 +61,32 @@ pub(crate) fn validate_document_invariants(document: &Document) -> Result<(), Mo
             })
             .count(),
     );
-    for (note, section) in document
-        .footnote_section_indices
-        .iter()
-        .copied()
-        .enumerate()
-    {
+    for (note, entry) in document.footnotes.iter().enumerate() {
         validate_one_based_index(
             "footnote section",
-            section,
+            entry.section_index.get(),
             section_count,
             format!("footnotes[{note}]"),
         )?;
-    }
-    for (note, section) in document.endnote_section_indices.iter().copied().enumerate() {
-        validate_one_based_index(
-            "endnote section",
-            section,
-            section_count,
-            format!("endnotes[{note}]"),
-        )?;
-    }
-    for (note, block) in document.footnote_block_indices.iter().copied().enumerate() {
         validate_index(
             "footnote block",
-            block,
+            entry.body_block_index.get(),
             document.blocks.len(),
             format!("footnotes[{note}]"),
         )?;
     }
-    for (image, block) in document
-        .inline_image_block_indices
-        .iter()
-        .copied()
-        .enumerate()
-    {
+    for (note, entry) in document.endnotes.iter().enumerate() {
+        validate_one_based_index(
+            "endnote section",
+            entry.section_index.get(),
+            section_count,
+            format!("endnotes[{note}]"),
+        )?;
+    }
+    for (image, entry) in document.inline_images.iter().enumerate() {
         validate_index(
             "inline-image block",
-            block,
+            entry.body_block_index.get(),
             document.blocks.len(),
             format!("inline_images[{image}]"),
         )?;
@@ -174,8 +126,12 @@ pub(crate) fn validate_document_invariants(document: &Document) -> Result<(), Mo
         "endnote_continuation_separator",
         &context,
     )?;
-    validate_paragraph_list(&document.footnotes, "footnotes", &context)?;
-    validate_paragraph_list(&document.endnotes, "endnotes", &context)?;
+    for (index, note) in document.footnotes.iter().enumerate() {
+        validate_paragraph(&note.content, &format!("footnotes[{index}]"), &context)?;
+    }
+    for (index, note) in document.endnotes.iter().enumerate() {
+        validate_paragraph(&note.content, &format!("endnotes[{index}]"), &context)?;
+    }
 
     validate_shape_list(&document.header_shapes, "header_shapes", &context)?;
     validate_shape_list(
@@ -286,13 +242,12 @@ pub(crate) fn normalize_missing_font_references(document: &mut Document) {
         fallback_index,
         &mut changed,
     );
-    normalize_paragraph_fonts(
-        &mut document.footnotes,
-        &known,
-        fallback_index,
-        &mut changed,
-    );
-    normalize_paragraph_fonts(&mut document.endnotes, &known, fallback_index, &mut changed);
+    for note in &mut document.footnotes {
+        normalize_paragraph_font(&mut note.content, &known, fallback_index, &mut changed);
+    }
+    for note in &mut document.endnotes {
+        normalize_paragraph_font(&mut note.content, &known, fallback_index, &mut changed);
+    }
     for shapes in [
         &mut document.header_shapes,
         &mut document.first_page_header_shapes,
@@ -409,18 +364,12 @@ pub(crate) fn normalize_missing_color_references(document: &mut Document) {
         fallback_index,
         &mut changed,
     );
-    normalize_paragraph_colors(
-        &mut document.footnotes,
-        valid_len,
-        fallback_index,
-        &mut changed,
-    );
-    normalize_paragraph_colors(
-        &mut document.endnotes,
-        valid_len,
-        fallback_index,
-        &mut changed,
-    );
+    for note in &mut document.footnotes {
+        normalize_paragraph_color(&mut note.content, valid_len, fallback_index, &mut changed);
+    }
+    for note in &mut document.endnotes {
+        normalize_paragraph_color(&mut note.content, valid_len, fallback_index, &mut changed);
+    }
     for shapes in [
         &mut document.header_shapes,
         &mut document.first_page_header_shapes,
@@ -588,22 +537,6 @@ struct ValidationContext<'a> {
     inline_image_count: usize,
     footnote_count: usize,
     endnote_count: usize,
-}
-
-fn validate_parallel_len(
-    vector: &'static str,
-    expected: usize,
-    actual: usize,
-) -> Result<(), ModelInvariantError> {
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(ModelInvariantError::ParallelVectorLength {
-            vector,
-            expected,
-            actual,
-        })
-    }
 }
 
 fn validate_parallel_prefix_len(
@@ -980,15 +913,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_misaligned_note_metadata() {
+    fn rejects_invalid_aggregate_note_metadata() {
         let mut document = Document::default();
-        document.footnotes.push(Paragraph::default());
+        document.footnotes.push(Footnote {
+            content: Paragraph::default(),
+            section_index: SectionIndex::new(2),
+            body_block_index: BlockIndex::new(0),
+            numbering: None,
+        });
         assert!(matches!(
             validate_document_invariants(&document),
-            Err(ModelInvariantError::ParallelVectorLength {
-                vector: "footnote_section_indices",
-                expected: 1,
-                actual: 0,
+            Err(ModelInvariantError::IndexOutOfBounds {
+                kind: "footnote section",
+                index: 2,
+                len: 1,
+                ..
             })
         ));
     }

@@ -37,7 +37,7 @@
         assert!(
             text.contains(&format!(
                 "Note {} again I missing [Field removed: no passive result]",
-                footnote_reference_marker(0)
+                footnote_reference_marker(FootnoteId::new(0))
             )),
             "text was {text:?}"
         );

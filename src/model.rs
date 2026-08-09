@@ -6,6 +6,8 @@ pub(crate) use invariants::{
     validate_document_invariants,
 };
 
+use std::ops::{Deref, DerefMut};
+
 pub const PAGE_NUMBER_MARKER: &str = "\u{f0000}";
 pub const TOTAL_PAGES_MARKER: &str = "\u{f0001}";
 pub const SECTION_NUMBER_MARKER: &str = "\u{f0002}";
@@ -27,6 +29,93 @@ pub const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
 pub const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
 pub const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
 
+macro_rules! typed_index {
+    ($name:ident) => {
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $name(usize);
+
+        impl $name {
+            pub const fn new(index: usize) -> Self {
+                Self(index)
+            }
+
+            pub const fn get(self) -> usize {
+                self.0
+            }
+        }
+    };
+}
+
+typed_index!(SectionIndex);
+typed_index!(BlockIndex);
+typed_index!(FootnoteId);
+typed_index!(EndnoteId);
+typed_index!(InlineImageId);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Footnote {
+    pub content: Paragraph,
+    pub section_index: SectionIndex,
+    pub body_block_index: BlockIndex,
+    pub numbering: Option<NoteNumbering>,
+}
+
+impl Deref for Footnote {
+    type Target = Paragraph;
+
+    fn deref(&self) -> &Self::Target {
+        &self.content
+    }
+}
+
+impl DerefMut for Footnote {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.content
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Endnote {
+    pub content: Paragraph,
+    pub section_index: SectionIndex,
+    pub placement: EndnotePlacement,
+    pub numbering: Option<NoteNumbering>,
+}
+
+impl Deref for Endnote {
+    type Target = Paragraph;
+
+    fn deref(&self) -> &Self::Target {
+        &self.content
+    }
+}
+
+impl DerefMut for Endnote {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.content
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineImageEntry {
+    pub image: StaticImage,
+    pub body_block_index: BlockIndex,
+}
+
+impl Deref for InlineImageEntry {
+    type Target = StaticImage;
+
+    fn deref(&self) -> &Self::Target {
+        &self.image
+    }
+}
+
+impl DerefMut for InlineImageEntry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.image
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub page: PageSettings,
@@ -37,8 +126,6 @@ pub struct Document {
     pub endnote_number_format: PageNumberFormat,
     pub footnote_number_restart: NoteNumberRestart,
     pub endnote_number_restart: NoteNumberRestart,
-    pub footnote_numbering: Vec<NoteNumbering>,
-    pub endnote_numbering: Vec<NoteNumbering>,
     pub footnote_placement: FootnotePlacement,
     pub endnote_placement: EndnotePlacement,
     pub fonts: Vec<FontDef>,
@@ -66,14 +153,9 @@ pub struct Document {
     pub footnote_continuation_separator: Option<Paragraph>,
     pub endnote_separator: Option<Paragraph>,
     pub endnote_continuation_separator: Option<Paragraph>,
-    pub footnotes: Vec<Paragraph>,
-    pub footnote_section_indices: Vec<usize>,
-    pub footnote_block_indices: Vec<usize>,
-    pub endnotes: Vec<Paragraph>,
-    pub endnote_section_indices: Vec<usize>,
-    pub endnote_placements: Vec<EndnotePlacement>,
-    pub inline_images: Vec<StaticImage>,
-    pub inline_image_block_indices: Vec<usize>,
+    pub footnotes: Vec<Footnote>,
+    pub endnotes: Vec<Endnote>,
+    pub inline_images: Vec<InlineImageEntry>,
     pub blocks: Vec<Block>,
 }
 
@@ -88,8 +170,6 @@ impl Default for Document {
             endnote_number_format: PageNumberFormat::Decimal,
             footnote_number_restart: NoteNumberRestart::Continuous,
             endnote_number_restart: NoteNumberRestart::Continuous,
-            footnote_numbering: Vec::new(),
-            endnote_numbering: Vec::new(),
             footnote_placement: FootnotePlacement::BeneathText,
             endnote_placement: EndnotePlacement::AfterBody,
             fonts: vec![FontDef {
@@ -126,13 +206,8 @@ impl Default for Document {
             endnote_separator: None,
             endnote_continuation_separator: None,
             footnotes: Vec::new(),
-            footnote_section_indices: Vec::new(),
-            footnote_block_indices: Vec::new(),
             endnotes: Vec::new(),
-            endnote_section_indices: Vec::new(),
-            endnote_placements: Vec::new(),
             inline_images: Vec::new(),
-            inline_image_block_indices: Vec::new(),
             blocks: vec![Block::Paragraph(Paragraph::default())],
         }
     }
@@ -143,6 +218,10 @@ pub fn inline_image_marker(index: usize) -> Option<char> {
     char::from_u32(codepoint).filter(|ch| *ch <= '\u{ffffd}')
 }
 
+pub(crate) fn inline_image_marker_for_id(id: InlineImageId) -> Option<char> {
+    inline_image_marker(id.get())
+}
+
 pub fn inline_image_marker_index(text: &str) -> Option<usize> {
     let mut chars = text.chars();
     let codepoint = chars.next()? as u32;
@@ -150,6 +229,10 @@ pub fn inline_image_marker_index(text: &str) -> Option<usize> {
         return None;
     }
     usize::try_from(codepoint - INLINE_IMAGE_MARKER_BASE).ok()
+}
+
+pub(crate) fn inline_image_marker_id(text: &str) -> Option<InlineImageId> {
+    inline_image_marker_index(text).map(InlineImageId::new)
 }
 
 #[derive(Debug, Clone, PartialEq)]

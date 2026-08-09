@@ -770,7 +770,10 @@ pub(in crate::layout) fn inline_image_for_marker<'a>(
     document: &'a Document,
     text: &str,
 ) -> Option<&'a StaticImage> {
-    document.inline_images.get(inline_image_marker_index(text)?)
+    document
+        .inline_images
+        .get(inline_image_marker_id(text)?.get())
+        .map(|entry| &entry.image)
 }
 
 pub(in crate::layout) fn passive_advance_width_points(style: &CharacterStyle) -> f32 {

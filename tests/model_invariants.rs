@@ -1,11 +1,11 @@
 use open_rtf_converter::{
     layout::LayoutEngine,
     model::{
-        Block, CharacterStyle, Document, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END,
-        ModelInvariantError, Paragraph, Run, Table, TableCell, TableCellBorders,
-        TableCellHorizontalMerge, TableCellPadding, TableCellSpacing, TableCellTextDirection,
-        TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-        TableRowWrapMargins, inline_image_marker,
+        Block, BlockIndex, CharacterStyle, Document, FOOTNOTE_REFERENCE_MARKER,
+        FOOTNOTE_REFERENCE_MARKER_END, Footnote, ModelInvariantError, Paragraph, Run, SectionIndex,
+        Table, TableCell, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
+        TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
+        TableRow, TableRowAlignment, TableRowWrapMargins, inline_image_marker,
     },
 };
 
@@ -17,26 +17,14 @@ fn first_paragraph(document: &mut Document) -> &mut Paragraph {
 }
 
 #[test]
-fn advanced_layout_rejects_misaligned_parallel_vectors() {
-    let mut document = Document::default();
-    document.footnotes.push(Paragraph::default());
-
-    assert!(matches!(
-        LayoutEngine::try_layout(&document),
-        Err(ModelInvariantError::ParallelVectorLength {
-            vector: "footnote_section_indices",
-            expected: 1,
-            actual: 0,
-        })
-    ));
-}
-
-#[test]
 fn advanced_layout_rejects_out_of_range_section_and_block_indexes() {
     let mut document = Document::default();
-    document.footnotes.push(Paragraph::default());
-    document.footnote_section_indices.push(2);
-    document.footnote_block_indices.push(0);
+    document.footnotes.push(Footnote {
+        content: Paragraph::default(),
+        section_index: SectionIndex::new(2),
+        body_block_index: BlockIndex::new(0),
+        numbering: None,
+    });
 
     assert!(matches!(
         LayoutEngine::try_layout(&document),
@@ -48,8 +36,8 @@ fn advanced_layout_rejects_out_of_range_section_and_block_indexes() {
         })
     ));
 
-    document.footnote_section_indices[0] = 1;
-    document.footnote_block_indices[0] = document.blocks.len();
+    document.footnotes[0].section_index = SectionIndex::new(1);
+    document.footnotes[0].body_block_index = BlockIndex::new(document.blocks.len());
     assert!(matches!(
         LayoutEngine::try_layout(&document),
         Err(ModelInvariantError::IndexOutOfBounds {

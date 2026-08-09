@@ -1456,6 +1456,7 @@ pub(in crate::layout) fn max_footnote_reference_index_in_text(text: &str) -> Opt
     let mut search_start = 0;
     while let Some((start, end)) = next_footnote_reference_marker_range(text, search_start) {
         if let Some(index) = parse_footnote_reference_marker_id(&text[start..end]) {
+            let index = index.get();
             max_index = Some(max_index.map_or(index, |current: usize| current.max(index)));
         }
         search_start = end;

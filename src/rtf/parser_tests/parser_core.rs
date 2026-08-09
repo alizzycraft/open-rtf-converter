@@ -429,12 +429,12 @@
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            format!("Body{}", footnote_reference_marker(0))
+            format!("Body{}", footnote_reference_marker(FootnoteId::new(0)))
         );
         let reference = body
             .runs
             .iter()
-            .find(|run| run.text == footnote_reference_marker(0))
+            .find(|run| run.text == footnote_reference_marker(FootnoteId::new(0)))
             .expect("footnote reference run");
         assert_eq!(
             reference.style.baseline_shift_half_points,
@@ -495,7 +495,7 @@
         );
         assert!(output.document.footnotes.is_empty());
         assert_eq!(output.document.endnotes.len(), 1);
-        assert_eq!(output.document.endnote_section_indices, vec![1]);
+        assert_eq!(output.document.endnotes[0].section_index.get(), 1);
         assert_eq!(output.document.endnotes[0].runs[0].text, "Legacy endnote");
         assert!(output.diagnostics.iter().any(|diagnostic| {
             diagnostic
@@ -520,7 +520,7 @@
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            format!("Foot{} End1", footnote_reference_marker(0))
+            format!("Foot{} End1", footnote_reference_marker(FootnoteId::new(0)))
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
@@ -552,12 +552,12 @@
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            format!("Body{} Endi", footnote_reference_marker(0))
+            format!("Body{} Endi", footnote_reference_marker(FootnoteId::new(0)))
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");
         assert_eq!(output.document.endnotes[0].runs[0].text, "Endnote text");
         assert_eq!(
-            output.document.footnote_numbering[0],
+            output.document.footnotes[0].numbering.expect("footnote numbering"),
             NoteNumbering {
                 start: 1,
                 format: PageNumberFormat::Decimal,
@@ -566,7 +566,7 @@
             }
         );
         assert_eq!(
-            output.document.endnote_numbering[0],
+            output.document.endnotes[0].numbering.expect("endnote numbering"),
             NoteNumbering {
                 start: 1,
                 format: PageNumberFormat::LowerRoman,
@@ -592,16 +592,16 @@
                 .iter()
                 .map(|run| run.text.as_str())
                 .collect::<String>(),
-            format!("Body{} Endb", footnote_reference_marker(0))
+            format!("Body{} Endb", footnote_reference_marker(FootnoteId::new(0)))
         );
-        assert_eq!(output.document.footnote_numbering[0].start, 4);
+        assert_eq!(output.document.footnotes[0].numbering.expect("footnote numbering").start, 4);
         assert_eq!(
-            output.document.footnote_numbering[0].format,
+            output.document.footnotes[0].numbering.expect("footnote numbering").format,
             PageNumberFormat::UpperRoman
         );
-        assert_eq!(output.document.endnote_numbering[0].start, 2);
+        assert_eq!(output.document.endnotes[0].numbering.expect("endnote numbering").start, 2);
         assert_eq!(
-            output.document.endnote_numbering[0].format,
+            output.document.endnotes[0].numbering.expect("endnote numbering").format,
             PageNumberFormat::LowerLetter
         );
     }
@@ -667,12 +667,12 @@
             EndnotePlacement::EndOfDocument
         );
         assert_eq!(
-            output.document.endnote_placements,
+            output.document.endnotes.iter().map(|note| note.placement).collect::<Vec<_>>(),
             vec![EndnotePlacement::EndOfDocument]
         );
         assert!(
             document_text(&output.document)
-                .contains(&format!("Body{} End1", footnote_reference_marker(0)))
+                .contains(&format!("Body{} End1", footnote_reference_marker(FootnoteId::new(0))))
         );
         assert!(!document_text(&output.document).contains("aenddoc"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
@@ -718,7 +718,7 @@
         );
         assert!(
             document_text(&output.document)
-                .contains(&format!("Body{}", footnote_reference_marker(0)))
+                .contains(&format!("Body{}", footnote_reference_marker(FootnoteId::new(0))))
         );
         assert!(!document_text(&output.document).contains("ftnbj"));
         assert!(output.diagnostics.iter().any(|diagnostic| {
@@ -736,9 +736,12 @@
         .unwrap();
 
         assert_eq!(output.document.endnotes.len(), 2);
-        assert_eq!(output.document.endnote_section_indices, vec![1, 2]);
         assert_eq!(
-            output.document.endnote_placements,
+            output.document.endnotes.iter().map(|note| note.section_index.get()).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            output.document.endnotes.iter().map(|note| note.placement).collect::<Vec<_>>(),
             vec![
                 EndnotePlacement::EndOfDocument,
                 EndnotePlacement::EndOfSection
@@ -763,7 +766,7 @@
         let text = document_text(&output.document);
 
         assert!(
-            text.contains(&format!("Body{} End1", footnote_reference_marker(0))),
+            text.contains(&format!("Body{} End1", footnote_reference_marker(FootnoteId::new(0)))),
             "text: {text:?}"
         );
         assert_eq!(output.document.footnotes[0].runs[0].text, "Footnote text");

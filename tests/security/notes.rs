@@ -371,7 +371,7 @@ fn section_footnotes_render_at_passive_section_boundary_without_control_leakage(
     assert!(text.contains(&format!("First section{}", footnote_reference_marker(0))));
     assert!(text.contains("Second section"));
     assert!(text.contains("First section footnote"));
-    assert_eq!(parsed.document.footnote_section_indices, vec![1]);
+    assert_eq!(parsed.document.footnotes[0].section_index.get(), 1);
     for forbidden in ["chftn", "objdata"] {
         assert!(
             !text.contains(forbidden),
@@ -475,11 +475,17 @@ fn explicit_page_break_flushes_prior_footnotes_without_later_note_duplication() 
 
     assert!(text.contains(&format!("First page{}", footnote_reference_marker(0))));
     assert!(text.contains(&format!("Second page{}", footnote_reference_marker(1))));
-    assert_eq!(parsed.document.footnote_block_indices.len(), 2);
+    assert_eq!(parsed.document.footnotes.len(), 2);
     assert!(
-        parsed.document.footnote_block_indices[0] < parsed.document.footnote_block_indices[1],
+        parsed.document.footnotes[0].body_block_index
+            < parsed.document.footnotes[1].body_block_index,
         "footnote reference block order should be monotonic: {:?}",
-        parsed.document.footnote_block_indices
+        parsed
+            .document
+            .footnotes
+            .iter()
+            .map(|note| note.body_block_index.get())
+            .collect::<Vec<_>>()
     );
     for forbidden in ["chftn", "objdata"] {
         assert!(
@@ -577,7 +583,12 @@ fn automatic_page_flow_flushes_prior_footnotes_without_tail_drift() {
     )));
     assert!(text.contains("First automatic footnote"));
     assert_eq!(
-        parsed.document.footnote_block_indices,
+        parsed
+            .document
+            .footnotes
+            .iter()
+            .map(|note| note.body_block_index.get())
+            .collect::<Vec<_>>(),
         vec![0],
         "automatic-flow fixture should reference the first body paragraph block"
     );
@@ -1434,7 +1445,7 @@ fn endnotes_at_end_of_section_render_before_next_section_without_control_leakage
         EndnotePlacement::EndOfSection
     );
     assert_eq!(parsed.document.endnotes.len(), 1);
-    assert_eq!(parsed.document.endnote_section_indices, vec![1]);
+    assert_eq!(parsed.document.endnotes[0].section_index.get(), 1);
     assert!(text.contains("First section1"));
     assert!(text.contains("Second section"));
     assert!(text.contains("Section note"));
@@ -1525,9 +1536,22 @@ fn mixed_endnote_placements_render_passively_without_control_leakage() {
     let text = collect_text(&parsed.document);
 
     assert_eq!(parsed.document.endnotes.len(), 2);
-    assert_eq!(parsed.document.endnote_section_indices, vec![1, 2]);
     assert_eq!(
-        parsed.document.endnote_placements,
+        parsed
+            .document
+            .endnotes
+            .iter()
+            .map(|note| note.section_index.get())
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(
+        parsed
+            .document
+            .endnotes
+            .iter()
+            .map(|note| note.placement)
+            .collect::<Vec<_>>(),
         vec![
             EndnotePlacement::EndOfDocument,
             EndnotePlacement::EndOfSection
@@ -1625,7 +1649,7 @@ fn fet1_legacy_footnote_groups_render_as_passive_endnotes_without_control_leakag
 
     assert!(parsed.document.footnotes.is_empty());
     assert_eq!(parsed.document.endnotes.len(), 1);
-    assert_eq!(parsed.document.endnote_section_indices, vec![1]);
+    assert_eq!(parsed.document.endnotes[0].section_index.get(), 1);
     assert!(text.contains("Bodyi"));
     assert!(text.contains("Legacy endnote"));
     for forbidden in ["fet1", "aenddoc", "chftn", "footnote"] {

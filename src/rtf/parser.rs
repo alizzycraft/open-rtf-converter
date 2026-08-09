@@ -37,28 +37,29 @@ use crate::config::{
 use crate::diagnostics::Diagnostic;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
-    DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER,
-    ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
-    FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnotePlacement,
-    ImageCrop, ImageFormat, ImageToneAdjustment, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
+    Block, BlockIndex, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color,
+    DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document,
+    ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END, Endnote, EndnoteId, EndnotePlacement,
+    FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch,
+    Footnote, FootnoteId, FootnotePlacement, ImageCrop, ImageFormat, ImageToneAdjustment,
+    InlineImageEntry, InlineImageId, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
     NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
     PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
     PageSettings, PageVerticalAlignment, Paragraph, ParagraphFrameVerticalAlignment,
     ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
-    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
-    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
-    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
-    TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
-    TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
-    TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle, inline_image_marker,
-    normalize_missing_color_references, normalize_missing_font_references,
-    validate_document_invariants,
+    SECTION_PAGES_MARKER, SectionIndex, ShadingPattern, StaticImage, StaticImageAlphaMask,
+    StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
+    StaticImageVectorRaster, StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
+    StaticShapeLineJoin, StaticShapePoint, StaticShapeTextVerticalAnchor,
+    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
+    TableCellPadding, TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief,
+    UnderlineStyle, inline_image_marker_for_id, normalize_missing_color_references,
+    normalize_missing_font_references, validate_document_invariants,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -2050,19 +2051,25 @@ fn remap_retained_document_block_index(
     old_to_new.iter().flatten().next().copied().unwrap_or(0)
 }
 
-fn footnote_reference_marker(index: usize) -> String {
-    format!("{FOOTNOTE_REFERENCE_MARKER}{index}{FOOTNOTE_REFERENCE_MARKER_END}")
+fn footnote_reference_marker(id: FootnoteId) -> String {
+    format!(
+        "{FOOTNOTE_REFERENCE_MARKER}{}{FOOTNOTE_REFERENCE_MARKER_END}",
+        id.get()
+    )
 }
 
-fn endnote_reference_marker(index: usize) -> String {
-    format!("{ENDNOTE_REFERENCE_MARKER}{index}{ENDNOTE_REFERENCE_MARKER_END}")
+fn endnote_reference_marker(id: EndnoteId) -> String {
+    format!(
+        "{ENDNOTE_REFERENCE_MARKER}{}{ENDNOTE_REFERENCE_MARKER_END}",
+        id.get()
+    )
 }
 
-fn parse_footnote_reference_marker_id(text: &str) -> Option<usize> {
+fn parse_footnote_reference_marker_id(text: &str) -> Option<FootnoteId> {
     let rest = text.strip_prefix(FOOTNOTE_REFERENCE_MARKER)?;
     let id = rest.strip_suffix(FOOTNOTE_REFERENCE_MARKER_END)?;
     (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok())?
+        .then(|| id.parse::<usize>().ok().map(FootnoteId::new))?
 }
 
 impl Parser {
@@ -2282,13 +2289,19 @@ impl Parser {
         }
         self.document.blocks = retained;
         let retained_len = self.document.blocks.len();
-        for block_index in &mut self.document.footnote_block_indices {
-            *block_index =
-                remap_retained_document_block_index(*block_index, &old_to_new, retained_len);
+        for note in &mut self.document.footnotes {
+            note.body_block_index = BlockIndex::new(remap_retained_document_block_index(
+                note.body_block_index.get(),
+                &old_to_new,
+                retained_len,
+            ));
         }
-        for block_index in &mut self.document.inline_image_block_indices {
-            *block_index =
-                remap_retained_document_block_index(*block_index, &old_to_new, retained_len);
+        for entry in &mut self.document.inline_images {
+            entry.body_block_index = BlockIndex::new(remap_retained_document_block_index(
+                entry.body_block_index.get(),
+                &old_to_new,
+                retained_len,
+            ));
         }
     }
 
@@ -8689,13 +8702,13 @@ impl Parser {
             Destination::Footnote => {
                 self.next_footnote_reference_sequence();
                 self.current_footnote_reference_block_index = self.current_reference_block_index();
-                footnote_reference_marker(self.document.footnotes.len())
+                footnote_reference_marker(FootnoteId::new(self.document.footnotes.len()))
             }
             Destination::Endnote => {
                 let numbering = self.effective_endnote_numbering();
                 if numbering.restart == NoteNumberRestart::EachPage {
                     self.next_endnote_reference_sequence();
-                    endnote_reference_marker(self.document.endnotes.len())
+                    endnote_reference_marker(EndnoteId::new(self.document.endnotes.len()))
                 } else {
                     let sequence = self.next_endnote_reference_sequence();
                     format_note_number(numbering.start, sequence, numbering.format)
@@ -8718,7 +8731,8 @@ impl Parser {
             return self.start_note_destination(Destination::Endnote, offset);
         }
 
-        let footnote_marker = footnote_reference_marker(self.document.footnotes.len());
+        let footnote_marker =
+            footnote_reference_marker(FootnoteId::new(self.document.footnotes.len()));
         let replacement = PENDING_NOTE_REFERENCE_MARKER;
         let replaced = if let Some(row) = self.current_table_row.as_mut()
             && replace_last_note_marker_in_paragraph(
@@ -9796,12 +9810,32 @@ impl Parser {
                 &mut self.document.footer,
                 &mut self.document.first_page_footer,
                 &mut self.document.even_page_footer,
-                &mut self.document.footnotes,
-                &mut self.document.endnotes,
             ] {
                 if replace_last_pending_note_marker_in_paragraphs(paragraphs, &replacement) {
                     replaced = true;
                     break;
+                }
+            }
+            if !replaced {
+                for note in self.document.footnotes.iter_mut().rev() {
+                    if replace_last_pending_note_marker_in_paragraph(
+                        &mut note.content,
+                        &replacement,
+                    ) {
+                        replaced = true;
+                        break;
+                    }
+                }
+            }
+            if !replaced {
+                for note in self.document.endnotes.iter_mut().rev() {
+                    if replace_last_pending_note_marker_in_paragraph(
+                        &mut note.content,
+                        &replacement,
+                    ) {
+                        replaced = true;
+                        break;
+                    }
                 }
             }
             replaced
@@ -9850,10 +9884,14 @@ impl Parser {
             &mut self.document.footer,
             &mut self.document.first_page_footer,
             &mut self.document.even_page_footer,
-            &mut self.document.footnotes,
-            &mut self.document.endnotes,
         ] {
             replace_all_pending_note_markers_in_paragraphs(paragraphs, "*");
+        }
+        for note in &mut self.document.footnotes {
+            replace_all_pending_note_markers_in_paragraph(&mut note.content, "*");
+        }
+        for note in &mut self.document.endnotes {
+            replace_all_pending_note_markers_in_paragraph(&mut note.content, "*");
         }
         self.replace_all_pending_note_markers_in_bookmarks("*");
     }
@@ -12102,15 +12140,15 @@ impl Parser {
             return None;
         }
         let text = strip_bookmark_page_markers(text)?;
-        let note_index = parse_footnote_reference_marker_id(&text)?;
+        let note_index = parse_footnote_reference_marker_id(&text)?.get();
         if note_index > self.document.footnotes.len() {
             return None;
         }
         let numbering = self
             .document
-            .footnote_numbering
+            .footnotes
             .get(note_index)
-            .copied()
+            .and_then(|note| note.numbering)
             .unwrap_or(NoteNumbering {
                 start: self.document.footnote_number_start,
                 format: self.document.footnote_number_format,
@@ -12122,16 +12160,16 @@ impl Parser {
             NoteNumberRestart::EachSection => {
                 let section = self
                     .document
-                    .footnote_section_indices
+                    .footnotes
                     .get(note_index)
-                    .copied()
+                    .map(|note| note.section_index.get())
                     .unwrap_or_else(|| self.current_section_index.max(1));
                 let prior_count = self
                     .document
-                    .footnote_section_indices
+                    .footnotes
                     .iter()
                     .take(note_index)
-                    .filter(|candidate| **candidate == section)
+                    .filter(|candidate| candidate.section_index.get() == section)
                     .count();
                 prior_count + 1
             }
@@ -12723,16 +12761,12 @@ impl Parser {
                     runs: Vec::new(),
                 },
             );
-            self.document.footnotes.push(paragraph);
-            self.document
-                .footnote_section_indices
-                .push(self.current_section_index.max(1));
-            self.document
-                .footnote_block_indices
-                .push(self.current_footnote_reference_block_index);
-            self.document
-                .footnote_numbering
-                .push(self.effective_footnote_numbering());
+            self.document.footnotes.push(Footnote {
+                content: paragraph,
+                section_index: SectionIndex::new(self.current_section_index.max(1)),
+                body_block_index: BlockIndex::new(self.current_footnote_reference_block_index),
+                numbering: Some(self.effective_footnote_numbering()),
+            });
         }
         Ok(())
     }
@@ -12747,16 +12781,12 @@ impl Parser {
                     runs: Vec::new(),
                 },
             );
-            self.document.endnotes.push(paragraph);
-            self.document
-                .endnote_section_indices
-                .push(self.current_section_index.max(1));
-            self.document
-                .endnote_placements
-                .push(self.document.endnote_placement);
-            self.document
-                .endnote_numbering
-                .push(self.effective_endnote_numbering());
+            self.document.endnotes.push(Endnote {
+                content: paragraph,
+                section_index: SectionIndex::new(self.current_section_index.max(1)),
+                placement: self.document.endnote_placement,
+                numbering: Some(self.effective_endnote_numbering()),
+            });
         }
         Ok(())
     }
@@ -16446,15 +16476,18 @@ impl Parser {
             && !self.state.inside_shape
         {
             let image_index = self.document.inline_images.len();
-            let marker =
-                inline_image_marker(image_index).ok_or(ParseError::ResourceLimitExceeded {
+            let marker = inline_image_marker_for_id(InlineImageId::new(image_index)).ok_or(
+                ParseError::ResourceLimitExceeded {
                     resource: "inline image references".to_string(),
                     offset,
-                })?;
+                },
+            )?;
             let block_index = self.document.blocks.len();
             self.push_document_block(Block::Image(image.clone()), offset)?;
-            self.document.inline_image_block_indices.push(block_index);
-            self.document.inline_images.push(image);
+            self.document.inline_images.push(InlineImageEntry {
+                image,
+                body_block_index: BlockIndex::new(block_index),
+            });
             push_text_to_paragraph(
                 &mut self.current_paragraph,
                 &marker.to_string(),
@@ -17127,23 +17160,29 @@ impl Parser {
         } else if destination == Destination::Footnote {
             let count = paragraphs.len();
             self.ensure_note_capacity(count, offset)?;
-            self.document.footnotes.extend(paragraphs);
+            let section_index = SectionIndex::new(self.current_section_index.max(1));
+            let body_block_index = BlockIndex::new(self.current_footnote_reference_block_index);
             self.document
-                .footnote_section_indices
-                .extend(std::iter::repeat(self.current_section_index.max(1)).take(count));
-            self.document
-                .footnote_block_indices
-                .extend(std::iter::repeat(self.current_footnote_reference_block_index).take(count));
+                .footnotes
+                .extend(paragraphs.into_iter().map(|content| Footnote {
+                    content,
+                    section_index,
+                    body_block_index,
+                    numbering: None,
+                }));
         } else if destination == Destination::Endnote {
             let count = paragraphs.len();
             self.ensure_note_capacity(count, offset)?;
-            self.document.endnotes.extend(paragraphs);
+            let section_index = SectionIndex::new(self.current_section_index.max(1));
+            let placement = self.document.endnote_placement;
             self.document
-                .endnote_section_indices
-                .extend(std::iter::repeat(self.current_section_index.max(1)).take(count));
-            self.document
-                .endnote_placements
-                .extend(std::iter::repeat(self.document.endnote_placement).take(count));
+                .endnotes
+                .extend(paragraphs.into_iter().map(|content| Endnote {
+                    content,
+                    section_index,
+                    placement,
+                    numbering: None,
+                }));
         } else if destination != Destination::Background {
             self.reserve_document_blocks(paragraphs.len(), offset)?;
             self.document

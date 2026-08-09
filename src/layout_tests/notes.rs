@@ -1,3 +1,23 @@
+    use crate::model::{BlockIndex, Endnote, Footnote, SectionIndex};
+
+    fn footnote(content: Paragraph) -> Footnote {
+        Footnote {
+            content,
+            section_index: SectionIndex::new(1),
+            body_block_index: BlockIndex::new(0),
+            numbering: None,
+        }
+    }
+
+    fn endnote(content: Paragraph, placement: EndnotePlacement) -> Endnote {
+        Endnote {
+            content,
+            section_index: SectionIndex::new(1),
+            placement,
+            numbering: None,
+        }
+    }
+
     #[test]
     fn lays_out_footnotes_after_body_with_separator() {
         let mut document = Document::default();
@@ -8,13 +28,13 @@
                 style: Default::default(),
             }],
         })];
-        document.footnotes = vec![Paragraph {
+        document.footnotes = vec![footnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
                 text: "* Footnote text".to_string(),
                 style: Default::default(),
             }],
-        }];
+        })];
 
         let layout = LayoutEngine::layout(&document);
         let page = &layout.pages[0];
@@ -49,13 +69,13 @@
                 style: Default::default(),
             }],
         })];
-        document.footnotes = vec![Paragraph {
+        document.footnotes = vec![footnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
                 text: "Bottom footnote".to_string(),
                 style: Default::default(),
             }],
-        }];
+        })];
 
         let layout = LayoutEngine::layout(&document);
         let page = &layout.pages[0];
@@ -155,13 +175,13 @@
                 style: Default::default(),
             }],
         })];
-        document.endnotes = vec![Paragraph {
+        document.endnotes = vec![endnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
                 text: "* Endnote text".to_string(),
                 style: Default::default(),
             }],
-        }];
+        }, document.endnote_placement)];
 
         let layout = LayoutEngine::layout(&document);
         let page = &layout.pages[0];
@@ -196,13 +216,13 @@
                 style: Default::default(),
             }],
         })];
-        document.endnotes = vec![Paragraph {
+        document.endnotes = vec![endnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
                 text: "Endnote text".to_string(),
                 style: Default::default(),
             }],
-        }];
+        }, document.endnote_placement)];
 
         let layout = LayoutEngine::layout(&document);
 
@@ -217,20 +237,20 @@
         document.footnote_placement = FootnotePlacement::BottomOfPage;
         document.endnote_placement = EndnotePlacement::EndOfDocument;
         document.blocks = vec![paragraph_with_text("Body")];
-        document.endnotes = vec![Paragraph {
+        document.endnotes = vec![endnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
                 text: "Endnote text".to_string(),
                 style: Default::default(),
             }],
-        }];
-        document.footnotes = vec![Paragraph {
+        }, document.endnote_placement)];
+        document.footnotes = vec![footnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
                 text: "Footnote text".to_string(),
                 style: Default::default(),
             }],
-        }];
+        })];
 
         let layout = LayoutEngine::layout(&document);
         let page = &layout.pages[0];

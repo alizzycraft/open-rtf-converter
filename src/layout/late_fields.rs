@@ -886,7 +886,7 @@ pub(in crate::layout) fn footnote_reference_pages(
                 next_footnote_reference_marker_range(&fragment.text, search_start)
             {
                 if let Some(index) = parse_footnote_reference_marker_id(&fragment.text[start..end])
-                    && let Some(reference_page) = reference_pages.get_mut(index)
+                    && let Some(reference_page) = reference_pages.get_mut(index.get())
                     && reference_page.is_none()
                 {
                     *reference_page = Some(page_number);
@@ -908,7 +908,8 @@ pub(in crate::layout) fn replace_endnote_reference_markers_in_text(
     while let Some((start, end)) = next_endnote_reference_marker_range(text, search_start) {
         output.push_str(&text[search_start..start]);
         let replacement = parse_endnote_reference_marker_id(&text[start..end])
-            .map(|index| {
+            .map(|id| {
+                let index = id.get();
                 let numbering = endnote_numbering_for(document, index);
                 let note_page = rendered_endnote_pages
                     .get(index)
@@ -942,7 +943,8 @@ pub(in crate::layout) fn replace_footnote_reference_markers_in_text(
     while let Some((start, end)) = next_footnote_reference_marker_range(text, search_start) {
         output.push_str(&text[search_start..start]);
         let replacement = parse_footnote_reference_marker_id(&text[start..end])
-            .map(|index| {
+            .map(|id| {
+                let index = id.get();
                 let numbering = footnote_numbering_for(document, index);
                 let sequence = footnote_sequence_for_reference_page(
                     document,
@@ -968,11 +970,7 @@ pub(in crate::layout) fn footnote_sequence_for_reference_page(
 ) -> usize {
     match footnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
-        NoteNumberRestart::EachSection => note_sequence_for_index(
-            NoteNumberRestart::EachSection,
-            &document.footnote_section_indices,
-            index,
-        ),
+        NoteNumberRestart::EachSection => footnote_section_sequence(document, index),
         NoteNumberRestart::EachPage => reference_pages
             .iter()
             .enumerate()
@@ -1465,16 +1463,16 @@ pub(in crate::layout) fn parse_bookmark_page_marker_id(text: &str, prefix: &str)
         .then(|| id.parse::<usize>().ok())?
 }
 
-pub(in crate::layout) fn parse_footnote_reference_marker_id(text: &str) -> Option<usize> {
+pub(in crate::layout) fn parse_footnote_reference_marker_id(text: &str) -> Option<FootnoteId> {
     let rest = text.strip_prefix(FOOTNOTE_REFERENCE_MARKER)?;
     let id = rest.strip_suffix(FOOTNOTE_REFERENCE_MARKER_END)?;
     (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok())?
+        .then(|| id.parse::<usize>().ok().map(FootnoteId::new))?
 }
 
-pub(in crate::layout) fn parse_endnote_reference_marker_id(text: &str) -> Option<usize> {
+pub(in crate::layout) fn parse_endnote_reference_marker_id(text: &str) -> Option<EndnoteId> {
     let rest = text.strip_prefix(ENDNOTE_REFERENCE_MARKER)?;
     let id = rest.strip_suffix(ENDNOTE_REFERENCE_MARKER_END)?;
     (!id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit()))
-        .then(|| id.parse::<usize>().ok())?
+        .then(|| id.parse::<usize>().ok().map(EndnoteId::new))?
 }

@@ -1484,7 +1484,7 @@
                 Block::Image(image) => Some(image),
                 _ => None,
             })
-            .or_else(|| output.document.inline_images.first())
+            .or_else(|| output.document.inline_images.first().map(|entry| &entry.image))
             .expect("passive geometry placeholder");
 
         assert!(text.contains("before"));
@@ -1523,7 +1523,7 @@
                 Block::Image(image) => Some(image),
                 _ => None,
             })
-            .or_else(|| output.document.inline_images.first())
+            .or_else(|| output.document.inline_images.first().map(|entry| &entry.image))
             .expect("passive geometry placeholder");
 
         assert!(text.contains("before"));

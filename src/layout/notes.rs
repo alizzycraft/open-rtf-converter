@@ -23,7 +23,7 @@ pub(in crate::layout) fn layout_remaining_footnotes(
                 .get(*idx)
                 .is_none_or(Option::is_none)
         })
-        .map(|(idx, note)| (idx, note.clone()))
+        .map(|(idx, note)| (idx, note.content.clone()))
         .collect::<Vec<_>>();
     if entries.is_empty() {
         return;
@@ -66,15 +66,8 @@ pub(in crate::layout) fn layout_footnotes_for_section(
                 .get(*idx)
                 .is_none_or(Option::is_none)
         })
-        .filter(|(idx, _)| {
-            document
-                .footnote_section_indices
-                .get(*idx)
-                .copied()
-                .unwrap_or(1)
-                == section_number
-        })
-        .map(|(idx, note)| (idx, note.clone()))
+        .filter(|(_, note)| note.section_index.get() == section_number)
+        .map(|(idx, note)| (idx, note.content.clone()))
         .collect::<Vec<_>>();
     if entries.is_empty() {
         return;
@@ -153,7 +146,7 @@ pub(in crate::layout) fn layout_footnotes_until_index(
                 .get(*idx)
                 .is_none_or(Option::is_none)
         })
-        .map(|(idx, note)| (idx, note.clone()))
+        .map(|(idx, note)| (idx, note.content.clone()))
         .collect::<Vec<_>>();
     if entries.is_empty() {
         return;
@@ -188,15 +181,8 @@ pub(in crate::layout) fn footnote_entries_until_block(
                 .get(*idx)
                 .is_none_or(Option::is_none)
         })
-        .filter(|(idx, _)| {
-            document
-                .footnote_block_indices
-                .get(*idx)
-                .copied()
-                .unwrap_or(usize::MAX)
-                <= block_index
-        })
-        .map(|(idx, note)| (idx, note.clone()))
+        .filter(|(_, note)| note.body_block_index.get() <= block_index)
+        .map(|(idx, note)| (idx, note.content.clone()))
         .collect()
 }
 
@@ -215,7 +201,7 @@ pub(in crate::layout) fn footnote_entries_until_index(
                 .get(*idx)
                 .is_none_or(Option::is_none)
         })
-        .map(|(idx, note)| (idx, note.clone()))
+        .map(|(idx, note)| (idx, note.content.clone()))
         .collect()
 }
 
@@ -515,9 +501,9 @@ pub(in crate::layout) fn footnote_numbering_for(
     index: usize,
 ) -> NoteNumbering {
     document
-        .footnote_numbering
+        .footnotes
         .get(index)
-        .copied()
+        .and_then(|note| note.numbering)
         .unwrap_or(NoteNumbering {
             start: document.footnote_number_start,
             format: document.footnote_number_format,
@@ -528,9 +514,9 @@ pub(in crate::layout) fn footnote_numbering_for(
 
 pub(in crate::layout) fn endnote_numbering_for(document: &Document, index: usize) -> NoteNumbering {
     document
-        .endnote_numbering
+        .endnotes
         .get(index)
-        .copied()
+        .and_then(|note| note.numbering)
         .unwrap_or(NoteNumbering {
             start: document.endnote_number_start,
             format: document.endnote_number_format,
@@ -542,15 +528,11 @@ pub(in crate::layout) fn endnote_numbering_for(document: &Document, index: usize
 pub(in crate::layout) fn footnote_sequence_for_index(document: &Document, index: usize) -> usize {
     match footnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
-        NoteNumberRestart::EachSection => note_sequence_for_index(
-            NoteNumberRestart::EachSection,
-            &document.footnote_section_indices,
-            index,
-        ),
+        NoteNumberRestart::EachSection => footnote_section_sequence(document, index),
         NoteNumberRestart::EachPage => {
             let page_group = explicit_page_group_for_footnote(document, index);
             document
-                .footnote_block_indices
+                .footnotes
                 .iter()
                 .enumerate()
                 .take(index.saturating_add(1))
@@ -571,11 +553,7 @@ pub(in crate::layout) fn footnote_sequence_for_rendered_page(
 ) -> usize {
     match footnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
-        NoteNumberRestart::EachSection => note_sequence_for_index(
-            NoteNumberRestart::EachSection,
-            &document.footnote_section_indices,
-            index,
-        ),
+        NoteNumberRestart::EachSection => footnote_section_sequence(document, index),
         NoteNumberRestart::EachPage => rendered_footnote_pages
             .iter()
             .enumerate()
@@ -600,11 +578,7 @@ pub(in crate::layout) fn endnote_sequence_for_rendered_page(
 ) -> usize {
     match endnote_numbering_for(document, index).restart {
         NoteNumberRestart::Continuous => index.saturating_add(1),
-        NoteNumberRestart::EachSection => note_sequence_for_index(
-            NoteNumberRestart::EachSection,
-            &document.endnote_section_indices,
-            index,
-        ),
+        NoteNumberRestart::EachSection => endnote_section_sequence(document, index),
         NoteNumberRestart::EachPage => rendered_endnote_pages
             .iter()
             .enumerate()
@@ -626,9 +600,9 @@ pub(in crate::layout) fn explicit_page_group_for_footnote(
     index: usize,
 ) -> usize {
     let block_index = document
-        .footnote_block_indices
+        .footnotes
         .get(index)
-        .copied()
+        .map(|note| note.body_block_index.get())
         .unwrap_or(usize::MAX);
     document
         .blocks
@@ -639,23 +613,34 @@ pub(in crate::layout) fn explicit_page_group_for_footnote(
         .saturating_add(1)
 }
 
-pub(in crate::layout) fn note_sequence_for_index(
-    restart: NoteNumberRestart,
-    section_indices: &[usize],
-    index: usize,
-) -> usize {
-    match restart {
-        NoteNumberRestart::Continuous | NoteNumberRestart::EachPage => index.saturating_add(1),
-        NoteNumberRestart::EachSection => {
-            let section = section_indices.get(index).copied().unwrap_or(1);
-            section_indices
-                .iter()
-                .take(index.saturating_add(1))
-                .filter(|candidate| **candidate == section)
-                .count()
-                .max(1)
-        }
-    }
+pub(in crate::layout) fn footnote_section_sequence(document: &Document, index: usize) -> usize {
+    let section = document
+        .footnotes
+        .get(index)
+        .map(|note| note.section_index.get())
+        .unwrap_or(1);
+    document
+        .footnotes
+        .iter()
+        .take(index.saturating_add(1))
+        .filter(|note| note.section_index.get() == section)
+        .count()
+        .max(1)
+}
+
+pub(in crate::layout) fn endnote_section_sequence(document: &Document, index: usize) -> usize {
+    let section = document
+        .endnotes
+        .get(index)
+        .map(|note| note.section_index.get())
+        .unwrap_or(1);
+    document
+        .endnotes
+        .iter()
+        .take(index.saturating_add(1))
+        .filter(|note| note.section_index.get() == section)
+        .count()
+        .max(1)
 }
 
 pub(in crate::layout) fn note_display_paragraph(
@@ -851,7 +836,7 @@ pub(in crate::layout) fn layout_endnotes_for_placement(
         .enumerate()
         .filter(|(idx, _)| rendered_endnote_pages.get(*idx).is_none_or(Option::is_none))
         .filter(|(idx, _)| endnote_placement_for(document, *idx) == placement)
-        .map(|(idx, note)| (idx, note.clone()))
+        .map(|(idx, note)| (idx, note.content.clone()))
         .collect::<Vec<_>>();
     if entries.is_empty() {
         return;
@@ -938,13 +923,9 @@ pub(in crate::layout) fn layout_endnotes_for_section(
         if endnote_placement_for(document, idx) != EndnotePlacement::EndOfSection {
             continue;
         }
-        let note_section = document
-            .endnote_section_indices
-            .get(idx)
-            .copied()
-            .unwrap_or(1);
+        let note_section = endnote.section_index.get();
         if note_section == section_number {
-            section_notes.push((idx, endnote.clone()));
+            section_notes.push((idx, endnote.content.clone()));
         }
     }
     if section_notes.is_empty() {
@@ -985,13 +966,7 @@ pub(in crate::layout) fn layout_remaining_section_endnotes(
         .enumerate()
         .filter(|(idx, _)| rendered_endnote_pages.get(*idx).is_none_or(Option::is_none))
         .filter(|(idx, _)| endnote_placement_for(document, *idx) == EndnotePlacement::EndOfSection)
-        .map(|(idx, _)| {
-            document
-                .endnote_section_indices
-                .get(idx)
-                .copied()
-                .unwrap_or(1)
-        })
+        .map(|(_, note)| note.section_index.get())
         .collect::<Vec<_>>();
     sections.sort_unstable();
     sections.dedup();
@@ -1018,8 +993,8 @@ pub(in crate::layout) fn endnote_placement_for(
     index: usize,
 ) -> EndnotePlacement {
     document
-        .endnote_placements
+        .endnotes
         .get(index)
-        .copied()
+        .map(|note| note.placement)
         .unwrap_or(document.endnote_placement)
 }

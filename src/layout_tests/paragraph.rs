@@ -4,7 +4,7 @@
         let after_baseline_from_page_top = |rtf: &str, needle: &str| {
             let parsed = parse_rtf(rtf).expect("image fixture should parse");
             assert_eq!(parsed.document.inline_images.len(), 1);
-            assert_eq!(parsed.document.inline_image_block_indices.len(), 1);
+            assert_eq!(parsed.document.inline_images.len(), 1);
             let layout = LayoutEngine::layout_with_font_provider(&parsed.document, Some(&provider));
             let after = layout.pages[0]
                 .items

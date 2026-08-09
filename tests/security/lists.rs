@@ -3639,11 +3639,17 @@ fn footnote_page_restart_uses_authored_page_breaks_for_passive_numbering() {
         )),
         "second authored page note reference should be a safe layout-resolved marker: {text:?}"
     );
-    assert_eq!(parsed.document.footnote_block_indices.len(), 2);
+    assert_eq!(parsed.document.footnotes.len(), 2);
     assert!(
-        parsed.document.footnote_block_indices[0] < parsed.document.footnote_block_indices[1],
+        parsed.document.footnotes[0].body_block_index
+            < parsed.document.footnotes[1].body_block_index,
         "footnote reference block order should be monotonic: {:?}",
-        parsed.document.footnote_block_indices
+        parsed
+            .document
+            .footnotes
+            .iter()
+            .map(|note| note.body_block_index.get())
+            .collect::<Vec<_>>()
     );
     assert!(
         parsed
@@ -3947,8 +3953,24 @@ fn section_note_restart_controls_render_passive_section_local_numbering() {
         )),
         "text: {text:?}"
     );
-    assert_eq!(parsed.document.footnote_section_indices, vec![1, 2]);
-    assert_eq!(parsed.document.endnote_section_indices, vec![1, 2]);
+    assert_eq!(
+        parsed
+            .document
+            .footnotes
+            .iter()
+            .map(|note| note.section_index.get())
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(
+        parsed
+            .document
+            .endnotes
+            .iter()
+            .map(|note| note.section_index.get())
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
     assert!(
         parsed
             .diagnostics

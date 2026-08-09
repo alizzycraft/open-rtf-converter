@@ -35,8 +35,8 @@ use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
     Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
     DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END,
-    EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
-    FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
+    EndnoteId, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
+    FontFamilyHint, FontPitch, FootnoteId, FootnotePlacement, ImageFormat, LineNumberRestart,
     ModelInvariantError, NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering,
     PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER,
     PASSIVE_MATH_INLINE_LEAD_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
@@ -50,7 +50,8 @@ use crate::model::{
     TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
     Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
     TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TableRowWrapMargins, UnderlineStyle, inline_image_marker_index, validate_document_invariants,
+    TableRowWrapMargins, UnderlineStyle, inline_image_marker_id, inline_image_marker_index,
+    validate_document_invariants,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -1317,7 +1318,11 @@ impl LayoutEngine {
                     );
                 }
                 Block::Image(image) => {
-                    if document.inline_image_block_indices.contains(&block_idx) {
+                    if document
+                        .inline_images
+                        .iter()
+                        .any(|entry| entry.body_block_index.get() == block_idx)
+                    {
                         continue;
                     }
                     layout_image(

@@ -75,7 +75,7 @@ fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
             .count(),
         1
     );
-    assert_eq!(parsed.document.inline_image_block_indices.len(), 1);
+    assert_eq!(parsed.document.inline_images.len(), 1);
     let command = parsed.document.inline_images[0]
         .vector_commands
         .iter()
@@ -912,7 +912,7 @@ fn paragraph_start_images_do_not_create_an_extra_blank_flow_line() {
     let position = |input: &[u8], needle: &str| {
         let parsed = parse_rtf_bytes(input).unwrap();
         assert_eq!(parsed.document.inline_images.len(), 1);
-        assert_eq!(parsed.document.inline_image_block_indices.len(), 1);
+        assert_eq!(parsed.document.inline_images.len(), 1);
 
         let output = convert_rtf_to_pdf(input, &ConvertOptions::browser_safe_defaults()).unwrap();
         audit_passive_pdf_bytes(&output.pdf).unwrap();
