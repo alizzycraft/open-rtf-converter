@@ -10,20 +10,26 @@ use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineJoin, LineStyle};
 use open_rtf_converter::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DOCUMENT_CHARS_MARKER,
-    DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, ENDNOTE_REFERENCE_MARKER,
-    ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
-    FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch, ImageFormat, ImageToneAdjustment,
-    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment,
-    ParagraphFrameVerticalAlignment, PassiveMathFractionPart, PassiveMathLimitPart,
-    SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImageTextHorizontalAlign,
-    StaticImageTextVerticalAlign, StaticImageVectorCommand, StaticImageVectorFillRule,
-    StaticImageVectorPathSegment, StaticImageWrapSide, StaticShapeArrowhead,
-    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
-    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor, TOTAL_PAGES_MARKER, TabAlignment,
+    Block, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, DynamicField,
+    ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END, EndnotePlacement,
+    FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontFamilyHint, FontPitch,
+    ImageFormat, ImageToneAdjustment, PASSIVE_ADVANCE_MARKER, PageVerticalAlignment,
+    ParagraphFrameVerticalAlignment, PassiveMathFractionPart, PassiveMathLimitPart, ShadingPattern,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageWrapSide,
+    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
+    StaticShapeLineJoin, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor, TabAlignment,
     TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
     inline_image_marker_index,
 };
+
+const PAGE_NUMBER_MARKER: &str = "\u{f0000}";
+const TOTAL_PAGES_MARKER: &str = "\u{f0001}";
+const SECTION_NUMBER_MARKER: &str = "\u{f0002}";
+const SECTION_PAGES_MARKER: &str = "\u{f0004}";
+const DOCUMENT_WORDS_MARKER: &str = "\u{f0008}";
+const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
+const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
 };
@@ -2889,7 +2895,19 @@ fn paragraph_run_style_for_text<'a>(
 
 fn append_paragraph_text(text: &mut String, paragraph: &open_rtf_converter::model::Paragraph) {
     for run in &paragraph.runs {
-        text.push_str(&run.text);
+        if let Some(field) = run.dynamic_field {
+            text.push_str(match field {
+                DynamicField::PageNumber => PAGE_NUMBER_MARKER,
+                DynamicField::TotalPages => TOTAL_PAGES_MARKER,
+                DynamicField::SectionNumber => SECTION_NUMBER_MARKER,
+                DynamicField::SectionPages => SECTION_PAGES_MARKER,
+                DynamicField::DocumentWords => DOCUMENT_WORDS_MARKER,
+                DynamicField::DocumentCharacters => DOCUMENT_CHARS_MARKER,
+                DynamicField::DocumentCharactersWithSpaces => DOCUMENT_CHARS_WITH_SPACES_MARKER,
+            });
+        } else {
+            text.push_str(&run.text);
+        }
     }
 }
 

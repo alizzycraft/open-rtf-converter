@@ -134,7 +134,7 @@
             PdfFontFamily::Helvetica,
         );
         pages[0].items.push(deep_drawing_wrapped_item(
-            passive_text_item(TOTAL_PAGES_MARKER, marker_x, marker_baseline),
+            passive_dynamic_field_item(DynamicField::TotalPages, marker_x, marker_baseline),
             2048,
         ));
         pages[0].items.push(deep_drawing_wrapped_item(
@@ -142,7 +142,7 @@
             2048,
         ));
         pages[0].items.push(deep_drawing_wrapped_item(
-            passive_text_item(SECTION_PAGES_MARKER, 36.0, 40.0),
+            passive_dynamic_field_item(DynamicField::SectionPages, 36.0, 40.0),
             2048,
         ));
         let old_suffix_x = leaf_text_fragment(&pages[0].items[1]).x;
@@ -155,8 +155,8 @@
         let section_pages = leaf_text_fragment(&pages[0].items[2]);
         assert_eq!(total.text, "2");
         assert_eq!(section_pages.text, "2");
-        assert!(!total.text.contains(TOTAL_PAGES_MARKER));
-        assert!(!section_pages.text.contains(SECTION_PAGES_MARKER));
+        assert_eq!(total.dynamic_field, None);
+        assert_eq!(section_pages.dynamic_field, None);
         assert!(
             suffix.x < old_suffix_x,
             "suffix should shift left after replacing the bounded page-count placeholder"
@@ -256,6 +256,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Wrapped beside image".to_string(),
                     style: Default::default(),
                 }],
@@ -330,6 +331,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Wrapped with larger margin".to_string(),
                     style: Default::default(),
                 }],
@@ -569,6 +571,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour".to_string(),
                     style: Default::default(),
                 }],
@@ -663,6 +666,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "center gap words should flow between the two passive picture frames before returning below them"
                         .to_string(),
                     style: Default::default(),
@@ -762,6 +766,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "wrapped words should start beside the passive static shape frame"
                         .to_string(),
                     style: Default::default(),
@@ -1255,6 +1260,7 @@
             text: vec![Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Layered Box".to_string(),
                     style: Default::default(),
                 }],
@@ -1383,6 +1389,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Body text".to_string(),
                     style: Default::default(),
                 }],
@@ -1816,6 +1823,7 @@
             text: vec![Paragraph {
                 style: paragraph_style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Styled shape".to_string(),
                     style: Default::default(),
                 }],
@@ -1931,6 +1939,7 @@
             text: vec![Paragraph {
                 style: ParagraphStyle::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Bottom anchored".to_string(),
                     style: Default::default(),
                 }],
@@ -2017,6 +2026,7 @@
             text: vec![Paragraph {
                 style: ParagraphStyle::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Centered".to_string(),
                     style: Default::default(),
                 }],
@@ -2909,6 +2919,7 @@
         let paragraph = Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Alpha\u{00ad}Beta".to_string(),
                 style: style.clone(),
             }],
@@ -2935,6 +2946,7 @@
         let hyphenated = Paragraph {
             style: hyphenated_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: word.to_string(),
                 style: style.clone(),
             }],
@@ -2979,6 +2991,7 @@
         let tight_zone = Paragraph {
             style: tight_zone_style.clone(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: word.to_string(),
                 style: style.clone(),
             }],
@@ -3014,6 +3027,7 @@
         let hyphenated = Paragraph {
             style: hyphenated_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: word.to_string(),
                 style: style.clone(),
             }],
@@ -3044,6 +3058,7 @@
         let paragraph = Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "A\u{00a0}B C".to_string(),
                 style: style.clone(),
             }],
@@ -3065,6 +3080,7 @@
         let paragraph = Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "A\u{2011}B C".to_string(),
                 style: style.clone(),
             }],
@@ -3086,6 +3102,7 @@
         let mut paragraph = Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Alpha Beta".to_string(),
                 style: style.clone(),
             }],
@@ -3115,6 +3132,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Dropped paragraph".to_string(),
                 style: CharacterStyle::default(),
             }],
@@ -4011,6 +4029,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "First\nSecond".to_string(),
                 style: Default::default(),
             }],
@@ -4032,6 +4051,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "First\nSecond".to_string(),
                 style: Default::default(),
             }],
@@ -4115,6 +4135,7 @@
             document.blocks.push(Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Body paragraph.".to_string(),
                     style: Default::default(),
                 }],
@@ -4145,31 +4166,42 @@
         let style = CharacterStyle::default();
         let paragraph = Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("A {TOTAL_PAGES_MARKER} tail"),
-                style: style.clone(),
-            }],
+            runs: vec![
+                Run {
+                    dynamic_field: None,
+                    text: "A ".to_string(),
+                    style: style.clone(),
+                },
+                Run {
+                    dynamic_field: Some(DynamicField::TotalPages),
+                    text: String::new(),
+                    style: style.clone(),
+                },
+                Run {
+                    dynamic_field: None,
+                    text: " tail".to_string(),
+                    style: style.clone(),
+                },
+            ],
         };
-        let raw_marker_width =
-            measure_text_with_family(TOTAL_PAGES_MARKER, &style, PdfFontFamily::Helvetica);
         let placeholder_width = measure_text_with_family(
             LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
             &style,
             PdfFontFamily::Helvetica,
         );
         let prefix_width = measure_text_with_family("A ", &style, PdfFontFamily::Helvetica);
-        let line_width = prefix_width + raw_marker_width + 0.5;
+        let line_width = prefix_width + placeholder_width - 0.5;
         assert!(
             line_width < prefix_width + placeholder_width,
-            "fixture should distinguish raw marker width from placeholder width"
+            "fixture should force the typed field onto the next line"
         );
 
         let lines = wrap_paragraph(&paragraph, line_width, &test_markers("1", "1"), &document);
 
         assert_eq!(line_text(&lines[0]), "A ");
         assert!(
-            line_text(&lines[1]).starts_with(TOTAL_PAGES_MARKER),
-            "late NUMPAGES marker should wrap using bounded placeholder width"
+            line_text(&lines[1]).starts_with(LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER),
+            "late NUMPAGES field should wrap using bounded placeholder width"
         );
     }
 
@@ -4179,30 +4211,53 @@
         let style = CharacterStyle::default();
         let paragraph = Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("A {SECTION_PAGES_MARKER} tail"),
-                style: style.clone(),
-            }],
+            runs: vec![
+                Run {
+                    dynamic_field: None,
+                    text: "A ".to_string(),
+                    style: style.clone(),
+                },
+                Run {
+                    dynamic_field: Some(DynamicField::SectionPages),
+                    text: String::new(),
+                    style: style.clone(),
+                },
+                Run {
+                    dynamic_field: None,
+                    text: " tail".to_string(),
+                    style: style.clone(),
+                },
+            ],
         };
-        let raw_marker_width =
-            measure_text_with_family(SECTION_PAGES_MARKER, &style, PdfFontFamily::Helvetica);
         let placeholder_width = measure_text_with_family(
             LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
             &style,
             PdfFontFamily::Helvetica,
         );
         let prefix_width = measure_text_with_family("A ", &style, PdfFontFamily::Helvetica);
-        let line_width = prefix_width + raw_marker_width + 0.5;
+        let line_width = prefix_width + placeholder_width - 0.5;
         assert!(
             line_width < prefix_width + placeholder_width,
-            "fixture should distinguish raw marker width from placeholder width"
+            "fixture should force the typed field onto the next line"
         );
 
         let lines = wrap_paragraph(&paragraph, line_width, &test_markers("1", "1"), &document);
 
         assert_eq!(line_text(&lines[0]), "A ");
         assert!(
-            line_text(&lines[1]).starts_with(SECTION_PAGES_MARKER),
-            "late SECTIONPAGES marker should wrap using bounded placeholder width"
+            line_text(&lines[1]).starts_with(LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER),
+            "late SECTIONPAGES field should wrap using bounded placeholder width"
         );
+    }
+    fn passive_dynamic_field_item(
+        field: DynamicField,
+        x: f32,
+        baseline_y: f32,
+    ) -> LayoutItem {
+        let mut item = passive_text_item(LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER, x, baseline_y);
+        let LayoutItem::Text(fragment) = &mut item else {
+            unreachable!("passive text helper must create a text fragment");
+        };
+        fragment.dynamic_field = Some(field);
+        item
     }

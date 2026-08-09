@@ -370,6 +370,7 @@ pub(in crate::layout) fn wrap_paragraph_with_font_provider_dynamic_width(
                     continue;
                 }
                 let next_segment = FlowRun {
+                    dynamic_field: None,
                     text: trimmed,
                     style: segment.style,
                     width: 0.0,
@@ -552,6 +553,7 @@ pub(in crate::layout) fn apply_passive_math_operator_spacing(
             }
             if start < index {
                 output.runs.push(Run {
+                    dynamic_field: None,
                     text: run.text[start..index].to_string(),
                     style: run.style.clone(),
                 });
@@ -559,6 +561,7 @@ pub(in crate::layout) fn apply_passive_math_operator_spacing(
             let side_space = run.style.font_size_points() * side_space_em;
             push_passive_math_advance(&mut output.runs, side_space, &run.style);
             output.runs.push(Run {
+                dynamic_field: None,
                 text: ch.to_string(),
                 style: run.style.clone(),
             });
@@ -567,6 +570,7 @@ pub(in crate::layout) fn apply_passive_math_operator_spacing(
         }
         if start < run.text.len() {
             output.runs.push(Run {
+                dynamic_field: None,
                 text: run.text[start..].to_string(),
                 style: run.style.clone(),
             });
@@ -680,11 +684,13 @@ pub(in crate::layout) fn group_word_compatible_passive_math_nary_runs(
         lead_style.character_spacing_twips =
             points_to_bounded_twips(WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS);
         output.runs.push(Run {
+            dynamic_field: None,
             text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
             style: lead_style,
         });
         marker_style.character_spacing_twips = points_to_bounded_twips(nary_width);
         output.runs.push(Run {
+            dynamic_field: None,
             text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
             style: marker_style,
         });
@@ -763,6 +769,7 @@ pub(in crate::layout) fn stack_passive_math_limits(
         marker_style.font_size_scale_percent = 100;
         marker_style.character_spacing_twips = points_to_bounded_twips(stack_width);
         output.runs.push(Run {
+            dynamic_field: None,
             text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
             style: marker_style.clone(),
         });
@@ -851,11 +858,13 @@ pub(in crate::layout) fn stack_passive_math_fractions(
         lead_style.character_spacing_twips =
             points_to_bounded_twips(WORD_INLINE_OFFICE_MATH_LEAD_IN_POINTS);
         output.runs.push(Run {
+            dynamic_field: None,
             text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
             style: lead_style,
         });
         marker_style.character_spacing_twips = points_to_bounded_twips(fraction_width);
         output.runs.push(Run {
+            dynamic_field: None,
             text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
             style: marker_style.clone(),
         });
@@ -950,6 +959,7 @@ pub(in crate::layout) fn stack_passive_math_equation_arrays(
         marker_style.font_size_scale_percent = 100;
         marker_style.character_spacing_twips = points_to_bounded_twips(array_width);
         output.runs.push(Run {
+            dynamic_field: None,
             text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
             style: marker_style.clone(),
         });
@@ -1003,6 +1013,7 @@ pub(in crate::layout) fn passive_math_model_runs_width(
     runs.iter()
         .map(|run| {
             let flow = FlowRun {
+                dynamic_field: None,
                 text: run.text.clone(),
                 style: run.style.clone(),
                 width: 0.0,
@@ -1029,6 +1040,7 @@ pub(in crate::layout) fn push_passive_math_advance(
     style.baseline_shift_half_points = 0;
     style.character_spacing_twips = points_to_bounded_twips(width);
     runs.push(Run {
+        dynamic_field: None,
         text: PASSIVE_ADVANCE_MARKER.to_string(),
         style,
     });
@@ -1070,6 +1082,7 @@ pub(in crate::layout) fn apply_fit_text_scaling_to_run_groups(
             let mut style = run.style.clone();
             style.fit_text_width_twips = None;
             let flow = FlowRun {
+                dynamic_field: None,
                 text: run.text.clone(),
                 line_height_points: style.font_size_points(),
                 style,
@@ -1142,6 +1155,7 @@ pub(in crate::layout) fn apply_drop_cap_to_segments(
 
         if cap_start > 0 {
             output.push(FlowRun {
+                dynamic_field: None,
                 text: segment.text[..cap_start].to_string(),
                 style: segment.style.clone(),
                 width: 0.0,
@@ -1159,6 +1173,7 @@ pub(in crate::layout) fn apply_drop_cap_to_segments(
             .saturating_mul(drop_cap_lines.max(1))
             .clamp(2, MAX_SYNTHETIC_DROP_CAP_FONT_SIZE_HALF_POINTS);
         output.push(FlowRun {
+            dynamic_field: None,
             text: cap.to_string(),
             line_height_points: cap_style.font_size_points(),
             style: cap_style,
@@ -1171,6 +1186,7 @@ pub(in crate::layout) fn apply_drop_cap_to_segments(
 
         if cap_end < segment.text.len() {
             output.push(FlowRun {
+                dynamic_field: None,
                 text: segment.text[cap_end..].to_string(),
                 style: segment.style,
                 width: 0.0,
@@ -1489,20 +1505,19 @@ pub(in crate::layout) fn split_run_for_wrapping(
     if run.style.hidden {
         return output;
     }
+    if let Some(field) = run.dynamic_field {
+        let text = dynamic_field_layout_text(field, markers);
+        let first = output.len();
+        push_display_text_segment(&mut output, text, &run.style, false);
+        for segment in &mut output[first..] {
+            segment.dynamic_field = Some(field);
+        }
+        return output;
+    }
     let mut start = 0;
     let resolved_text;
     let text = if contains_inline_marker(&run.text) {
-        resolved_text = run
-            .text
-            .replace(NESTED_TABLE_ANCHOR_MARKER, "")
-            .replace(PAGE_NUMBER_MARKER, &markers.page_number)
-            .replace(SECTION_NUMBER_MARKER, &markers.section_number)
-            .replace(DOCUMENT_WORDS_MARKER, &markers.document_words)
-            .replace(DOCUMENT_CHARS_MARKER, &markers.document_chars)
-            .replace(
-                DOCUMENT_CHARS_WITH_SPACES_MARKER,
-                &markers.document_chars_with_spaces,
-            );
+        resolved_text = run.text.replace(NESTED_TABLE_ANCHOR_MARKER, "");
         resolved_text.as_str()
     } else {
         run.text.as_str()
@@ -1549,6 +1564,7 @@ pub(in crate::layout) fn split_run_for_wrapping(
             }
             if mandatory && (idx < text.len() || has_break_terminator) {
                 output.push(FlowRun {
+                    dynamic_field: None,
                     text: "\n".to_string(),
                     style: run.style.clone(),
                     width: 0.0,
@@ -1568,6 +1584,20 @@ pub(in crate::layout) fn split_run_for_wrapping(
     }
 
     output
+}
+
+pub(in crate::layout) fn dynamic_field_layout_text(
+    field: DynamicField,
+    markers: &MarkerContext,
+) -> &str {
+    match field {
+        DynamicField::PageNumber => &markers.page_number,
+        DynamicField::TotalPages | DynamicField::SectionPages => LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER,
+        DynamicField::SectionNumber => &markers.section_number,
+        DynamicField::DocumentWords => &markers.document_words,
+        DynamicField::DocumentCharacters => &markers.document_chars,
+        DynamicField::DocumentCharactersWithSpaces => &markers.document_chars_with_spaces,
+    }
 }
 
 pub(in crate::layout) fn current_marker_context(
@@ -1601,14 +1631,7 @@ pub(in crate::layout) fn marker_context(
 }
 
 pub(in crate::layout) fn contains_inline_marker(text: &str) -> bool {
-    text.contains(PAGE_NUMBER_MARKER)
-        || text.contains(SECTION_NUMBER_MARKER)
-        || text.contains(TOTAL_PAGES_MARKER)
-        || text.contains(SECTION_PAGES_MARKER)
-        || text.contains(DOCUMENT_WORDS_MARKER)
-        || text.contains(DOCUMENT_CHARS_MARKER)
-        || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
-        || text.contains(FOOTNOTE_REFERENCE_MARKER)
+    text.contains(FOOTNOTE_REFERENCE_MARKER)
         || text.contains(FOOTNOTE_REFERENCE_MARKER_END)
         || text.contains(ENDNOTE_REFERENCE_MARKER)
         || text.contains(ENDNOTE_REFERENCE_MARKER_END)

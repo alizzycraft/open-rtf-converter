@@ -37,29 +37,28 @@ use crate::config::{
 use crate::diagnostics::Diagnostic;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BlockIndex, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color,
-    DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER, DOCUMENT_WORDS_MARKER, Document,
-    ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END, Endnote, EndnoteId, EndnotePlacement,
-    FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch,
-    Footnote, FootnoteId, FootnotePlacement, ImageCrop, ImageFormat, ImageToneAdjustment,
-    InlineImageEntry, InlineImageId, LineNumberRestart, NESTED_TABLE_ANCHOR_MARKER,
-    NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER,
+    Block, BlockIndex, BorderStyle, CharacterEmphasisMark, CharacterStyle, Color, Document,
+    DynamicField, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END, Endnote, EndnoteId,
+    EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
+    FontFamilyHint, FontPitch, Footnote, FootnoteId, FootnotePlacement, ImageCrop, ImageFormat,
+    ImageToneAdjustment, InlineImageEntry, InlineImageId, LineNumberRestart,
+    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PASSIVE_ADVANCE_MARKER,
     PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
     PageSettings, PageVerticalAlignment, Paragraph, ParagraphFrameVerticalAlignment,
-    ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, SectionIndex, ShadingPattern, StaticImage, StaticImageAlphaMask,
-    StaticImagePlacement, StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign,
-    StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment,
-    StaticImageVectorRaster, StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape,
-    StaticShapeArrowhead, StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap,
-    StaticShapeLineJoin, StaticShapePoint, StaticShapeTextVerticalAnchor,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellBorders, TableCellHorizontalMerge,
-    TableCellPadding, TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, TextRelief,
-    UnderlineStyle, inline_image_marker_for_id, normalize_missing_color_references,
-    normalize_missing_font_references, validate_document_invariants,
+    ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart, Run, SectionIndex,
+    ShadingPattern, StaticImage, StaticImageAlphaMask, StaticImagePlacement,
+    StaticImageTextHorizontalAlign, StaticImageTextVerticalAlign, StaticImageVectorCommand,
+    StaticImageVectorFillRule, StaticImageVectorPathSegment, StaticImageVectorRaster,
+    StaticImageVectorTextBounds, StaticImageWrapSide, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapePoint, StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TabAlignment, TabLeader, Table, TableCell, TableCellBorder, TableCellBorders,
+    TableCellHorizontalMerge, TableCellPadding, TableCellSpacing, TableCellTextDirection,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TableRowWrapMargins, TextRelief, UnderlineStyle, inline_image_marker_for_id,
+    normalize_missing_color_references, normalize_missing_font_references,
+    validate_document_invariants,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -5554,9 +5553,9 @@ impl Parser {
                         offset,
                     )?;
                 }
-                self.push_visible_control_text(PAGE_NUMBER_MARKER, offset)?;
+                self.push_visible_dynamic_field(DynamicField::PageNumber, offset)?;
             }
-            "sectnum" => self.push_visible_control_text(SECTION_NUMBER_MARKER, offset)?,
+            "sectnum" => self.push_visible_dynamic_field(DynamicField::SectionNumber, offset)?,
             "chftn" => self.push_note_reference(offset)?,
             "chdate" | "chtime" | "chdpa" | "chdpl" => {
                 self.handle_dynamic_date_time_control(control.name.as_str(), offset)?
@@ -9941,7 +9940,7 @@ impl Parser {
         let sanitized_text;
         let text = if is_internal_marker(text) {
             text
-        } else if contains_internal_marker(text) {
+        } else if contains_internal_marker(text) || contains_reserved_private_use(text) {
             sanitized_text = sanitize_internal_markers(text);
             &sanitized_text
         } else {
@@ -10043,6 +10042,122 @@ impl Parser {
         } else {
             push_text_to_paragraph(paragraph, text, &self.state.paragraph, &style);
         }
+        Ok(())
+    }
+
+    fn push_dynamic_field(&mut self, field: DynamicField, offset: usize) -> Result<(), ParseError> {
+        if self.state.character.hidden {
+            return self.count_skipped_destination_bytes(1, offset);
+        }
+        self.mark_object_result_visible_content();
+        self.mark_field_result_visible_content();
+        let pending_marker = self.take_pending_or_synthesized_list_marker(offset)?;
+        let marker_run_chars = pending_marker
+            .as_ref()
+            .map(|marker| {
+                marker
+                    .runs
+                    .iter()
+                    .map(|run| run.text.chars().count())
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+        let styled_marker = pending_marker.as_ref().and_then(|marker| {
+            if marker.runs.is_empty() {
+                marker
+                    .character_style
+                    .clone()
+                    .map(|style| (marker.text.clone(), style))
+            } else {
+                None
+            }
+        });
+        let plain_marker = pending_marker
+            .as_ref()
+            .filter(|marker| marker.runs.is_empty() && marker.character_style.is_none())
+            .map(|marker| marker.text.clone());
+        let marker_chars = marker_run_chars
+            .checked_add(
+                styled_marker
+                    .as_ref()
+                    .map(|(text, _)| text.chars().count())
+                    .unwrap_or(0),
+            )
+            .and_then(|count| {
+                count.checked_add(
+                    plain_marker
+                        .as_ref()
+                        .map(|text| text.chars().count())
+                        .unwrap_or(0),
+                )
+            })
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        self.output_text_chars = self
+            .output_text_chars
+            .checked_add(marker_chars.saturating_add(1))
+            .ok_or(ParseError::OutputTextTooLarge(offset))?;
+        if self.output_text_chars > self.limits().max_output_text_chars {
+            return Err(ParseError::OutputTextTooLarge(offset));
+        }
+
+        let paragraph = if self.state.destination == Destination::Header {
+            &mut self.current_header_paragraph
+        } else if self.state.destination == Destination::FirstPageHeader {
+            &mut self.current_first_page_header_paragraph
+        } else if self.state.destination == Destination::EvenPageHeader {
+            &mut self.current_even_page_header_paragraph
+        } else if self.state.destination == Destination::Footer {
+            &mut self.current_footer_paragraph
+        } else if self.state.destination == Destination::FirstPageFooter {
+            &mut self.current_first_page_footer_paragraph
+        } else if self.state.destination == Destination::EvenPageFooter {
+            &mut self.current_even_page_footer_paragraph
+        } else if self.state.destination == Destination::Footnote {
+            &mut self.current_footnote_paragraph
+        } else if self.state.destination == Destination::Endnote {
+            &mut self.current_endnote_paragraph
+        } else if self.state.destination == Destination::FootnoteSeparator {
+            &mut self.current_footnote_separator_paragraph
+        } else if self.state.destination == Destination::FootnoteContinuationSeparator {
+            &mut self.current_footnote_continuation_separator_paragraph
+        } else if self.state.destination == Destination::EndnoteSeparator {
+            &mut self.current_endnote_separator_paragraph
+        } else if self.state.destination == Destination::EndnoteContinuationSeparator {
+            &mut self.current_endnote_continuation_separator_paragraph
+        } else if self.state.destination == Destination::ShapeText {
+            if let Some(shape) = self.current_shape.as_mut() {
+                &mut shape.current_text_paragraph
+            } else {
+                &mut self.current_paragraph
+            }
+        } else if let Some(row) = self.current_table_row.as_mut() {
+            row.cell_open = true;
+            &mut row.current_cell_paragraph
+        } else {
+            &mut self.current_paragraph
+        };
+
+        if let Some(marker) = pending_marker.as_ref() {
+            for run in &marker.runs {
+                push_text_to_paragraph(paragraph, &run.text, &self.state.paragraph, &run.style);
+            }
+        }
+        if let Some((marker_text, marker_style)) = styled_marker.as_ref() {
+            push_text_to_paragraph(paragraph, marker_text, &self.state.paragraph, marker_style);
+        }
+        if let Some(marker_text) = plain_marker.as_ref() {
+            push_text_to_paragraph(
+                paragraph,
+                marker_text,
+                &self.state.paragraph,
+                &self.state.character,
+            );
+        }
+        let mut style = self.state.character.clone();
+        if self.state.field_result_form_field_shading {
+            style.form_field_shading = true;
+        }
+        push_dynamic_field_to_paragraph(paragraph, field, &self.state.paragraph, &style);
         Ok(())
     }
 
@@ -10240,6 +10355,60 @@ impl Parser {
             | Destination::Ignored
             | Destination::Metadata
             | Destination::ObjectData => self.count_skipped_destination_bytes(text.len(), offset),
+        }
+    }
+
+    fn push_visible_dynamic_field(
+        &mut self,
+        field: DynamicField,
+        offset: usize,
+    ) -> Result<(), ParseError> {
+        if self.state.destination == Destination::Body && self.state.table_nesting_level > 1 {
+            if self.state.character.hidden {
+                return self.count_skipped_destination_bytes(1, offset);
+            }
+            self.output_text_chars = self
+                .output_text_chars
+                .checked_add(1)
+                .ok_or(ParseError::OutputTextTooLarge(offset))?;
+            if self.output_text_chars > self.limits().max_output_text_chars {
+                return Err(ParseError::OutputTextTooLarge(offset));
+            }
+            self.begin_nested_table_capture();
+            if let Some(row) = self.current_table_row.as_mut()
+                && let Some(capture) = row.nested_table_capture.as_mut()
+            {
+                push_dynamic_field_to_paragraph(
+                    &mut capture.current_cell_paragraph,
+                    field,
+                    &self.state.paragraph,
+                    &self.state.character,
+                );
+                return Ok(());
+            }
+        }
+
+        match self.state.destination {
+            Destination::Body => {
+                if self.current_table.is_some() && self.current_table_row.is_none() {
+                    self.finish_table(offset)?;
+                }
+                self.push_dynamic_field(field, offset)
+            }
+            Destination::Header
+            | Destination::FirstPageHeader
+            | Destination::EvenPageHeader
+            | Destination::Footer
+            | Destination::FirstPageFooter
+            | Destination::EvenPageFooter
+            | Destination::ShapeText
+            | Destination::Footnote
+            | Destination::Endnote
+            | Destination::FootnoteSeparator
+            | Destination::FootnoteContinuationSeparator
+            | Destination::EndnoteSeparator
+            | Destination::EndnoteContinuationSeparator => self.push_dynamic_field(field, offset),
+            _ => self.count_skipped_destination_bytes(1, offset),
         }
     }
 
@@ -11360,6 +11529,12 @@ impl Parser {
 
         let result = if let Err(error) = leading_result {
             Err(error)
+        } else if let Some(field) = result.dynamic_field {
+            let previous_destination = self.state.destination;
+            self.state.destination = destination;
+            let pushed = self.push_visible_dynamic_field(field, offset);
+            self.state.destination = previous_destination;
+            pushed
         } else if field_instruction_name(instruction) == Some("EQ") {
             if let Some(segments) = passive_eq_field_segments(instruction).filter(|segments| {
                 segments
@@ -11606,6 +11781,7 @@ impl Parser {
                 Some(offset),
             ));
             Some(PassiveFieldResult {
+                dynamic_field: None,
                 text: String::new(),
                 font_name: None,
                 font_size_half_points: None,
@@ -11619,6 +11795,7 @@ impl Parser {
                 Some(offset),
             ));
             Some(PassiveFieldResult {
+                dynamic_field: None,
                 text: String::new(),
                 font_name: None,
                 font_size_half_points: None,
@@ -11648,6 +11825,11 @@ impl Parser {
 
     fn passive_doc_property_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
+        if self.document_stat_property_field_text(&name).is_none()
+            && let Some(field) = document_stat_property_dynamic_field(&name)
+        {
+            return Some(PassiveFieldResult::dynamic(field));
+        }
         let text = if let Some(text) = self.passive_document_property_field_text(&name, instruction)
         {
             text
@@ -11660,6 +11842,7 @@ impl Parser {
                 .clone()
         };
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text,
             font_name: None,
             font_size_half_points: None,
@@ -11676,6 +11859,7 @@ impl Parser {
                 stored_name.eq_ignore_ascii_case(&name).then(|| text)
             })?;
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text: text.clone(),
             font_name: None,
             font_size_half_points: None,
@@ -11685,7 +11869,13 @@ impl Parser {
 
     fn passive_info_field_result(&self, instruction: &str) -> Option<PassiveFieldResult> {
         let name = field_first_argument(instruction)?;
+        if self.document_stat_property_field_text(&name).is_none()
+            && let Some(field) = document_stat_property_dynamic_field(&name)
+        {
+            return Some(PassiveFieldResult::dynamic(field));
+        }
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text: self.passive_document_property_field_text(&name, instruction)?,
             font_name: None,
             font_size_half_points: None,
@@ -11698,6 +11888,7 @@ impl Parser {
         property: DocumentProperty,
     ) -> Option<PassiveFieldResult> {
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text: self.document_property_text(property)?.clone(),
             font_name: None,
             font_size_half_points: None,
@@ -11718,9 +11909,6 @@ impl Parser {
     ) -> Option<String> {
         if let Some(text) = self.document_stat_property_field_text(name) {
             return Some(text);
-        }
-        if let Some(marker) = document_stat_property_field_marker(name) {
-            return Some(marker.to_string());
         }
         if let Some(kind) = document_timestamp_property_field_name(name) {
             let timestamp = self
@@ -11754,6 +11942,7 @@ impl Parser {
             format_default_document_timestamp(timestamp)
         };
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text,
             font_name: None,
             font_size_half_points: None,
@@ -11763,6 +11952,7 @@ impl Parser {
 
     fn passive_edit_time_field_result(&self) -> Option<PassiveFieldResult> {
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text: self.document_edit_minutes?.to_string(),
             font_name: None,
             font_size_half_points: None,
@@ -11772,6 +11962,7 @@ impl Parser {
 
     fn passive_revision_number_field_result(&self) -> Option<PassiveFieldResult> {
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text: self.document_revision_number?.to_string(),
             font_name: None,
             font_size_half_points: None,
@@ -11781,6 +11972,7 @@ impl Parser {
 
     fn passive_file_size_field_result(&self) -> Option<PassiveFieldResult> {
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text: self.document_byte_count?.to_string(),
             font_name: None,
             font_size_half_points: None,
@@ -11824,6 +12016,7 @@ impl Parser {
             self.set_field_bookmark_value(name, value, offset)?;
         }
         Ok(Some(PassiveFieldResult {
+            dynamic_field: None,
             text: String::new(),
             font_name: None,
             font_size_half_points: None,
@@ -11868,6 +12061,7 @@ impl Parser {
             value.to_string()
         };
         Ok(Some(PassiveFieldResult {
+            dynamic_field: None,
             text,
             font_name: None,
             font_size_half_points: None,
@@ -11951,6 +12145,7 @@ impl Parser {
         }
         *counter += 1;
         Ok(Some(PassiveFieldResult {
+            dynamic_field: None,
             text: counter.to_string(),
             font_name: None,
             font_size_half_points: None,
@@ -11988,6 +12183,7 @@ impl Parser {
         };
 
         Ok(Some(PassiveFieldResult {
+            dynamic_field: None,
             text: value.to_string(),
             font_name: None,
             font_size_half_points: None,
@@ -12057,6 +12253,7 @@ impl Parser {
             .bookmark_text(&name)
             .or_else(|| self.field_bookmark_value(&name))?;
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text,
             font_name: None,
             font_size_half_points: None,
@@ -12073,6 +12270,7 @@ impl Parser {
             .with_identifier_resolver(&|name| self.passive_formula_identifier_value(name))
             .parse()?;
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text: value.to_string(),
             font_name: None,
             font_size_half_points: None,
@@ -12122,6 +12320,7 @@ impl Parser {
             && let Some(text) = self.passive_footnote_marker_noteref_text(&text, instruction)
         {
             return Some(PassiveFieldResult {
+                dynamic_field: None,
                 text,
                 font_name: None,
                 font_size_half_points: None,
@@ -12236,6 +12435,7 @@ impl Parser {
             return Ok(None);
         };
         Ok(Some(PassiveFieldResult {
+            dynamic_field: None,
             text: bookmark_page_ref_marker(id),
             font_name: None,
             font_size_half_points: None,
@@ -12271,6 +12471,7 @@ impl Parser {
                 .find_map(|(index, text)| (*index == style_index).then(|| text.clone()))?
         };
         Some(PassiveFieldResult {
+            dynamic_field: None,
             text,
             font_name: None,
             font_size_half_points: None,
@@ -12638,6 +12839,7 @@ impl Parser {
             && !self.current_paragraph_has_modern_shape_anchor
         {
             let run = Run {
+                dynamic_field: None,
                 text: String::new(),
                 style: self.state.character.clone(),
             };
@@ -13536,6 +13738,7 @@ impl Parser {
             && row.nested_table_capture.is_none()
         {
             row.current_cell_paragraph.runs.push(Run {
+                dynamic_field: None,
                 text: NESTED_TABLE_ANCHOR_MARKER.to_string(),
                 style: self.state.character.clone(),
             });
@@ -14153,6 +14356,7 @@ impl Parser {
             && let Some(capture) = row.nested_table_capture.as_mut()
         {
             capture.current_cell_paragraph.runs.push(Run {
+                dynamic_field: None,
                 text: text.to_string(),
                 style: self.state.character.clone(),
             });
@@ -22993,14 +23197,7 @@ fn field_switch_argument_value(input: &str) -> Option<String> {
 fn is_internal_marker(text: &str) -> bool {
     matches!(
         text,
-        PAGE_NUMBER_MARKER
-            | TOTAL_PAGES_MARKER
-            | SECTION_NUMBER_MARKER
-            | SECTION_PAGES_MARKER
-            | DOCUMENT_WORDS_MARKER
-            | DOCUMENT_CHARS_MARKER
-            | DOCUMENT_CHARS_WITH_SPACES_MARKER
-            | PASSIVE_ADVANCE_MARKER
+        PASSIVE_ADVANCE_MARKER
             | PASSIVE_MATH_FRACTION_RULE_MARKER
             | PASSIVE_MATH_STACK_ANCHOR_MARKER
             | PENDING_NOTE_REFERENCE_MARKER
@@ -23012,14 +23209,7 @@ fn is_internal_marker(text: &str) -> bool {
 }
 
 fn contains_internal_marker(text: &str) -> bool {
-    text.contains(PAGE_NUMBER_MARKER)
-        || text.contains(TOTAL_PAGES_MARKER)
-        || text.contains(SECTION_NUMBER_MARKER)
-        || text.contains(SECTION_PAGES_MARKER)
-        || text.contains(DOCUMENT_WORDS_MARKER)
-        || text.contains(DOCUMENT_CHARS_MARKER)
-        || text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER)
-        || text.contains(PASSIVE_ADVANCE_MARKER)
+    text.contains(PASSIVE_ADVANCE_MARKER)
         || text.contains(PASSIVE_MATH_FRACTION_RULE_MARKER)
         || text.contains(PASSIVE_MATH_STACK_ANCHOR_MARKER)
         || text.contains(PENDING_NOTE_REFERENCE_MARKER)
@@ -23032,15 +23222,13 @@ fn contains_internal_marker(text: &str) -> bool {
         || text.contains(BOOKMARK_PAGE_MARKER_END)
 }
 
+fn contains_reserved_private_use(text: &str) -> bool {
+    text.chars()
+        .any(|ch| ('\u{f0000}'..='\u{ffffd}').contains(&ch))
+}
+
 fn sanitize_internal_markers(text: &str) -> String {
-    text.replace(PAGE_NUMBER_MARKER, "\u{fffd}")
-        .replace(TOTAL_PAGES_MARKER, "\u{fffd}")
-        .replace(SECTION_NUMBER_MARKER, "\u{fffd}")
-        .replace(SECTION_PAGES_MARKER, "\u{fffd}")
-        .replace(DOCUMENT_WORDS_MARKER, "\u{fffd}")
-        .replace(DOCUMENT_CHARS_MARKER, "\u{fffd}")
-        .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "\u{fffd}")
-        .replace(PASSIVE_ADVANCE_MARKER, "\u{fffd}")
+    text.replace(PASSIVE_ADVANCE_MARKER, "\u{fffd}")
         .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "\u{fffd}")
         .replace(PASSIVE_MATH_STACK_ANCHOR_MARKER, "\u{fffd}")
         .replace(PENDING_NOTE_REFERENCE_MARKER, "\u{fffd}")
@@ -23051,6 +23239,15 @@ fn sanitize_internal_markers(text: &str) -> String {
         .replace(BOOKMARK_PAGE_ANCHOR_MARKER, "\u{fffd}")
         .replace(BOOKMARK_PAGE_REF_MARKER, "\u{fffd}")
         .replace(BOOKMARK_PAGE_MARKER_END, "\u{fffd}")
+        .chars()
+        .map(|ch| {
+            if ('\u{f0000}'..='\u{ffffd}').contains(&ch) {
+                '\u{fffd}'
+            } else {
+                ch
+            }
+        })
+        .collect()
 }
 
 fn is_bookmark_page_marker(text: &str) -> bool {
@@ -23446,6 +23643,7 @@ fn push_text_to_paragraph(
 
     if let Some(last) = paragraph.runs.last_mut()
         && last.style == *character_style
+        && last.dynamic_field.is_none()
         && !contains_bookmark_page_marker(text)
         && !contains_bookmark_page_marker(&last.text)
     {
@@ -23454,7 +23652,24 @@ fn push_text_to_paragraph(
     }
 
     paragraph.runs.push(Run {
+        dynamic_field: None,
         text: text.to_string(),
+        style: character_style.clone(),
+    });
+}
+
+fn push_dynamic_field_to_paragraph(
+    paragraph: &mut Paragraph,
+    field: DynamicField,
+    paragraph_style: &ParagraphStyle,
+    character_style: &CharacterStyle,
+) {
+    if paragraph.style != *paragraph_style && paragraph.runs.is_empty() {
+        paragraph.style = paragraph_style.clone();
+    }
+    paragraph.runs.push(Run {
+        dynamic_field: Some(field),
+        text: String::new(),
         style: character_style.clone(),
     });
 }
@@ -23519,12 +23734,14 @@ fn word_compatible_style_ref_number_text(text: &str, _mode: StyleRefNumberMode) 
 fn push_text_to_runs(runs: &mut Vec<Run>, text: &str, character_style: &CharacterStyle) {
     if let Some(last) = runs.last_mut()
         && last.style == *character_style
+        && last.dynamic_field.is_none()
     {
         last.text.push_str(text);
         return;
     }
 
     runs.push(Run {
+        dynamic_field: None,
         text: text.to_string(),
         style: character_style.clone(),
     });
@@ -24169,6 +24386,26 @@ mod tests {
 
     fn visible_document_text(document: &Document) -> String {
         document_text(document).replace(PASSIVE_ADVANCE_MARKER, "")
+    }
+
+    fn paragraph_dynamic_fields(paragraph: &Paragraph) -> Vec<DynamicField> {
+        paragraph
+            .runs
+            .iter()
+            .filter_map(|run| run.dynamic_field)
+            .collect()
+    }
+
+    fn document_dynamic_fields(document: &Document) -> Vec<DynamicField> {
+        document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph_dynamic_fields(paragraph)),
+                _ => None,
+            })
+            .flatten()
+            .collect()
     }
 
     fn parse_rtf_strict(input: &str) -> Result<ParseOutput, ParseError> {

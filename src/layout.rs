@@ -33,25 +33,23 @@ use crate::fonts::{FontAssetStyle, FontProvider};
 use crate::model::StaticImageWrapSide;
 use crate::model::{
     Alignment, BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER,
-    Block, BorderStyle, CharacterStyle, DOCUMENT_CHARS_MARKER, DOCUMENT_CHARS_WITH_SPACES_MARKER,
-    DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END,
-    EndnoteId, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
-    FontFamilyHint, FontPitch, FootnoteId, FootnotePlacement, ImageFormat, LineNumberRestart,
-    ModelInvariantError, NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering,
-    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER,
-    PASSIVE_MATH_INLINE_LEAD_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
-    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
-    ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart,
-    Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    Block, BorderStyle, CharacterStyle, Document, DynamicField, ENDNOTE_REFERENCE_MARKER,
+    ENDNOTE_REFERENCE_MARKER_END, EndnoteId, EndnotePlacement, FOOTNOTE_REFERENCE_MARKER,
+    FOOTNOTE_REFERENCE_MARKER_END, FontDef, FontFamilyHint, FontPitch, FootnoteId,
+    FootnotePlacement, ImageFormat, LineNumberRestart, ModelInvariantError,
+    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PASSIVE_ADVANCE_MARKER,
+    PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_INLINE_LEAD_MARKER,
+    PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
+    Paragraph, ParagraphBorders, ParagraphFrameVerticalAlignment, ParagraphStyle,
+    PassiveMathFractionPart, PassiveMathLimitPart, Run, ShadingPattern, StaticImage,
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
     StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
     StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
     TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
-    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
-    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
-    TableRowWrapMargins, UnderlineStyle, inline_image_marker_id, inline_image_marker_index,
-    validate_document_invariants,
+    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TabAlignment, TabLeader, Table, TableCell,
+    TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
+    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
+    inline_image_marker_id, inline_image_marker_index, validate_document_invariants,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -266,6 +264,7 @@ pub enum LineJoin {
 
 #[derive(Debug, Clone)]
 pub struct TextFragment {
+    pub dynamic_field: Option<DynamicField>,
     pub text: String,
     pub x: f32,
     pub baseline_y: f32,
@@ -792,6 +791,7 @@ fn new_layout_page(geometry: PageGeometry, physical_page_number: usize) -> Layou
 
 #[derive(Debug, Clone)]
 struct FlowRun {
+    dynamic_field: Option<DynamicField>,
     text: String,
     style: CharacterStyle,
     width: f32,
@@ -1274,6 +1274,7 @@ impl LayoutEngine {
                     let paragraph = Paragraph {
                         style: ParagraphStyle::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: text.clone(),
                             style: CharacterStyle::default(),
                         }],
@@ -1666,11 +1667,10 @@ mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProviderLimits};
     use crate::model::{
         BOOKMARK_PAGE_ANCHOR_MARKER, BOOKMARK_PAGE_MARKER_END, BOOKMARK_PAGE_REF_MARKER, Block,
-        Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat, PAGE_NUMBER_MARKER,
-        PageNumberFormat, PageSettings, Paragraph, Run, SECTION_PAGES_MARKER, StaticImagePlacement,
-        StaticShape, StaticShapeKind, StaticShapePoint, TOTAL_PAGES_MARKER, Table, TableCell,
-        TableCellBorder, TableCellBorders, TableCellPadding, TableCellSpacing,
-        TableCellVerticalMerge, TableRow, TableRowWrapMargins,
+        Color, Document, FontDef, FontFamilyHint, ImageCrop, ImageFormat, PageNumberFormat,
+        PageSettings, Paragraph, Run, StaticImagePlacement, StaticShape, StaticShapeKind,
+        StaticShapePoint, Table, TableCell, TableCellBorder, TableCellBorders, TableCellPadding,
+        TableCellSpacing, TableCellVerticalMerge, TableRow, TableRowWrapMargins,
     };
     use crate::rtf::parse_rtf;
 
@@ -1710,6 +1710,7 @@ mod tests {
 
     fn passive_text_item(text: &str, x: f32, baseline_y: f32) -> LayoutItem {
         LayoutItem::Text(TextFragment {
+            dynamic_field: None,
             text: text.to_string(),
             x,
             baseline_y,
@@ -1770,6 +1771,7 @@ mod tests {
                         Paragraph {
                             style: first_style,
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "First".to_string(),
                                 style: Default::default(),
                             }],
@@ -1777,6 +1779,7 @@ mod tests {
                         Paragraph {
                             style: second_style,
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Second".to_string(),
                                 style: Default::default(),
                             }],
@@ -1802,6 +1805,7 @@ mod tests {
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "First\nSecond".to_string(),
                 style: Default::default(),
             }],
@@ -1829,6 +1833,7 @@ mod tests {
             Block::Paragraph(Paragraph {
                 style: first_style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "First".to_string(),
                     style: Default::default(),
                 }],
@@ -1836,6 +1841,7 @@ mod tests {
             Block::Paragraph(Paragraph {
                 style: second_style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Second".to_string(),
                     style: Default::default(),
                 }],
@@ -2029,6 +2035,7 @@ mod tests {
         Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: text.to_string(),
                 style: Default::default(),
             }],
@@ -2039,6 +2046,7 @@ mod tests {
         Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: text.to_string(),
                 style: Default::default(),
             }],

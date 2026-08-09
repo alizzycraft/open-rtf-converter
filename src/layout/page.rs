@@ -967,6 +967,7 @@ pub(in crate::layout) fn layout_legacy_auto_page_numbers(
         let paragraph = Paragraph {
             style: ParagraphStyle::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: page.display_page_number.clone(),
                 style: CharacterStyle::default(),
             }],

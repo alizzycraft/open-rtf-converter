@@ -81,6 +81,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "one two three four five six seven eight nine ten".to_string(),
                 style: Default::default(),
             }],
@@ -117,6 +118,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "one two three four five six seven eight nine ten".to_string(),
                 style: Default::default(),
             }],
@@ -156,14 +158,17 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "base".to_string(),
                     style: Default::default(),
                 },
                 Run {
+                    dynamic_field: None,
                     text: "up".to_string(),
                     style: shifted_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "strike".to_string(),
                     style: struck_style,
                 },
@@ -208,6 +213,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "over".to_string(),
                 style: overline_style,
             }],
@@ -256,10 +262,12 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "double".to_string(),
                     style: double_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "wave".to_string(),
                     style: wave_style,
                 },
@@ -296,6 +304,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Two words".to_string(),
                 style,
             }],
@@ -346,6 +355,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Styled".to_string(),
                 style: character_style,
             }],
@@ -375,6 +385,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: triple_paragraph,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Triple".to_string(),
                 style: CharacterStyle::default(),
             }],
@@ -412,6 +423,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Wavy".to_string(),
                 style: character_style,
             }],
@@ -505,6 +517,7 @@
         let unlimited = Paragraph {
             style: unlimited_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: word.to_string(),
                 style: style.clone(),
             }],
@@ -539,6 +552,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "ABC".to_string(),
                 style: expanded,
             }],
@@ -566,10 +580,12 @@
                 style: Default::default(),
                 runs: vec![
                     Run {
+                        dynamic_field: None,
                         text: "ABCD".to_string(),
                         style: spaced,
                     },
                     Run {
+                        dynamic_field: None,
                         text: "EFGH".to_string(),
                         style: Default::default(),
                     },
@@ -612,6 +628,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "ABC".to_string(),
                 style: expanded,
             }],
@@ -641,6 +658,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "FittedText".to_string(),
                 style: fit_style,
             }],
@@ -676,10 +694,12 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "Visible styled typography".to_string(),
                     style: first_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "After typography.".to_string(),
                     style: second_style,
                 },
@@ -734,6 +754,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "First\nSecond".to_string(),
                 style: Default::default(),
             }],
@@ -763,6 +784,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Alpha Bravo Charlie Delta Echo Foxtrot".to_string(),
                 style: Default::default(),
             }],
@@ -870,6 +892,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Left\tRight".to_string(),
                 style: Default::default(),
             }],
@@ -911,6 +934,7 @@
                 Block::Paragraph(Paragraph {
                     style,
                     runs: vec![Run {
+                        dynamic_field: None,
                         text: "A\tX".to_string(),
                         style: CharacterStyle {
                             font_size_half_points: 24,
@@ -954,6 +978,7 @@
             Block::Paragraph(Paragraph {
                 style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: format!("{label}\tX"),
                     style: CharacterStyle {
                         font_size_half_points: 24,
@@ -1021,6 +1046,7 @@
             Block::Paragraph(Paragraph {
                 style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Left\tRight".to_string(),
                     style: Default::default(),
                 }],
@@ -1050,6 +1076,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: ParagraphStyle::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "A\tB".to_string(),
                 style: Default::default(),
             }],
@@ -1071,6 +1098,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Left\t9".to_string(),
                 style: Default::default(),
             }],
@@ -1104,6 +1132,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Left\tRight".to_string(),
                 style: Default::default(),
             }],
@@ -1131,6 +1160,7 @@
         document.header = vec![Paragraph {
             style: header_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Head\tRight".to_string(),
                 style: Default::default(),
             }],
@@ -1159,6 +1189,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Left\tMM".to_string(),
                 style: Default::default(),
             }],
@@ -1190,6 +1221,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Amount\t123.45".to_string(),
                 style: Default::default(),
             }],
@@ -1234,6 +1266,7 @@
         let paragraph = Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "A".to_string(),
                 style: style.clone(),
             }],
@@ -1299,6 +1332,7 @@
         let paragraph = Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Calibri line".to_string(),
                 style: CharacterStyle {
                     font_index: 0,
@@ -1418,6 +1452,7 @@
             let paragraph = Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Line".to_string(),
                     style: CharacterStyle {
                         font_index,
@@ -1458,6 +1493,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Here is a brief Times New Roman text.".to_string(),
                 style: Default::default(),
             }],
@@ -1589,6 +1625,7 @@
                 Block::Paragraph(Paragraph {
                     style: ParagraphStyle::default(),
                     runs: vec![Run {
+                        dynamic_field: None,
                         text: "Before".to_string(),
                         style: Default::default(),
                     }],
@@ -1596,6 +1633,7 @@
                 Block::Paragraph(Paragraph {
                     style,
                     runs: vec![Run {
+                        dynamic_field: None,
                         text: "First\nSecond".to_string(),
                         style: Default::default(),
                     }],
@@ -1625,6 +1663,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: ParagraphStyle::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "First\nSecond".to_string(),
                 style: Default::default(),
             }],
@@ -1646,6 +1685,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "First\nSecond".to_string(),
                 style: Default::default(),
             }],
@@ -1666,6 +1706,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "A\tB".to_string(),
                 style: Default::default(),
             }],
@@ -1854,6 +1895,7 @@
                 Block::Paragraph(Paragraph {
                     style: keep_next_style,
                     runs: vec![Run {
+                        dynamic_field: None,
                         text: "Keep next".to_string(),
                         style: Default::default(),
                     }],
@@ -1879,6 +1921,7 @@
             .chain([Block::Paragraph(Paragraph {
                 style: widow_style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Alpha\nBeta\nGamma".to_string(),
                     style: Default::default(),
                 }],

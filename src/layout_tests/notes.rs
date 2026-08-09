@@ -24,6 +24,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Body".to_string(),
                 style: Default::default(),
             }],
@@ -31,6 +32,7 @@
         document.footnotes = vec![footnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "* Footnote text".to_string(),
                 style: Default::default(),
             }],
@@ -65,6 +67,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Body".to_string(),
                 style: Default::default(),
             }],
@@ -72,6 +75,7 @@
         document.footnotes = vec![footnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Bottom footnote".to_string(),
                 style: Default::default(),
             }],
@@ -171,6 +175,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Body".to_string(),
                 style: Default::default(),
             }],
@@ -178,6 +183,7 @@
         document.endnotes = vec![endnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "* Endnote text".to_string(),
                 style: Default::default(),
             }],
@@ -212,6 +218,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Body".to_string(),
                 style: Default::default(),
             }],
@@ -219,6 +226,7 @@
         document.endnotes = vec![endnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Endnote text".to_string(),
                 style: Default::default(),
             }],
@@ -240,6 +248,7 @@
         document.endnotes = vec![endnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Endnote text".to_string(),
                 style: Default::default(),
             }],
@@ -247,6 +256,7 @@
         document.footnotes = vec![footnote(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Footnote text".to_string(),
                 style: Default::default(),
             }],

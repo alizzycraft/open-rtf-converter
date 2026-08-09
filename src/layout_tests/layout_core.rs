@@ -6,6 +6,7 @@
             document.blocks.push(Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "A paragraph that should force more than one page.".to_string(),
                     style: Default::default(),
                 }],
@@ -342,10 +343,12 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "base".to_string(),
                     style: Default::default(),
                 },
                 Run {
+                    dynamic_field: None,
                     text: "sup".to_string(),
                     style: super_style,
                 },
@@ -380,6 +383,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "double".to_string(),
                 style: double_style,
             }],
@@ -408,14 +412,17 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "Visible".to_string(),
                     style: Default::default(),
                 },
                 Run {
+                    dynamic_field: None,
                     text: "Hidden".to_string(),
                     style: hidden_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "Shown".to_string(),
                     style: Default::default(),
                 },
@@ -485,6 +492,7 @@
             Block::Paragraph(Paragraph {
                 style: paragraph_style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Horizontal paragraph".to_string(),
                     style: Default::default(),
                 }],
@@ -522,6 +530,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Vertical cell".to_string(),
                                 style: Default::default(),
                             }],
@@ -583,6 +592,7 @@
             Block::Paragraph(Paragraph {
                 style: paragraph_style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Diagonal paragraph".to_string(),
                     style: Default::default(),
                 }],
@@ -620,6 +630,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Dark cross cell".to_string(),
                                 style: Default::default(),
                             }],
@@ -754,6 +765,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "\u{2022}\t".to_string(),
                 style,
             }],
@@ -801,6 +813,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "\u{2611}".to_string(),
                 style,
             }],
@@ -841,6 +854,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "\u{25a1} \u{2610} \u{2611} \u{2612} \u{2713} \u{2717}".to_string(),
                 style,
             }],
@@ -881,6 +895,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Label \u{2611}".to_string(),
                 style,
             }],
@@ -910,6 +925,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Mixed case".to_string(),
                 style,
             }],
@@ -929,6 +945,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Mix".to_string(),
                 style,
             }],

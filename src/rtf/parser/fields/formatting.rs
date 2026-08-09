@@ -4,6 +4,7 @@ use super::super::*;
 use super::formula::*;
 
 pub(in crate::rtf::parser) struct PassiveFieldResult {
+    pub(in crate::rtf::parser) dynamic_field: Option<DynamicField>,
     pub(in crate::rtf::parser) text: String,
     pub(in crate::rtf::parser) font_name: Option<String>,
     pub(in crate::rtf::parser) font_size_half_points: Option<i32>,
@@ -72,9 +73,10 @@ pub(in crate::rtf::parser) enum FieldFormatSwitch {
 }
 
 impl PassiveFieldResult {
-    pub(in crate::rtf::parser) fn text(text: &'static str) -> Self {
+    pub(in crate::rtf::parser) fn dynamic(field: DynamicField) -> Self {
         Self {
-            text: text.to_string(),
+            dynamic_field: Some(field),
+            text: String::new(),
             font_name: None,
             font_size_half_points: None,
             form_field: false,
@@ -120,6 +122,9 @@ pub(in crate::rtf::parser) fn apply_field_format_switches(
     instruction: &str,
     mut result: PassiveFieldResult,
 ) -> Option<PassiveFieldResult> {
+    if let Some(field) = result.dynamic_field {
+        return (field_instruction_dynamic_field(instruction) == Some(field)).then_some(result);
+    }
     if result.font_name.is_some() {
         if !passive_field_result_text_is_safe(&result.text) {
             return None;
@@ -173,6 +178,23 @@ pub(in crate::rtf::parser) fn apply_field_format_switches(
     Some(result)
 }
 
+pub(in crate::rtf::parser) fn field_instruction_dynamic_field(
+    instruction: &str,
+) -> Option<DynamicField> {
+    match field_instruction_name(instruction)? {
+        "PAGE" => Some(DynamicField::PageNumber),
+        "NUMPAGES" => Some(DynamicField::TotalPages),
+        "NUMWORDS" => Some(DynamicField::DocumentWords),
+        "NUMCHARS" => Some(DynamicField::DocumentCharacters),
+        "NUMCHARSWS" => Some(DynamicField::DocumentCharactersWithSpaces),
+        "SECTION" => Some(DynamicField::SectionNumber),
+        "SECTIONPAGES" => Some(DynamicField::SectionPages),
+        "DOCPROPERTY" | "INFO" => field_first_argument(instruction)
+            .and_then(|name| document_stat_property_dynamic_field(&name)),
+        _ => None,
+    }
+}
+
 pub(in crate::rtf::parser) fn passive_field_result_text_is_safe(text: &str) -> bool {
     text.chars().count() <= MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         && !text.chars().any(|ch| ch.is_control())
@@ -184,16 +206,7 @@ pub(in crate::rtf::parser) fn field_result_allows_internal_marker(
     text: &str,
 ) -> bool {
     match field_instruction_name(instruction) {
-        Some("PAGE") => text == PAGE_NUMBER_MARKER,
-        Some("NUMPAGES") => text == TOTAL_PAGES_MARKER,
-        Some("NUMWORDS") => text == DOCUMENT_WORDS_MARKER,
-        Some("NUMCHARS") => text == DOCUMENT_CHARS_MARKER,
-        Some("NUMCHARSWS") => text == DOCUMENT_CHARS_WITH_SPACES_MARKER,
-        Some("SECTION") => text == SECTION_NUMBER_MARKER,
-        Some("SECTIONPAGES") => text == SECTION_PAGES_MARKER,
         Some("PAGEREF") => is_bookmark_page_marker(text),
-        Some("DOCPROPERTY") => field_docproperty_result_allows_internal_marker(instruction, text),
-        Some("INFO") => field_document_property_result_allows_internal_marker(instruction, text),
         _ => false,
     }
 }
@@ -218,19 +231,24 @@ pub(in crate::rtf::parser) fn passive_field_result(
     form_dropdown_selected_index: Option<i32>,
 ) -> Option<PassiveFieldResult> {
     match field_instruction_name(instruction)? {
-        "PAGE" => Some(PassiveFieldResult::text(PAGE_NUMBER_MARKER)),
-        "NUMPAGES" => Some(PassiveFieldResult::text(TOTAL_PAGES_MARKER)),
-        "NUMWORDS" => Some(PassiveFieldResult::text(DOCUMENT_WORDS_MARKER)),
-        "NUMCHARS" => Some(PassiveFieldResult::text(DOCUMENT_CHARS_MARKER)),
-        "NUMCHARSWS" => Some(PassiveFieldResult::text(DOCUMENT_CHARS_WITH_SPACES_MARKER)),
-        "SECTION" => Some(PassiveFieldResult::text(SECTION_NUMBER_MARKER)),
-        "SECTIONPAGES" => Some(PassiveFieldResult::text(SECTION_PAGES_MARKER)),
+        "PAGE" => Some(PassiveFieldResult::dynamic(DynamicField::PageNumber)),
+        "NUMPAGES" => Some(PassiveFieldResult::dynamic(DynamicField::TotalPages)),
+        "NUMWORDS" => Some(PassiveFieldResult::dynamic(DynamicField::DocumentWords)),
+        "NUMCHARS" => Some(PassiveFieldResult::dynamic(
+            DynamicField::DocumentCharacters,
+        )),
+        "NUMCHARSWS" => Some(PassiveFieldResult::dynamic(
+            DynamicField::DocumentCharactersWithSpaces,
+        )),
+        "SECTION" => Some(PassiveFieldResult::dynamic(DynamicField::SectionNumber)),
+        "SECTIONPAGES" => Some(PassiveFieldResult::dynamic(DynamicField::SectionPages)),
         "FORMTEXT" => passive_form_text_field_result(form_default_text),
         "FORMDROPDOWN" => passive_form_dropdown_field_result(
             form_dropdown_entries,
             form_dropdown_selected_index.unwrap_or(0),
         ),
         "FORMCHECKBOX" => Some(PassiveFieldResult {
+            dynamic_field: None,
             text: if form_checkbox_checked.unwrap_or(false) {
                 "\u{2611}"
             } else {
@@ -464,34 +482,18 @@ pub(in crate::rtf::parser) fn document_timestamp_property_field_name(
     }
 }
 
-pub(in crate::rtf::parser) fn document_stat_property_field_marker(
+pub(in crate::rtf::parser) fn document_stat_property_dynamic_field(
     name: &str,
-) -> Option<&'static str> {
+) -> Option<DynamicField> {
     match normalized_document_property_name(name).as_str() {
-        "number of pages" | "pages" => Some(TOTAL_PAGES_MARKER),
-        "number of words" | "words" => Some(DOCUMENT_WORDS_MARKER),
-        "number of characters" | "characters" => Some(DOCUMENT_CHARS_MARKER),
+        "number of pages" | "pages" => Some(DynamicField::TotalPages),
+        "number of words" | "words" => Some(DynamicField::DocumentWords),
+        "number of characters" | "characters" => Some(DynamicField::DocumentCharacters),
         "number of characters with spaces" | "characters with spaces" => {
-            Some(DOCUMENT_CHARS_WITH_SPACES_MARKER)
+            Some(DynamicField::DocumentCharactersWithSpaces)
         }
         _ => None,
     }
-}
-
-pub(in crate::rtf::parser) fn field_docproperty_result_allows_internal_marker(
-    instruction: &str,
-    text: &str,
-) -> bool {
-    field_document_property_result_allows_internal_marker(instruction, text)
-}
-
-pub(in crate::rtf::parser) fn field_document_property_result_allows_internal_marker(
-    instruction: &str,
-    text: &str,
-) -> bool {
-    field_first_argument(instruction)
-        .and_then(|name| document_stat_property_field_marker(&name))
-        .is_some_and(|marker| marker == text)
 }
 
 pub(in crate::rtf::parser) fn normalized_document_property_name(name: &str) -> String {
@@ -822,6 +824,7 @@ pub(in crate::rtf::parser) fn passive_form_text_field_result(
         return None;
     }
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -839,6 +842,7 @@ pub(in crate::rtf::parser) fn passive_form_dropdown_field_result(
         return None;
     }
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -855,6 +859,7 @@ pub(in crate::rtf::parser) fn passive_eq_field_result(
         .map(|segment| segment.text.as_str())
         .collect::<String>();
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -879,6 +884,7 @@ pub(in crate::rtf::parser) fn passive_word_compatible_eq_field_result(
     }
 
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text: rest.trim().to_string(),
         font_name: None,
         font_size_half_points: None,
@@ -1016,6 +1022,7 @@ pub(in crate::rtf::parser) fn passive_if_field_result_with_resolver(
         return None;
     }
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -1044,6 +1051,7 @@ pub(in crate::rtf::parser) fn passive_compare_field_result_with_resolver(
     let left = passive_compare_resolved_operand(left, identifier_resolver);
     let right = passive_compare_resolved_operand(right, identifier_resolver);
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text: if field_if_condition_matches(&left, operator, &right) {
             "1"
         } else {
@@ -1082,6 +1090,7 @@ pub(in crate::rtf::parser) fn passive_quote_field_result(
         return None;
     }
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -1098,6 +1107,7 @@ pub(in crate::rtf::parser) fn passive_fillin_field_result(
         return None;
     }
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -1117,6 +1127,7 @@ pub(in crate::rtf::parser) fn passive_greetingline_field_result(
         return None;
     }
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -1205,6 +1216,7 @@ pub(in crate::rtf::parser) fn passive_macrobutton_field_result(
     }
 
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -1255,6 +1267,7 @@ pub(in crate::rtf::parser) fn passive_gotobutton_field_result_with_quote_mode(
     }
 
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: None,
         font_size_half_points: None,
@@ -1275,6 +1288,7 @@ pub(in crate::rtf::parser) fn passive_mergefield_result(
     }
 
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text: format!("\u{00ab}{name}\u{00bb}"),
         font_name: None,
         font_size_half_points: None,
@@ -1335,6 +1349,7 @@ pub(in crate::rtf::parser) fn passive_symbol_field_result(
     };
 
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text,
         font_name: passive_font_name,
         font_size_half_points,

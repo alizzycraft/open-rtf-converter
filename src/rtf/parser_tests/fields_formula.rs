@@ -1302,15 +1302,17 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_page_fields_render_passive_page_marker() {
+    fn resultless_page_fields_create_typed_dynamic_fields() {
         let output = parse_rtf(
             r"{\rtf1 Page {\field{\*\fldinst PAGE}} of {\field{\*\fldinst NUMPAGES}}\par}",
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains(PAGE_NUMBER_MARKER));
-        assert!(text.contains(TOTAL_PAGES_MARKER));
+        assert_eq!(
+            document_dynamic_fields(&output.document),
+            vec![DynamicField::PageNumber, DynamicField::TotalPages]
+        );
         assert!(!text.contains("[Field removed"));
         assert!(!text.contains("PAGE"));
         assert!(!text.contains("NUMPAGES"));
@@ -1319,17 +1321,24 @@ After\par}"#;
     #[test]
     fn passive_field_marker_bypass_is_limited_to_marker_fields() {
         assert!(
-            apply_field_format_switches("PAGE", PassiveFieldResult::text(PAGE_NUMBER_MARKER))
+            apply_field_format_switches(
+                "PAGE",
+                PassiveFieldResult::dynamic(DynamicField::PageNumber),
+            )
                 .is_some()
         );
         assert!(
-            apply_field_format_switches("NUMPAGES", PassiveFieldResult::text(TOTAL_PAGES_MARKER))
+            apply_field_format_switches(
+                "NUMPAGES",
+                PassiveFieldResult::dynamic(DynamicField::TotalPages),
+            )
                 .is_some()
         );
         assert!(
             apply_field_format_switches(
                 "PAGEREF Target",
                 PassiveFieldResult {
+                    dynamic_field: None,
                     text: bookmark_page_ref_marker(7),
                     font_name: None,
                     font_size_half_points: None,
@@ -1342,7 +1351,7 @@ After\par}"#;
         assert!(
             apply_field_format_switches(
                 r#"QUOTE "hostile""#,
-                PassiveFieldResult::text(PAGE_NUMBER_MARKER)
+                PassiveFieldResult::dynamic(DynamicField::PageNumber)
             )
             .is_none()
         );
@@ -1350,6 +1359,7 @@ After\par}"#;
             apply_field_format_switches(
                 "MACROBUTTON Launch Visible",
                 PassiveFieldResult {
+                    dynamic_field: None,
                     text: bookmark_page_ref_marker(7),
                     font_name: None,
                     font_size_half_points: None,
@@ -1362,7 +1372,8 @@ After\par}"#;
             apply_field_format_switches(
                 "SYMBOL 65",
                 PassiveFieldResult {
-                    text: PAGE_NUMBER_MARKER.to_string(),
+                    dynamic_field: None,
+                    text: PASSIVE_ADVANCE_MARKER.to_string(),
                     font_name: Some("ZapfDingbats".to_string()),
                     font_size_half_points: None,
                     form_field: false,
@@ -1379,6 +1390,7 @@ After\par}"#;
             apply_field_format_switches(
                 r#"QUOTE "hostile""#,
                 PassiveFieldResult {
+                    dynamic_field: None,
                     text: oversized.clone(),
                     font_name: None,
                     font_size_half_points: None,
@@ -1391,6 +1403,7 @@ After\par}"#;
             apply_field_format_switches(
                 r#"QUOTE "hostile""#,
                 PassiveFieldResult {
+                    dynamic_field: None,
                     text: "safe\nunsafe".to_string(),
                     font_name: None,
                     font_size_half_points: None,
@@ -1403,6 +1416,7 @@ After\par}"#;
             apply_field_format_switches(
                 "SYMBOL 65",
                 PassiveFieldResult {
+                    dynamic_field: None,
                     text: oversized,
                     font_name: Some("ZapfDingbats".to_string()),
                     font_size_half_points: None,
@@ -2564,11 +2578,14 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_section_fields_render_passive_section_marker() {
+    fn resultless_section_fields_create_typed_dynamic_fields() {
         let output = parse_rtf(r"{\rtf1 Section {\field{\*\fldinst SECTION}}\par}").unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains(SECTION_NUMBER_MARKER));
+        assert_eq!(
+            document_dynamic_fields(&output.document),
+            vec![DynamicField::SectionNumber]
+        );
         assert!(!text.contains("[Field removed"));
         assert!(!text.contains("SECTION"));
         assert!(!text.contains("fldinst"));
@@ -2703,17 +2720,22 @@ After\par}"#;
     }
 
     #[test]
-    fn resultless_docproperty_stat_aliases_render_safe_layout_markers() {
+    fn resultless_docproperty_stat_aliases_create_typed_dynamic_fields() {
         let output = parse_rtf(
             r#"{\rtf1 Alpha beta\page Gamma stats pages {\field{\*\fldinst DOCPROPERTY "Number of Pages"}} words {\field{\*\fldinst DOCPROPERTY "Number of Words"}} chars {\field{\*\fldinst DOCPROPERTY "Number of Characters"}} spaces {\field{\*\fldinst DOCPROPERTY "Number of Characters With Spaces"}}\par}"#,
         )
         .unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains(TOTAL_PAGES_MARKER));
-        assert!(text.contains(DOCUMENT_WORDS_MARKER));
-        assert!(text.contains(DOCUMENT_CHARS_MARKER));
-        assert!(text.contains(DOCUMENT_CHARS_WITH_SPACES_MARKER));
+        assert_eq!(
+            document_dynamic_fields(&output.document),
+            vec![
+                DynamicField::TotalPages,
+                DynamicField::DocumentWords,
+                DynamicField::DocumentCharacters,
+                DynamicField::DocumentCharactersWithSpaces,
+            ]
+        );
         for forbidden in [
             "DOCPROPERTY",
             "Number of Pages",
@@ -2730,14 +2752,14 @@ After\par}"#;
         assert!(
             apply_field_format_switches(
                 r#"DOCPROPERTY "Number of Words""#,
-                PassiveFieldResult::text(DOCUMENT_WORDS_MARKER),
+                PassiveFieldResult::dynamic(DynamicField::DocumentWords),
             )
             .is_some()
         );
         assert!(
             apply_field_format_switches(
                 r#"DOCPROPERTY Title"#,
-                PassiveFieldResult::text(DOCUMENT_WORDS_MARKER),
+                PassiveFieldResult::dynamic(DynamicField::DocumentWords),
             )
             .is_none()
         );
@@ -2765,10 +2787,6 @@ After\par}"#;
             "nofchars",
             "nofcharsws",
             "fldinst",
-            TOTAL_PAGES_MARKER,
-            DOCUMENT_WORDS_MARKER,
-            DOCUMENT_CHARS_MARKER,
-            DOCUMENT_CHARS_WITH_SPACES_MARKER,
         ] {
             assert!(
                 !text.contains(forbidden),

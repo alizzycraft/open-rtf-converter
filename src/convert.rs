@@ -554,6 +554,7 @@ mod tests {
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Nested drawing text".to_string(),
                 style: Default::default(),
             }],
@@ -581,6 +582,7 @@ mod tests {
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Deep drawing text".to_string(),
                 style: Default::default(),
             }],

@@ -309,12 +309,12 @@ mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProvider};
     use crate::layout::{DrawingFragment, LayoutEngine, LayoutItem};
     use crate::model::{
-        Alignment, Block, BorderStyle, CharacterStyle, Color, Document, FontDef, FontFamilyHint,
-        FontPitch, ImageCrop, ImageFormat, ImageToneAdjustment, PAGE_NUMBER_MARKER, PageSettings,
-        Paragraph, ParagraphStyle, Run, SECTION_NUMBER_MARKER, StaticImage, StaticImageAlphaMask,
-        StaticShape, StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap,
-        StaticShapeLineJoin, StaticShapeTextVerticalAnchor, TOTAL_PAGES_MARKER, Table, TableCell,
-        TableCellBorder, TableRow, TableRowWrapMargins, UnderlineStyle,
+        Alignment, Block, BorderStyle, CharacterStyle, Color, Document, DynamicField, FontDef,
+        FontFamilyHint, FontPitch, ImageCrop, ImageFormat, ImageToneAdjustment, PageSettings,
+        Paragraph, ParagraphStyle, Run, StaticImage, StaticImageAlphaMask, StaticShape,
+        StaticShapeArrowhead, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+        StaticShapeTextVerticalAnchor, Table, TableCell, TableCellBorder, TableRow,
+        TableRowWrapMargins, UnderlineStyle,
     };
     use crate::rtf::parse_rtf;
     use lopdf::{Dictionary, Object};

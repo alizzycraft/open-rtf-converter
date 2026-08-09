@@ -8,16 +8,9 @@ pub(crate) use invariants::{
 
 use std::ops::{Deref, DerefMut};
 
-pub const PAGE_NUMBER_MARKER: &str = "\u{f0000}";
-pub const TOTAL_PAGES_MARKER: &str = "\u{f0001}";
-pub const SECTION_NUMBER_MARKER: &str = "\u{f0002}";
-pub const SECTION_PAGES_MARKER: &str = "\u{f0004}";
 pub const BOOKMARK_PAGE_ANCHOR_MARKER: &str = "\u{f0005}";
 pub const BOOKMARK_PAGE_REF_MARKER: &str = "\u{f0006}";
 pub const BOOKMARK_PAGE_MARKER_END: &str = "\u{f0007}";
-pub const DOCUMENT_WORDS_MARKER: &str = "\u{f0008}";
-pub const DOCUMENT_CHARS_MARKER: &str = "\u{f0009}";
-pub const DOCUMENT_CHARS_WITH_SPACES_MARKER: &str = "\u{f000a}";
 pub const PASSIVE_ADVANCE_MARKER: &str = "\u{f000b}";
 pub const PASSIVE_MATH_FRACTION_RULE_MARKER: &str = "\u{f0011}";
 pub const PASSIVE_MATH_STACK_ANCHOR_MARKER: &str = "\u{f0012}";
@@ -28,6 +21,17 @@ pub const FOOTNOTE_REFERENCE_MARKER: &str = "\u{f000c}";
 pub const FOOTNOTE_REFERENCE_MARKER_END: &str = "\u{f000d}";
 pub const ENDNOTE_REFERENCE_MARKER: &str = "\u{f000e}";
 pub const ENDNOTE_REFERENCE_MARKER_END: &str = "\u{f000f}";
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum DynamicField {
+    PageNumber,
+    TotalPages,
+    SectionNumber,
+    SectionPages,
+    DocumentWords,
+    DocumentCharacters,
+    DocumentCharactersWithSpaces,
+}
 
 macro_rules! typed_index {
     ($name:ident) => {
@@ -1377,6 +1381,7 @@ const fn hidden_border() -> TableCellBorder {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Run {
+    pub dynamic_field: Option<DynamicField>,
     pub text: String,
     pub style: CharacterStyle,
 }

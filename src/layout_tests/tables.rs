@@ -34,6 +34,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "A".to_string(),
                                 style: Default::default(),
                             }],
@@ -55,6 +56,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "B".to_string(),
                                 style: Default::default(),
                             }],
@@ -155,6 +157,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "No borders".to_string(),
                             style: Default::default(),
                         }],
@@ -219,6 +222,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Borders".to_string(),
                             style: Default::default(),
                         }],
@@ -291,6 +295,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Spaced borders".to_string(),
                             style: Default::default(),
                         }],
@@ -365,6 +370,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Diagonal".to_string(),
                             style: Default::default(),
                         }],
@@ -478,6 +484,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Border style".to_string(),
                             style: Default::default(),
                         }],
@@ -920,6 +927,7 @@
         let paragraph = |text: &str| Paragraph {
             style: ParagraphStyle::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: text.to_string(),
                 style: CharacterStyle::default(),
             }],
@@ -1134,6 +1142,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Shaded".to_string(),
                             style: Default::default(),
                         }],
@@ -1239,6 +1248,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Tall".to_string(),
                             style: Default::default(),
                         }],
@@ -1303,6 +1313,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Exact row with text that would otherwise need more space"
                                 .to_string(),
                             style: Default::default(),
@@ -1361,6 +1372,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "ABC".to_string(),
                                 style: Default::default(),
                             }],
@@ -1382,6 +1394,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "XY".to_string(),
                                 style: Default::default(),
                             }],
@@ -1508,6 +1521,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Visible\nOverflow".to_string(),
                             style: Default::default(),
                         }],
@@ -1560,6 +1574,7 @@
                     paragraphs: vec![Paragraph {
                         style: paragraph_style,
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "First\nSecond".to_string(),
                             style: Default::default(),
                         }],
@@ -1621,6 +1636,7 @@
                     paragraphs: vec![Paragraph {
                         style: paragraph_style,
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Spaced".to_string(),
                             style: Default::default(),
                         }],
@@ -1688,6 +1704,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Offset".to_string(),
                             style: Default::default(),
                         }],
@@ -1745,6 +1762,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Offset".to_string(),
                                 style: Default::default(),
                             }],
@@ -1826,6 +1844,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: text.to_string(),
                             style: Default::default(),
                         }],
@@ -1925,6 +1944,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Floating".to_string(),
                                 style: Default::default(),
                             }],
@@ -1935,6 +1955,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Wrapped paragraph beside table".to_string(),
                     style: Default::default(),
                 }],
@@ -2077,6 +2098,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Center".to_string(),
                                 style: Default::default(),
                             }],
@@ -2111,6 +2133,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Right".to_string(),
                                 style: Default::default(),
                             }],
@@ -2167,6 +2190,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: text.to_string(),
                             style: Default::default(),
                         }],
@@ -2268,6 +2292,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Padded".to_string(),
                             style: Default::default(),
                         }],
@@ -2332,6 +2357,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Compact".to_string(),
                             style: Default::default(),
                         }],
@@ -2529,6 +2555,7 @@
                         paragraphs: vec![Paragraph {
                             style: center_style,
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "A".to_string(),
                                 style: Default::default(),
                             }],
@@ -2563,6 +2590,7 @@
                         paragraphs: vec![Paragraph {
                             style: right_style,
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "B".to_string(),
                                 style: Default::default(),
                             }],
@@ -2636,6 +2664,7 @@
                     paragraphs: vec![Paragraph {
                         style: paragraph_style,
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Cell".to_string(),
                             style: Default::default(),
                         }],
@@ -2691,6 +2720,7 @@
                     paragraphs: vec![Paragraph {
                         style: paragraph_style,
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "First\nSecond".to_string(),
                             style: Default::default(),
                         }],
@@ -2750,6 +2780,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Fit text stays on one visual row".to_string(),
                             style: Default::default(),
                         }],
@@ -2829,6 +2860,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Padded".to_string(),
                             style: Default::default(),
                         }],
@@ -2901,6 +2933,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Left".to_string(),
                                 style: Default::default(),
                             }],
@@ -2927,6 +2960,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Right".to_string(),
                                 style: Default::default(),
                             }],
@@ -3043,6 +3077,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Top".to_string(),
                                 style: Default::default(),
                             }],
@@ -3064,6 +3099,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Center".to_string(),
                                 style: Default::default(),
                             }],
@@ -3085,6 +3121,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Bottom".to_string(),
                                 style: Default::default(),
                             }],
@@ -3148,6 +3185,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Merged".to_string(),
                                 style: Default::default(),
                             }],
@@ -3169,6 +3207,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Hidden".to_string(),
                                 style: Default::default(),
                             }],
@@ -3190,6 +3229,7 @@
                         paragraphs: vec![Paragraph {
                             style: Default::default(),
                             runs: vec![Run {
+                                dynamic_field: None,
                                 text: "Plain".to_string(),
                                 style: Default::default(),
                             }],
@@ -3264,6 +3304,7 @@
                             paragraphs: vec![Paragraph {
                                 style: Default::default(),
                                 runs: vec![Run {
+                                    dynamic_field: None,
                                     text: "Merged top".to_string(),
                                     style: Default::default(),
                                 }],
@@ -3285,6 +3326,7 @@
                             paragraphs: vec![Paragraph {
                                 style: Default::default(),
                                 runs: vec![Run {
+                                    dynamic_field: None,
                                     text: "Right top".to_string(),
                                     style: Default::default(),
                                 }],
@@ -3321,6 +3363,7 @@
                             paragraphs: vec![Paragraph {
                                 style: Default::default(),
                                 runs: vec![Run {
+                                    dynamic_field: None,
                                     text: "Hidden continuation".to_string(),
                                     style: Default::default(),
                                 }],
@@ -3342,6 +3385,7 @@
                             paragraphs: vec![Paragraph {
                                 style: Default::default(),
                                 runs: vec![Run {
+                                    dynamic_field: None,
                                     text: "Right bottom".to_string(),
                                     style: Default::default(),
                                 }],
@@ -3420,6 +3464,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: text.to_string(),
                             style: Default::default(),
                         }],
@@ -3487,6 +3532,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: text.to_string(),
                             style: Default::default(),
                         }],
@@ -3551,6 +3597,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text,
                             style: Default::default(),
                         }],
@@ -3622,6 +3669,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text,
                             style: Default::default(),
                         }],
@@ -3683,6 +3731,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text,
                             style: Default::default(),
                         }],
@@ -3815,6 +3864,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Tinted cell".to_string(),
                             style: Default::default(),
                         }],
@@ -3888,6 +3938,7 @@
                     paragraphs: vec![Paragraph {
                         style: paragraph_style,
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Cell paragraph".to_string(),
                             style: Default::default(),
                         }],
@@ -3953,6 +4004,7 @@
                     paragraphs: vec![Paragraph {
                         style: paragraph_style,
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "A\tB".to_string(),
                             style: Default::default(),
                         }],
@@ -4002,6 +4054,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Mono".to_string(),
                 style,
             }],
@@ -4021,6 +4074,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Default text".to_string(),
                 style: CharacterStyle::default(),
             }],
@@ -4072,14 +4126,17 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "Normal".to_string(),
                     style: normal_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "\n".to_string(),
                     style: CharacterStyle::default(),
                 },
                 Run {
+                    dynamic_field: None,
                     text: "Normal".to_string(),
                     style: narrow_style,
                 },

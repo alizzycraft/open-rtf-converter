@@ -30,6 +30,7 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
             }
             if is_passive_advance {
                 output.push(FlowRun {
+                    dynamic_field: None,
                     text: PASSIVE_ADVANCE_MARKER.to_string(),
                     style: style.clone(),
                     width: passive_advance_width_points(style),
@@ -44,6 +45,7 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
             }
             if is_math_inline_lead {
                 output.push(FlowRun {
+                    dynamic_field: None,
                     text: PASSIVE_MATH_INLINE_LEAD_MARKER.to_string(),
                     style: style.clone(),
                     width: passive_advance_width_points(style),
@@ -58,6 +60,7 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
             }
             if is_math_fraction_rule {
                 output.push(FlowRun {
+                    dynamic_field: None,
                     text: PASSIVE_MATH_FRACTION_RULE_MARKER.to_string(),
                     style: style.clone(),
                     width: 0.0,
@@ -72,6 +75,7 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
             }
             if is_math_stack_anchor {
                 output.push(FlowRun {
+                    dynamic_field: None,
                     text: PASSIVE_MATH_STACK_ANCHOR_MARKER.to_string(),
                     style: style.clone(),
                     width: 0.0,
@@ -86,6 +90,7 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
             }
             if inline_image_index.is_some() {
                 output.push(FlowRun {
+                    dynamic_field: None,
                     text: ch.to_string(),
                     style: style.clone(),
                     width: 0.0,
@@ -99,6 +104,7 @@ pub(in crate::layout) fn push_text_segments_preserving_tabs(
                 continue;
             }
             output.push(FlowRun {
+                dynamic_field: None,
                 text: "\t".to_string(),
                 style: style.clone(),
                 width: 0.0,
@@ -232,6 +238,7 @@ pub(in crate::layout) fn push_flow_run(
     soft_hyphen_after: bool,
 ) {
     output.push(FlowRun {
+        dynamic_field: None,
         text: text.to_string(),
         style: style.clone(),
         width: 0.0,
@@ -288,6 +295,7 @@ pub(in crate::layout) fn push_small_caps_segment(
             scaled_small_caps_font_size(style.font_size_half_points);
     }
     output.push(FlowRun {
+        dynamic_field: None,
         text: text.to_string(),
         style: segment_style,
         width: 0.0,
@@ -406,6 +414,7 @@ pub(in crate::layout) fn push_flow_exclusion_advance(
         return;
     }
     line.runs.push(FlowRun {
+        dynamic_field: None,
         text: String::new(),
         style: style.clone(),
         width,
@@ -689,15 +698,9 @@ pub(in crate::layout) fn measure_flow_run(
     }
     let style = passive_pdf_style_for_run(document, &run.style);
     let text = display_text(&run.text, &style);
-    let measurement_text = late_page_count_measurement_text(&text);
     let font_family = font_family_for_run_text(document, &style, &text);
-    let text_width = measure_text_with_document_font(
-        &measurement_text,
-        &style,
-        font_family,
-        document,
-        font_provider,
-    );
+    let text_width =
+        measure_text_with_document_font(&text, &style, font_family, document, font_provider);
     text_width + (character_border_inset(&style) * 2.0)
 }
 
@@ -1087,6 +1090,7 @@ pub(in crate::layout) fn push_line_with_rotation(
             || parse_bookmark_page_marker_id(&run.text, BOOKMARK_PAGE_REF_MARKER).is_some()
         {
             page.items.push(LayoutItem::Text(TextFragment {
+                dynamic_field: None,
                 text: run.text.clone(),
                 x: run_x,
                 baseline_y: run_baseline_y,
@@ -1175,6 +1179,7 @@ pub(in crate::layout) fn push_line_with_rotation(
             );
         }
         page.items.push(LayoutItem::Text(TextFragment {
+            dynamic_field: run.dynamic_field,
             text: text.clone(),
             x: run_x,
             baseline_y: run_baseline_y,
@@ -1422,8 +1427,7 @@ pub(in crate::layout) fn measure_late_page_count_text_with_family(
     style: &CharacterStyle,
     font_family: PdfFontFamily,
 ) -> f32 {
-    let text = late_page_count_measurement_text(text);
-    measure_text_with_family(&text, style, font_family)
+    measure_text_with_family(text, style, font_family)
 }
 
 pub(in crate::layout) fn is_word_underline_gap(ch: char) -> bool {
@@ -1490,6 +1494,7 @@ pub(in crate::layout) fn push_tab_leader(
                 )
             };
             page.items.push(LayoutItem::Text(TextFragment {
+                dynamic_field: None,
                 text: leader.repeat(count.min(512)),
                 x: leader_x,
                 baseline_y: baseline_y + style.baseline_shift_points(),

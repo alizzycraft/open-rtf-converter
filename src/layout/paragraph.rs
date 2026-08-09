@@ -496,6 +496,7 @@ pub(in crate::layout) fn passive_negative_width_frame_paragraph(
     });
     passive.runs = first_visible.map_or_else(Vec::new, |(ch, style)| {
         vec![Run {
+            dynamic_field: None,
             text: ch.to_string(),
             style,
         }]
@@ -1738,6 +1739,7 @@ pub(in crate::layout) fn push_passive_line_number(
         return;
     };
     page.items.push(LayoutItem::Text(TextFragment {
+        dynamic_field: None,
         text,
         x,
         baseline_y,

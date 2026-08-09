@@ -4,6 +4,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Hello PDF".to_string(),
                 style: Default::default(),
             }],
@@ -25,6 +26,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Landscape PDF".to_string(),
                 style: Default::default(),
             }],
@@ -51,6 +53,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "First page".to_string(),
                     style: Default::default(),
                 }],
@@ -60,6 +63,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Second page".to_string(),
                     style: Default::default(),
                 }],
@@ -103,6 +107,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Styled".to_string(),
                 style: character_style,
             }],
@@ -149,6 +154,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Wavy".to_string(),
                 style: CharacterStyle::default(),
             }],
@@ -268,6 +274,7 @@
                     paragraphs: vec![Paragraph {
                         style: Default::default(),
                         runs: vec![Run {
+                            dynamic_field: None,
                             text: "Shaded".to_string(),
                             style: Default::default(),
                         }],
@@ -308,6 +315,7 @@
         wide_document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Alpha\u{00ad}Beta".to_string(),
                 style: Default::default(),
             }],
@@ -327,6 +335,7 @@
         narrow_document.blocks = vec![Block::Paragraph(Paragraph {
             style: narrow_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Alpha\u{00ad}Beta".to_string(),
                 style: Default::default(),
             }],
@@ -350,6 +359,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Tracked".to_string(),
                 style,
             }],
@@ -379,6 +389,7 @@
         let mut rtl_style = CharacterStyle::default();
         rtl_style.right_to_left = true;
         let rtl_fragment = TextFragment {
+            dynamic_field: None,
             text: "שלום".to_string(),
             x: 0.0,
             baseline_y: 0.0,
@@ -389,6 +400,7 @@
             style: rtl_style.clone(),
         };
         let latin_fragment = TextFragment {
+            dynamic_field: None,
             text: "LTR".to_string(),
             style: rtl_style,
             ..rtl_fragment.clone()
@@ -406,15 +418,21 @@
         let mut document = Document::default();
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("{PAGE_NUMBER_MARKER} of {TOTAL_PAGES_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: vec![
+                typed_field_run(DynamicField::PageNumber),
+                Run {
+                    dynamic_field: None,
+                    text: " of ".to_string(),
+                    style: Default::default(),
+                },
+                typed_field_run(DynamicField::TotalPages),
+            ],
         }];
         document.blocks = vec![
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "First".to_string(),
                     style: Default::default(),
                 }],
@@ -423,6 +441,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Second".to_string(),
                     style: Default::default(),
                 }],
@@ -438,10 +457,6 @@
 
         assert!(first_text.contains("1 of 2"));
         assert!(second_text.contains("2 of 2"));
-        assert!(!first_text.contains(PAGE_NUMBER_MARKER));
-        assert!(!second_text.contains(PAGE_NUMBER_MARKER));
-        assert!(!first_text.contains(TOTAL_PAGES_MARKER));
-        assert!(!second_text.contains(TOTAL_PAGES_MARKER));
     }
 
     #[test]
@@ -450,26 +465,38 @@
         document.blocks = vec![
             Block::Paragraph(Paragraph {
                 style: Default::default(),
-                runs: vec![Run {
-                    text: format!("Section {SECTION_NUMBER_MARKER}"),
-                    style: Default::default(),
-                }],
+                runs: vec![
+                    Run {
+                        dynamic_field: None,
+                        text: "Section ".to_string(),
+                        style: Default::default(),
+                    },
+                    typed_field_run(DynamicField::SectionNumber),
+                ],
             }),
             Block::ContinuousSectionBreak,
             Block::Paragraph(Paragraph {
                 style: Default::default(),
-                runs: vec![Run {
-                    text: format!("Section {SECTION_NUMBER_MARKER}"),
-                    style: Default::default(),
-                }],
+                runs: vec![
+                    Run {
+                        dynamic_field: None,
+                        text: "Section ".to_string(),
+                        style: Default::default(),
+                    },
+                    typed_field_run(DynamicField::SectionNumber),
+                ],
             }),
             Block::SectionBreak,
             Block::Paragraph(Paragraph {
                 style: Default::default(),
-                runs: vec![Run {
-                    text: format!("Section {SECTION_NUMBER_MARKER}"),
-                    style: Default::default(),
-                }],
+                runs: vec![
+                    Run {
+                        dynamic_field: None,
+                        text: "Section ".to_string(),
+                        style: Default::default(),
+                    },
+                    typed_field_run(DynamicField::SectionNumber),
+                ],
             }),
         ];
 
@@ -483,6 +510,11 @@
         assert!(first_text.contains("Section 1"));
         assert!(first_text.contains("Section 2"));
         assert!(second_text.contains("Section 3"));
-        assert!(!first_text.contains(SECTION_NUMBER_MARKER));
-        assert!(!second_text.contains(SECTION_NUMBER_MARKER));
+    }
+    fn typed_field_run(field: DynamicField) -> Run {
+        Run {
+            dynamic_field: Some(field),
+            text: String::new(),
+            style: Default::default(),
+        }
     }

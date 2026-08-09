@@ -18,6 +18,7 @@
             Block::Paragraph(Paragraph {
                 style: ParagraphStyle::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Supplied font".to_string(),
                     style,
                 }],

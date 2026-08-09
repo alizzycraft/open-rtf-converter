@@ -4986,7 +4986,7 @@ fn resultless_symbol_fields_render_without_executing_field_instruction() {
 }
 
 #[test]
-fn resultless_symbol_field_cannot_inject_internal_marker() {
+fn resultless_symbol_field_cannot_inject_reserved_private_use_semantics() {
     let input = rtf(&[
         "{",
         "\\",
@@ -5003,7 +5003,7 @@ fn resultless_symbol_field_cannot_inject_internal_marker() {
     let parsed = parse_rtf_bytes(&input).unwrap();
     let text = collect_text(&parsed.document);
 
-    assert!(text.contains("Before [Field removed: no passive result] After"));
+    assert!(text.contains("Before \u{fffd} After"));
     assert!(!text.contains(PAGE_NUMBER_MARKER));
     assert!(!text.contains("SYMBOL"));
     assert!(!text.contains("983040"));
@@ -5021,7 +5021,8 @@ fn resultless_symbol_field_cannot_inject_internal_marker() {
     let content = parsed_pdf.get_and_decode_page_content(page_id).unwrap();
     let rendered_text = decoded_pdf_text(&content);
 
-    assert!(rendered_text.contains("Before [Field removed: no passive result] After"));
+    assert!(rendered_text.contains("Before"));
+    assert!(rendered_text.contains("After"));
     assert!(!rendered_text.contains("Before 1 After"));
     for forbidden in [
         b"SYMBOL".as_slice(),

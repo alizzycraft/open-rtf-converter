@@ -183,6 +183,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Amount\t123".to_string(),
                 style: Default::default(),
             }],
@@ -212,6 +213,7 @@
             Block::Paragraph(Paragraph {
                 style: right_style,
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "RTL".to_string(),
                     style: Default::default(),
                 }],
@@ -235,6 +237,7 @@
             Block::Paragraph(Paragraph {
                 style: keep_next_style.clone(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: text.to_string(),
                     style: Default::default(),
                 }],

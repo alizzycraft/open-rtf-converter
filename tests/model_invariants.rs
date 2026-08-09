@@ -1,7 +1,7 @@
 use open_rtf_converter::{
     layout::LayoutEngine,
     model::{
-        Block, BlockIndex, CharacterStyle, Document, FOOTNOTE_REFERENCE_MARKER,
+        Block, BlockIndex, CharacterStyle, Document, DynamicField, FOOTNOTE_REFERENCE_MARKER,
         FOOTNOTE_REFERENCE_MARKER_END, Footnote, ModelInvariantError, Paragraph, Run, SectionIndex,
         Table, TableCell, TableCellBorders, TableCellHorizontalMerge, TableCellPadding,
         TableCellSpacing, TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge,
@@ -53,6 +53,7 @@ fn advanced_layout_rejects_out_of_range_section_and_block_indexes() {
 fn advanced_layout_rejects_invalid_inline_and_note_identifiers() {
     let mut document = Document::default();
     first_paragraph(&mut document).runs.push(Run {
+        dynamic_field: None,
         text: inline_image_marker(7).expect("bounded marker").to_string(),
         style: CharacterStyle::default(),
     });
@@ -80,9 +81,25 @@ fn advanced_layout_rejects_invalid_inline_and_note_identifiers() {
 }
 
 #[test]
+fn advanced_layout_rejects_dynamic_fields_that_also_carry_text() {
+    let mut document = Document::default();
+    first_paragraph(&mut document).runs.push(Run {
+        dynamic_field: Some(DynamicField::TotalPages),
+        text: "not atomic".to_owned(),
+        style: CharacterStyle::default(),
+    });
+
+    assert!(matches!(
+        LayoutEngine::try_layout(&document),
+        Err(ModelInvariantError::DynamicFieldWithText { .. })
+    ));
+}
+
+#[test]
 fn advanced_layout_rejects_invalid_style_indexes() {
     let mut document = Document::default();
     first_paragraph(&mut document).runs.push(Run {
+        dynamic_field: None,
         text: "invalid style".to_owned(),
         style: CharacterStyle {
             font_index: 42,

@@ -30,10 +30,12 @@
 
         let base_runs = vec![
             Run {
+                dynamic_field: None,
                 text: "Before ".to_string(),
                 style: Default::default(),
             },
             Run {
+                dynamic_field: None,
                 text: "After".to_string(),
                 style: Default::default(),
             },
@@ -43,14 +45,17 @@
         advance_style.baseline_shift_half_points = -12;
         let advanced_runs = vec![
             Run {
+                dynamic_field: None,
                 text: "Before ".to_string(),
                 style: Default::default(),
             },
             Run {
+                dynamic_field: None,
                 text: PASSIVE_ADVANCE_MARKER.to_string(),
                 style: advance_style,
             },
             Run {
+                dynamic_field: None,
                 text: "After".to_string(),
                 style: Default::default(),
             },
@@ -136,16 +141,14 @@
         let mut document = Document::default();
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: PAGE_NUMBER_MARKER.to_string(),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("", DynamicField::PageNumber, Default::default()),
         }];
         document.blocks.clear();
         for _ in 0..120 {
             document.blocks.push(Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Body paragraph.".to_string(),
                     style: Default::default(),
                 }],
@@ -166,10 +169,7 @@
         document.page.restart_page_numbering = true;
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Page {PAGE_NUMBER_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Page ", DynamicField::PageNumber, Default::default()),
         }];
         document.blocks = vec![
             paragraph_with_text("Page one"),
@@ -194,10 +194,7 @@
         document.page.page_number_format = Some(PageNumberFormat::UpperRoman);
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Page {PAGE_NUMBER_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Page ", DynamicField::PageNumber, Default::default()),
         }];
         document.blocks = vec![
             paragraph_with_text("Page one"),
@@ -221,10 +218,7 @@
         document.page.page_number_y_twips = Some(1_440);
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Page {PAGE_NUMBER_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Page ", DynamicField::PageNumber, Default::default()),
         }];
         document.blocks = vec![paragraph_with_text("Body")];
 
@@ -253,10 +247,7 @@
         document.page.page_number_y_twips = Some(1_440);
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Pages {TOTAL_PAGES_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Pages ", DynamicField::TotalPages, Default::default()),
         }];
         document.blocks = vec![
             paragraph_with_text("Page one"),
@@ -279,10 +270,7 @@
         document.page.page_number_y_twips = Some(1_440);
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Section pages {SECTION_PAGES_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Section pages ", DynamicField::SectionPages, Default::default()),
         }];
         document.blocks = vec![
             paragraph_with_text("First body page one"),
@@ -305,10 +293,7 @@
         let mut document = Document::default();
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Page {PAGE_NUMBER_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Page ", DynamicField::PageNumber, Default::default()),
         }];
         let mut second_section = PageSettings::default();
         second_section.page_number_start = Some(3);
@@ -336,10 +321,7 @@
         let mut document = Document::default();
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Page {PAGE_NUMBER_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Page ", DynamicField::PageNumber, Default::default()),
         }];
         document.blocks = vec![
             paragraph_with_text("First section"),
@@ -364,10 +346,7 @@
         let mut document = Document::default();
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Page {PAGE_NUMBER_MARKER}"),
-                style: Default::default(),
-            }],
+            runs: dynamic_field_runs("Page ", DynamicField::PageNumber, Default::default()),
         }];
         let mut second_section = PageSettings::default();
         second_section.page_number_start = Some(2);
@@ -399,10 +378,7 @@
         style.underline = UnderlineStyle::Single;
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Pages {TOTAL_PAGES_MARKER}"),
-                style: style.clone(),
-            }],
+            runs: dynamic_field_runs("Pages ", DynamicField::TotalPages, style.clone()),
         }];
         document.blocks.clear();
         for idx in 0..80 {
@@ -451,10 +427,7 @@
         style.underline = UnderlineStyle::Words;
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Pages {TOTAL_PAGES_MARKER}"),
-                style: style.clone(),
-            }],
+            runs: dynamic_field_runs("Pages ", DynamicField::TotalPages, style.clone()),
         }];
         document.blocks.clear();
         for idx in 0..80 {
@@ -497,10 +470,7 @@
         style.border.visible = true;
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Pages {TOTAL_PAGES_MARKER}"),
-                style: style.clone(),
-            }],
+            runs: dynamic_field_runs("Pages ", DynamicField::TotalPages, style.clone()),
         }];
         document.blocks.clear();
         for idx in 0..80 {
@@ -549,10 +519,17 @@
             style: Default::default(),
             runs: vec![
                 Run {
-                    text: format!("Pages {TOTAL_PAGES_MARKER}"),
+                    dynamic_field: None,
+                    text: "Pages ".to_string(),
                     style: Default::default(),
                 },
                 Run {
+                    dynamic_field: Some(DynamicField::TotalPages),
+                    text: String::new(),
+                    style: Default::default(),
+                },
+                Run {
+                    dynamic_field: None,
                     text: " total".to_string(),
                     style: Default::default(),
                 },
@@ -602,10 +579,7 @@
         style.underline = UnderlineStyle::Single;
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Section pages {SECTION_PAGES_MARKER}"),
-                style: style.clone(),
-            }],
+            runs: dynamic_field_runs("Section pages ", DynamicField::SectionPages, style.clone()),
         }];
         document.blocks.clear();
         for idx in 0..80 {
@@ -663,10 +637,7 @@
         style.underline = UnderlineStyle::Words;
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Section pages {SECTION_PAGES_MARKER}"),
-                style: style.clone(),
-            }],
+            runs: dynamic_field_runs("Section pages ", DynamicField::SectionPages, style.clone()),
         }];
         document.blocks.clear();
         for idx in 0..80 {
@@ -718,10 +689,7 @@
         style.border.visible = true;
         document.header = vec![Paragraph {
             style: Default::default(),
-            runs: vec![Run {
-                text: format!("Section pages {SECTION_PAGES_MARKER}"),
-                style: style.clone(),
-            }],
+            runs: dynamic_field_runs("Section pages ", DynamicField::SectionPages, style.clone()),
         }];
         document.blocks.clear();
         for idx in 0..80 {
@@ -746,7 +714,7 @@
             "fixture should cross into two-digit section page count, got {first_section_pages}"
         );
         let resolved_marker = first_section_pages.to_string();
-        let fragment = text_fragment_after(&layout.pages[0], "pages ", &resolved_marker);
+        let fragment = text_fragment_after(&layout.pages[0], "Section pages ", &resolved_marker);
         let expected_width =
             measure_text_with_family(&resolved_marker, &style, PdfFontFamily::Helvetica);
         let old_width = measure_text_with_family(
@@ -779,10 +747,17 @@
             style: Default::default(),
             runs: vec![
                 Run {
-                    text: format!("Section pages {SECTION_PAGES_MARKER}"),
+                    dynamic_field: None,
+                    text: "Section pages ".to_string(),
                     style: Default::default(),
                 },
                 Run {
+                    dynamic_field: Some(DynamicField::SectionPages),
+                    text: String::new(),
+                    style: Default::default(),
+                },
+                Run {
+                    dynamic_field: None,
                     text: " total".to_string(),
                     style: Default::default(),
                 },
@@ -832,4 +807,24 @@
             (suffix.x - (marker.x + old_width)).abs() > 1.0,
             "late SECTIONPAGES following text should not keep marker placeholder position"
         );
+    }
+    fn dynamic_field_runs(
+        prefix: &str,
+        field: DynamicField,
+        style: CharacterStyle,
+    ) -> Vec<Run> {
+        let mut runs = Vec::new();
+        if !prefix.is_empty() {
+            runs.push(Run {
+                dynamic_field: None,
+                text: prefix.to_owned(),
+                style: style.clone(),
+            });
+        }
+        runs.push(Run {
+            dynamic_field: Some(field),
+            text: String::new(),
+            style,
+        });
+        runs
     }

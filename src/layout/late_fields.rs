@@ -611,7 +611,7 @@ pub(in crate::layout) fn push_paragraph_stats(
     paragraph: &Paragraph,
 ) {
     for run in &paragraph.runs {
-        if !run.style.hidden {
+        if !run.style.hidden && run.dynamic_field.is_none() {
             builder.push_text(&run.text);
         }
     }
@@ -620,13 +620,6 @@ pub(in crate::layout) fn push_paragraph_stats(
 
 pub(in crate::layout) fn remove_internal_stat_markers(text: &str) -> String {
     let mut cleaned = text
-        .replace(PAGE_NUMBER_MARKER, "")
-        .replace(TOTAL_PAGES_MARKER, "")
-        .replace(SECTION_NUMBER_MARKER, "")
-        .replace(SECTION_PAGES_MARKER, "")
-        .replace(DOCUMENT_WORDS_MARKER, "")
-        .replace(DOCUMENT_CHARS_MARKER, "")
-        .replace(DOCUMENT_CHARS_WITH_SPACES_MARKER, "")
         .replace(PASSIVE_ADVANCE_MARKER, "")
         .replace(PASSIVE_MATH_FRACTION_RULE_MARKER, "")
         .replace(PASSIVE_MATH_INLINE_LEAD_MARKER, "")
@@ -718,7 +711,7 @@ pub(in crate::layout) fn format_alpha_page_number(value: i32, lowercase: bool) -
 pub(in crate::layout) fn resolve_total_page_markers(pages: &mut [LayoutPage]) {
     let total_pages = pages.len().to_string();
     for page in pages {
-        replace_late_page_marker(page, TOTAL_PAGES_MARKER, &total_pages);
+        replace_late_page_marker(page, DynamicField::TotalPages, &total_pages);
     }
 }
 
@@ -742,7 +735,7 @@ pub(in crate::layout) fn resolve_section_page_markers(pages: &mut [LayoutPage]) 
             .unwrap_or(1)
             .max(1)
             .to_string();
-        replace_late_page_marker(page, SECTION_PAGES_MARKER, &section_pages);
+        replace_late_page_marker(page, DynamicField::SectionPages, &section_pages);
     }
 }
 
@@ -1001,7 +994,7 @@ pub(in crate::layout) struct LateMarkerGeometry {
 
 pub(in crate::layout) fn replace_late_page_marker(
     page: &mut LayoutPage,
-    marker: &str,
+    field: DynamicField,
     replacement: &str,
 ) {
     let mut adjustments = Vec::new();
@@ -1009,14 +1002,15 @@ pub(in crate::layout) fn replace_late_page_marker(
         let Some(fragment) = layout_item_text_fragment_mut(item) else {
             continue;
         };
-        if !fragment.text.contains(marker) {
+        if fragment.dynamic_field != Some(field) {
             continue;
         }
         let old_text = fragment.text.clone();
-        let new_text = old_text.replace(marker, replacement);
+        let new_text = replacement.to_owned();
         let old_width = passive_text_fragment_width(fragment, &old_text);
         let new_width = passive_text_fragment_width(fragment, &new_text);
         fragment.text = new_text;
+        fragment.dynamic_field = None;
         if (new_width - old_width).abs() > 0.01 {
             adjustments.push(LateMarkerWidthAdjustment {
                 text_index: idx,
@@ -1035,18 +1029,8 @@ pub(in crate::layout) fn replace_late_page_marker(
 }
 
 pub(in crate::layout) fn passive_text_fragment_width(fragment: &TextFragment, text: &str) -> f32 {
-    let text = late_page_count_measurement_text(text);
-    measure_text_with_family(&text, &fragment.style, fragment.font_family)
-        + fragment.word_spacing * regular_space_count(&text) as f32
-}
-
-pub(in crate::layout) fn late_page_count_measurement_text(text: &str) -> String {
-    if text.contains(TOTAL_PAGES_MARKER) || text.contains(SECTION_PAGES_MARKER) {
-        text.replace(TOTAL_PAGES_MARKER, LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER)
-            .replace(SECTION_PAGES_MARKER, LATE_PAGE_COUNT_LAYOUT_PLACEHOLDER)
-    } else {
-        text.to_string()
-    }
+    measure_text_with_family(text, &fragment.style, fragment.font_family)
+        + fragment.word_spacing * regular_space_count(text) as f32
 }
 
 pub(in crate::layout) fn late_marker_geometry(

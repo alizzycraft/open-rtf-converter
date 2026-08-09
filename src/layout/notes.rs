@@ -675,6 +675,7 @@ pub(in crate::layout) fn note_display_paragraph(
         paragraph.runs.insert(
             0,
             Run {
+                dynamic_field: None,
                 text: label,
                 style: label_style,
             },

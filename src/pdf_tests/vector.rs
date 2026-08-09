@@ -11,6 +11,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Bordered".to_string(),
                 style: Default::default(),
             }],
@@ -304,6 +305,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Marked".to_string(),
                 style,
             }],
@@ -368,18 +370,22 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "double ".to_string(),
                     style: double_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "dotted ".to_string(),
                     style: dotted_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "dashed ".to_string(),
                     style: dashed_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "wave".to_string(),
                     style: wave_style,
                 },
@@ -422,6 +428,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Outline".to_string(),
                 style,
             }],

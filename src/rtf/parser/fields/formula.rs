@@ -29,6 +29,7 @@ pub(in crate::rtf::parser) fn passive_formula_field_result(
     }
     let value = FormulaParser::new(expression).parse()?;
     Some(PassiveFieldResult {
+        dynamic_field: None,
         text: value.to_string(),
         font_name: None,
         font_size_half_points: None,

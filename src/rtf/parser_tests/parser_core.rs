@@ -227,7 +227,7 @@
     }
 
     #[test]
-    fn normalizes_page_number_control_as_safe_marker() {
+    fn normalizes_page_number_control_as_typed_dynamic_field() {
         let output = parse_rtf(r"{\rtf1{\header \chpgn\par}Body text\page More text\par}").unwrap();
 
         assert_eq!(output.document.header.len(), 1);
@@ -236,8 +236,12 @@
             .iter()
             .map(|run| run.text.as_str())
             .collect::<String>();
-        assert_eq!(text.replace(PASSIVE_ADVANCE_MARKER, ""), PAGE_NUMBER_MARKER);
+        assert_eq!(text.replace(PASSIVE_ADVANCE_MARKER, ""), "");
         assert_eq!(text.matches(PASSIVE_ADVANCE_MARKER).count(), 1);
+        assert_eq!(
+            paragraph_dynamic_fields(&output.document.header[0]),
+            vec![DynamicField::PageNumber]
+        );
     }
 
     #[test]
@@ -253,7 +257,11 @@
                 .map(|run| run.text.as_str())
                 .collect::<String>()
                 .replace(PASSIVE_ADVANCE_MARKER, ""),
-            format!("Page {PAGE_NUMBER_MARKER}")
+            "Page "
+        );
+        assert_eq!(
+            paragraph_dynamic_fields(&output.document.header[0]),
+            vec![DynamicField::PageNumber]
         );
     }
 
@@ -277,7 +285,11 @@
                     .map(|run| run.text.as_str())
                     .collect::<String>()
                     .replace(PASSIVE_ADVANCE_MARKER, ""),
-                format!("Page {PAGE_NUMBER_MARKER}")
+                "Page "
+            );
+            assert_eq!(
+                paragraph_dynamic_fields(&output.document.header[0]),
+                vec![DynamicField::PageNumber]
             );
         }
     }
@@ -296,7 +308,11 @@
                 .map(|run| run.text.as_str())
                 .collect::<String>()
                 .replace(PASSIVE_ADVANCE_MARKER, ""),
-            format!("Page {PAGE_NUMBER_MARKER}")
+            "Page "
+        );
+        assert_eq!(
+            paragraph_dynamic_fields(&output.document.header[0]),
+            vec![DynamicField::PageNumber]
         );
         assert!(output.diagnostics.iter().all(|diagnostic| {
             !diagnostic
@@ -959,12 +975,15 @@
     }
 
     #[test]
-    fn section_number_controls_render_passive_section_marker() {
+    fn section_number_controls_create_typed_dynamic_fields() {
         let output =
             parse_rtf(r"{\rtf1 Section \sectnum\par\sbknone\sect Section \sectnum\par}").unwrap();
         let text = document_text(&output.document);
 
-        assert!(text.contains(SECTION_NUMBER_MARKER));
+        assert_eq!(
+            document_dynamic_fields(&output.document),
+            vec![DynamicField::SectionNumber, DynamicField::SectionNumber]
+        );
         assert!(!text.contains("sectnum"));
         assert!(
             output
@@ -1089,7 +1108,10 @@
         assert!(text.contains("revision IX edit 0017"));
         assert!(text.contains("paragraphs 3 lines 012"));
         assert!(text.contains("bytes 4,096"));
-        assert!(text.contains(DOCUMENT_WORDS_MARKER));
+        assert_eq!(
+            document_dynamic_fields(&output.document),
+            vec![DynamicField::DocumentWords]
+        );
         assert_eq!(
             text.matches("[Field removed: no passive result]").count(),
             1

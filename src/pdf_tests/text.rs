@@ -7,6 +7,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Left".to_string(),
                     style: Default::default(),
                 }],
@@ -15,6 +16,7 @@
             Block::Paragraph(Paragraph {
                 style: Default::default(),
                 runs: vec![Run {
+                    dynamic_field: None,
                     text: "Right".to_string(),
                     style: Default::default(),
                 }],
@@ -63,6 +65,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Boxed".to_string(),
                 style,
             }],
@@ -114,6 +117,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Tinted".to_string(),
                 style,
             }],
@@ -149,6 +153,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Mixed case".to_string(),
                 style,
             }],
@@ -171,6 +176,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Mix".to_string(),
                 style,
             }],
@@ -200,14 +206,17 @@
             style: Default::default(),
             runs: vec![
                 Run {
+                    dynamic_field: None,
                     text: "Visible".to_string(),
                     style: Default::default(),
                 },
                 Run {
+                    dynamic_field: None,
                     text: "Hidden".to_string(),
                     style: hidden_style,
                 },
                 Run {
+                    dynamic_field: None,
                     text: "Shown".to_string(),
                     style: Default::default(),
                 },
@@ -235,6 +244,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Wide".to_string(),
                 style,
             }],
@@ -267,6 +277,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Scaled".to_string(),
                 style,
             }],
@@ -302,6 +313,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: paragraph_style,
             runs: vec![Run {
+                dynamic_field: None,
                 text: "one two three four five six seven eight nine ten".to_string(),
                 style: Default::default(),
             }],
@@ -343,6 +355,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Shadow".to_string(),
                 style,
             }],
@@ -397,6 +410,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "Relief".to_string(),
                 style,
             }],
@@ -476,6 +490,7 @@
         document.blocks = vec![Block::Paragraph(Paragraph {
             style: Default::default(),
             runs: vec![Run {
+                dynamic_field: None,
                 text: "AV".to_string(),
                 style,
             }],

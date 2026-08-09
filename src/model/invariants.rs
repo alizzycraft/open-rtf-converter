@@ -35,6 +35,8 @@ pub enum ModelInvariantError {
         path: String,
         reason: &'static str,
     },
+    #[error("dynamic field at {path} must not also carry text")]
+    DynamicFieldWithText { path: String },
     #[error("nested table depth {depth} at {path} exceeds the transitional bound {limit}")]
     NestedTableDepthExceeded {
         depth: usize,
@@ -685,6 +687,9 @@ fn validate_paragraph(
     for (run_index, run) in paragraph.runs.iter().enumerate() {
         let run_path = format!("{path}.runs[{run_index}]");
         validate_character_style(&run.style, &run_path, context)?;
+        if run.dynamic_field.is_some() && !run.text.is_empty() {
+            return Err(ModelInvariantError::DynamicFieldWithText { path: run_path });
+        }
         validate_marker_text(&run.text, &run_path, context)?;
     }
     Ok(())
@@ -822,16 +827,9 @@ fn validate_marker_text(
 
 fn is_known_non_inline_marker(ch: char) -> bool {
     [
-        PAGE_NUMBER_MARKER,
-        TOTAL_PAGES_MARKER,
-        SECTION_NUMBER_MARKER,
-        SECTION_PAGES_MARKER,
         BOOKMARK_PAGE_ANCHOR_MARKER,
         BOOKMARK_PAGE_REF_MARKER,
         BOOKMARK_PAGE_MARKER_END,
-        DOCUMENT_WORDS_MARKER,
-        DOCUMENT_CHARS_MARKER,
-        DOCUMENT_CHARS_WITH_SPACES_MARKER,
         PASSIVE_ADVANCE_MARKER,
         PASSIVE_MATH_FRACTION_RULE_MARKER,
         PASSIVE_MATH_STACK_ANCHOR_MARKER,
@@ -940,6 +938,7 @@ mod tests {
             panic!("default block must be a paragraph");
         };
         paragraph.runs.push(Run {
+            dynamic_field: None,
             text: marker.to_string(),
             style: CharacterStyle::default(),
         });
@@ -962,6 +961,7 @@ mod tests {
                 panic!("default block must be a paragraph");
             };
             paragraph.runs.push(Run {
+                dynamic_field: None,
                 text: "malformed".to_owned(),
                 style: CharacterStyle {
                     font_index: 99,
@@ -997,6 +997,7 @@ mod tests {
             panic!("default block must be a paragraph");
         };
         paragraph.runs.push(Run {
+            dynamic_field: None,
             text: format!("{FOOTNOTE_REFERENCE_MARKER}not-a-number{FOOTNOTE_REFERENCE_MARKER_END}"),
             style: CharacterStyle::default(),
         });

@@ -1235,6 +1235,7 @@ pub(in crate::layout) fn table_cell_paragraphs_for_layout(cell: &TableCell) -> V
         let anchor_run = &paragraph.runs[anchor_run_index];
         if anchor_byte_index > 0 {
             before.push(Run {
+                dynamic_field: None,
                 text: anchor_run.text[..anchor_byte_index].to_string(),
                 style: anchor_run.style.clone(),
             });
@@ -1251,6 +1252,7 @@ pub(in crate::layout) fn table_cell_paragraphs_for_layout(cell: &TableCell) -> V
         let mut after = Vec::new();
         if suffix_start < anchor_run.text.len() {
             after.push(Run {
+                dynamic_field: None,
                 text: anchor_run.text[suffix_start..].to_string(),
                 style: anchor_run.style.clone(),
             });
@@ -1298,6 +1300,7 @@ pub(in crate::layout) fn append_nested_table_paragraphs(
             };
             if visual_index > 0 {
                 runs.push(Run {
+                    dynamic_field: None,
                     text: "\t".to_string(),
                     style: CharacterStyle::default(),
                 });
@@ -1305,6 +1308,7 @@ pub(in crate::layout) fn append_nested_table_paragraphs(
             for (paragraph_index, paragraph) in cell.paragraphs.iter().enumerate() {
                 if paragraph_index > 0 {
                     runs.push(Run {
+                        dynamic_field: None,
                         text: "\n".to_string(),
                         style: CharacterStyle::default(),
                     });
