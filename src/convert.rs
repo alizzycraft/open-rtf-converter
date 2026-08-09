@@ -7,15 +7,16 @@ use thiserror::Error;
 
 use crate::config::{LimitValidationError, RtfParseOptions};
 use crate::diagnostics::Diagnostic;
-use crate::fonts::{FontCoverage, FontProvider, FontProviderError};
+use crate::fonts::{FontCoverage, FontProvider, FontProviderError, PreparedFontCatalog};
 use crate::layout::{
     LayoutDocument, LayoutEngine, LayoutItem, PdfFontFamily, TextFragment,
     passive_pdf_font_family_for_font,
 };
 use crate::model::{Document, FontDef, ImageFormat, StaticImageVectorCommand};
 use crate::pdf::{
-    PassivePdfError, audit_passive_pdf_bytes, estimate_passive_pdf_object_count,
-    passive_base14_covers_latin_extended_char, render_pdf_with_font_provider,
+    PassivePdfError, audit_passive_pdf_bytes,
+    estimate_passive_pdf_object_count_with_prepared_fonts,
+    passive_base14_covers_latin_extended_char, render_pdf_with_prepared_fonts,
 };
 use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 
@@ -112,25 +113,28 @@ pub fn convert_rtf_to_pdf(
     input: &[u8],
     options: &ConvertOptions,
 ) -> Result<ConversionOutput, ConvertError> {
-    options.validate()?;
+    options
+        .parse_options
+        .validate()
+        .map_err(ParseError::InvalidLimits)?;
+    let font_catalog = PreparedFontCatalog::prepare(&options.font_provider)?;
     let parsed = parse_rtf_bytes_with_options(input, &options.parse_options)?;
     let mut diagnostics = if options.diagnostics {
         parsed.diagnostics.clone()
     } else {
         Vec::new()
     };
-    let layout =
-        LayoutEngine::layout_with_font_provider(&parsed.document, Some(&options.font_provider));
+    let layout = LayoutEngine::layout_with_prepared_font_catalog(&parsed.document, &font_catalog);
     if options.diagnostics {
         diagnostics.extend(passive_font_substitution_diagnostics(
             &parsed.document,
             &layout,
-            &options.font_provider,
+            &font_catalog,
         ));
         diagnostics.extend(unsupported_passive_glyph_diagnostics(
             &parsed.document,
             &layout,
-            &options.font_provider,
+            &font_catalog,
         ));
     }
     let page_count = layout.pages.len();
@@ -149,7 +153,8 @@ pub fn convert_rtf_to_pdf(
             limit: page_limit,
         });
     }
-    let object_count = estimate_passive_pdf_object_count(&layout, Some(&options.font_provider));
+    let object_count =
+        estimate_passive_pdf_object_count_with_prepared_fonts(&layout, &font_catalog);
     let object_limit = options.parse_options.limits.max_pdf_indirect_objects;
     if object_count > object_limit {
         return Err(ConvertError::TooManyPdfObjects {
@@ -157,7 +162,7 @@ pub fn convert_rtf_to_pdf(
             limit: object_limit,
         });
     }
-    let pdf = render_pdf_with_font_provider(&layout, Some(&options.font_provider));
+    let pdf = render_pdf_with_prepared_fonts(&layout, &font_catalog);
     let output_limit = options.parse_options.limits.max_pdf_output_bytes;
     if pdf.len() > output_limit {
         return Err(ConvertError::OutputTooLarge {
@@ -212,7 +217,7 @@ fn count_layout_item(item: &LayoutItem) -> usize {
 fn passive_font_substitution_diagnostics(
     document: &Document,
     layout: &LayoutDocument,
-    font_provider: &FontProvider,
+    font_provider: &PreparedFontCatalog,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = HashSet::<(String, PdfFontFamily)>::new();
@@ -258,7 +263,7 @@ fn collect_visible_font_indexes(layout: &LayoutDocument) -> HashSet<i32> {
 fn unsupported_passive_glyph_diagnostics(
     document: &Document,
     layout: &LayoutDocument,
-    font_provider: &FontProvider,
+    font_provider: &PreparedFontCatalog,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen = HashSet::<(i32, &'static str)>::new();
@@ -285,7 +290,7 @@ fn unsupported_passive_glyph_diagnostics(
 fn collect_unsupported_glyph_diagnostic_from_fragment(
     fragment: &TextFragment,
     fonts_by_index: &HashMap<i32, &FontDef>,
-    font_provider: &FontProvider,
+    font_provider: &PreparedFontCatalog,
     seen: &mut HashSet<(i32, &'static str)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -382,7 +387,7 @@ fn collect_unsupported_glyph_diagnostics_from_vector_images(
     });
 }
 
-fn font_provider_has_asset_for_font(font_provider: &FontProvider, font: &FontDef) -> bool {
+fn font_provider_has_asset_for_font(font_provider: &PreparedFontCatalog, font: &FontDef) -> bool {
     font_provider.has_asset_for_family(&font.name)
         || font
             .alternate_name
@@ -391,7 +396,7 @@ fn font_provider_has_asset_for_font(font_provider: &FontProvider, font: &FontDef
 }
 
 fn font_provider_coverage_for_font_char(
-    font_provider: &FontProvider,
+    font_provider: &PreparedFontCatalog,
     font: &FontDef,
     ch: char,
 ) -> FontCoverage {
@@ -546,6 +551,19 @@ mod tests {
                 asset_index: 0
             }))
         );
+    }
+
+    #[test]
+    fn conversion_prepares_fonts_before_parsing_input() {
+        let mut options = ConvertOptions::default();
+        options.font_provider.assets[0].bytes = std::sync::Arc::from(b"invalid".as_slice());
+
+        assert!(matches!(
+            convert_rtf_to_pdf(b"}", &options),
+            Err(ConvertError::FontProvider(
+                FontProviderError::InvalidAsset { asset_index: 0, .. }
+            ))
+        ));
     }
 
     #[test]

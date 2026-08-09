@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
@@ -280,6 +281,102 @@ impl FontProvider {
             }
         }
         best
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NormalizedFamilyName(String);
+
+impl NormalizedFamilyName {
+    fn new(value: &str) -> Option<Self> {
+        let value = canonical_word_charset_family_name(value).trim();
+        (!value.is_empty()).then(|| Self(value.to_ascii_lowercase()))
+    }
+}
+
+/// Validated, indexed font state used by one conversion.
+pub(crate) struct PreparedFontCatalog {
+    provider: FontProvider,
+    family_index: HashMap<NormalizedFamilyName, Vec<usize>>,
+    fallback_assets: Vec<usize>,
+}
+
+impl PreparedFontCatalog {
+    pub(crate) fn prepare(provider: &FontProvider) -> Result<Self, FontProviderError> {
+        provider.validate()?;
+        let mut family_index = HashMap::<NormalizedFamilyName, Vec<usize>>::new();
+        let mut fallback_assets = Vec::new();
+        for (asset_index, asset) in provider.assets.iter().enumerate() {
+            for family_name in &asset.family_names {
+                if is_wildcard_font_family_alias(family_name.trim()) {
+                    if !fallback_assets.contains(&asset_index) {
+                        fallback_assets.push(asset_index);
+                    }
+                    continue;
+                }
+                let Some(normalized) = NormalizedFamilyName::new(family_name) else {
+                    continue;
+                };
+                let indexes = family_index.entry(normalized).or_default();
+                if !indexes.contains(&asset_index) {
+                    indexes.push(asset_index);
+                }
+            }
+        }
+        Ok(Self {
+            provider: provider.clone(),
+            family_index,
+            fallback_assets,
+        })
+    }
+
+    pub(crate) fn provider(&self) -> &FontProvider {
+        &self.provider
+    }
+
+    pub(crate) fn has_asset_for_family(&self, family_name: &str) -> bool {
+        if NormalizedFamilyName::new(family_name).is_none() {
+            return false;
+        }
+        self.exact_asset_indexes(family_name)
+            .is_some_and(|indexes| !indexes.is_empty())
+            || !self.fallback_assets.is_empty()
+    }
+
+    pub(crate) fn coverage_for_char(&self, family_name: &str, ch: char) -> FontCoverage {
+        let mut found_asset = false;
+        for asset_index in self.candidate_asset_indexes(family_name) {
+            found_asset = true;
+            let asset = &self.provider.assets[asset_index];
+            if let Ok(face) = Face::parse(&asset.bytes, 0)
+                && face.glyph_index(ch).is_some()
+            {
+                return FontCoverage::Covered;
+            }
+        }
+        if found_asset {
+            FontCoverage::MissingGlyph
+        } else {
+            FontCoverage::NoAsset
+        }
+    }
+
+    fn exact_asset_indexes(&self, family_name: &str) -> Option<&[usize]> {
+        let normalized = NormalizedFamilyName::new(family_name)?;
+        self.family_index.get(&normalized).map(Vec::as_slice)
+    }
+
+    fn candidate_asset_indexes<'a>(
+        &'a self,
+        family_name: &str,
+    ) -> impl Iterator<Item = usize> + 'a {
+        let valid_family = NormalizedFamilyName::new(family_name).is_some();
+        self.exact_asset_indexes(family_name)
+            .into_iter()
+            .flatten()
+            .copied()
+            .chain(self.fallback_assets.iter().copied())
+            .filter(move |_| valid_family)
     }
 }
 
@@ -791,6 +888,47 @@ mod tests {
                 ..FontProviderLimits::default()
             },
         }
+    }
+
+    #[test]
+    fn prepared_catalog_indexes_exact_aliases_before_stable_fallbacks() {
+        let wildcard = FontAsset::from_bytes(
+            vec!["*".to_string()],
+            FontAssetStyle::default(),
+            include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        )
+        .unwrap();
+        let first_exact = FontAsset::from_bytes(
+            vec!["Times New Roman".to_string()],
+            FontAssetStyle::default(),
+            include_bytes!("../fixtures/fonts/Tuffy.ttf").to_vec(),
+        )
+        .unwrap();
+        let second_exact = first_exact.clone();
+        let provider = FontProvider {
+            assets: vec![wildcard, first_exact, second_exact],
+            limits: FontProviderLimits::default(),
+        };
+
+        let prepared = PreparedFontCatalog::prepare(&provider).unwrap();
+        assert_eq!(
+            prepared.provider().assets[0].bytes.as_ptr(),
+            provider.assets[0].bytes.as_ptr()
+        );
+        assert_eq!(
+            prepared
+                .candidate_asset_indexes("Times New Roman Cyr")
+                .collect::<Vec<_>>(),
+            vec![1, 2, 0]
+        );
+        assert_eq!(
+            prepared
+                .candidate_asset_indexes("Unknown Family")
+                .collect::<Vec<_>>(),
+            vec![0]
+        );
+        assert!(!prepared.has_asset_for_family("  "));
+        assert_eq!(prepared.coverage_for_char("", 'A'), FontCoverage::NoAsset);
     }
 
     #[test]

@@ -14,7 +14,7 @@ use pdf_writer::types::{
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 use ttf_parser::{Face, name_id};
 
-use crate::fonts::{FontAsset, FontProvider, font_asset_pair_kerning_points};
+use crate::fonts::{FontAsset, FontProvider, PreparedFontCatalog, font_asset_pair_kerning_points};
 use crate::layout::{
     LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
     TextFragment, TextRotation, passive_pair_kerning_points, passive_supplied_font_fallback_name,
@@ -304,6 +304,9 @@ pub(crate) use text::passive_base14_covers_latin_extended_char;
 use text::*;
 use vector::*;
 pub use writer::{estimate_passive_pdf_object_count, render_pdf, render_pdf_with_font_provider};
+pub(crate) use writer::{
+    estimate_passive_pdf_object_count_with_prepared_fonts, render_pdf_with_prepared_fonts,
+};
 #[cfg(test)]
 mod tests {
     use crate::fonts::{FontAsset, FontAssetStyle, FontProvider};
