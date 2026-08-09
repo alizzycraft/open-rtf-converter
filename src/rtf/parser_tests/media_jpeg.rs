@@ -199,7 +199,9 @@
             0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
             0xff, 0xd9,
         ]);
-        assert!(parse_jpeg_image_data(&jpeg).is_some());
+        assert!(
+            parse_jpeg_image_data(&jpeg, RtfLimits::default().max_image_pixels).is_ok()
+        );
         let input = format!("{{\\rtf1{{\\pict\\jpegblip {}}}}}", bytes_to_hex(&jpeg));
 
         let word = parse_rtf(&input).unwrap();

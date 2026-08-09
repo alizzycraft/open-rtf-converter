@@ -1,4 +1,22 @@
-use jpeg_decoder::{Decoder as JpegDecoder, PixelFormat as JpegPixelFormat};
+mod media;
+
+use media::MediaDecodeError;
+use media::dib::{
+    ParsedCompressedDibImage, ParsedDib, parse_compressed_dib_image_data, parse_dib_image_data,
+    parse_windows_bitmap_image_data,
+};
+use media::jpeg::{
+    decode_bounded_jpeg_to_rgb8, jpeg_image_data_is_decodable, parse_jpeg_image_data,
+};
+#[cfg(test)]
+use media::png::{
+    PNG_ADAM7_PASSES, adam7_pass_dimension, deflate_zlib_stored_blocks, inflate_zlib_stored_blocks,
+    png_pixel_bytes, scale_png_16_to_8,
+};
+use media::png::{
+    inflate_zlib_png_scanlines, parse_png_image_data, unfilter_png_scanlines,
+    unfiltered_png_scanlines,
+};
 use thiserror::Error;
 
 use crate::config::{
@@ -15784,104 +15802,126 @@ impl Parser {
         self.reserve_image_slot(offset)?;
 
         match picture.kind {
-            PictureKind::Jpeg => match parse_jpeg_image_data(&picture.bytes) {
-                Some(jpeg) => {
-                    let width_px = jpeg.width_px;
-                    let height_px = jpeg.height_px;
-                    self.ensure_image_pixels(width_px, height_px, offset)?;
-                    if !jpeg_image_data_is_decodable(&picture.bytes, &jpeg) {
-                        self.handle_malformed_jpeg_picture(&picture, offset)?;
-                        return Ok(());
+            PictureKind::Jpeg => {
+                match parse_jpeg_image_data(&picture.bytes, self.limits().max_image_pixels) {
+                    Ok(jpeg) => {
+                        let width_px = jpeg.width_px;
+                        let height_px = jpeg.height_px;
+                        self.ensure_image_pixels(width_px, height_px, offset)?;
+                        if !jpeg_image_data_is_decodable(&picture.bytes, &jpeg) {
+                            self.handle_malformed_jpeg_picture(&picture, offset)?;
+                            return Ok(());
+                        }
+                        let natural_width_px_hint =
+                            self.normalized_picture_natural_size_hint(&picture, true, offset);
+                        let natural_height_px_hint =
+                            self.normalized_picture_natural_size_hint(&picture, false, offset);
+                        let mut image = StaticImage {
+                            format: jpeg.format,
+                            bytes: picture.bytes[..jpeg.data_end].to_vec(),
+                            palette: Vec::new(),
+                            alpha_mask: None,
+                            tone_adjustment: None,
+                            vector_commands: Vec::new(),
+                            width_px,
+                            height_px,
+                            natural_width_px_hint,
+                            natural_height_px_hint,
+                            display_width_twips: picture.display_width_twips,
+                            display_height_twips: picture.display_height_twips,
+                            scale_x_percent: picture.scale_x_percent,
+                            scale_y_percent: picture.scale_y_percent,
+                            crop: picture.crop,
+                            placement: None,
+                        };
+                        self.apply_picture_color_mode(
+                            &mut image,
+                            PictureAdjustments {
+                                grayscale: picture.grayscale,
+                                bilevel: picture.bilevel,
+                                brightness_fixed: picture.brightness_fixed,
+                                contrast_fixed: picture.contrast_fixed,
+                            },
+                            offset,
+                        );
+                        self.push_static_image(picture.owner_destination, image, offset)?;
+                        self.mark_shape_visual_result_rendered();
                     }
-                    let natural_width_px_hint =
-                        self.normalized_picture_natural_size_hint(&picture, true, offset);
-                    let natural_height_px_hint =
-                        self.normalized_picture_natural_size_hint(&picture, false, offset);
-                    let mut image = StaticImage {
-                        format: jpeg.format,
-                        bytes: picture.bytes[..jpeg.data_end].to_vec(),
-                        palette: Vec::new(),
-                        alpha_mask: None,
-                        tone_adjustment: None,
-                        vector_commands: Vec::new(),
-                        width_px,
-                        height_px,
-                        natural_width_px_hint,
-                        natural_height_px_hint,
-                        display_width_twips: picture.display_width_twips,
-                        display_height_twips: picture.display_height_twips,
-                        scale_x_percent: picture.scale_x_percent,
-                        scale_y_percent: picture.scale_y_percent,
-                        crop: picture.crop,
-                        placement: None,
-                    };
-                    self.apply_picture_color_mode(
-                        &mut image,
-                        PictureAdjustments {
-                            grayscale: picture.grayscale,
-                            bilevel: picture.bilevel,
-                            brightness_fixed: picture.brightness_fixed,
-                            contrast_fixed: picture.contrast_fixed,
-                        },
-                        offset,
-                    );
-                    self.push_static_image(picture.owner_destination, image, offset)?;
-                    self.mark_shape_visual_result_rendered();
+                    Err(MediaDecodeError::PixelLimitExceeded {
+                        width_px: _,
+                        height_px: _,
+                    }) => {
+                        return Err(ParseError::ResourceLimitExceeded {
+                            resource: "image pixels".to_string(),
+                            offset,
+                        });
+                    }
+                    Err(MediaDecodeError::Malformed) => {
+                        self.handle_malformed_jpeg_picture(&picture, offset)?;
+                    }
                 }
-                None => {
-                    self.handle_malformed_jpeg_picture(&picture, offset)?;
-                }
-            },
-            PictureKind::Png => match parse_png_image_data(&picture.bytes) {
-                Some(png) => {
-                    self.ensure_image_pixels(png.width_px, png.height_px, offset)?;
-                    let natural_width_px_hint =
-                        self.normalized_picture_natural_size_hint(&picture, true, offset);
-                    let natural_height_px_hint =
-                        self.normalized_picture_natural_size_hint(&picture, false, offset);
-                    let mut image = StaticImage {
-                        format: png.format,
-                        bytes: png.idat,
-                        palette: png.palette,
-                        alpha_mask: png.alpha_mask,
-                        tone_adjustment: None,
-                        vector_commands: Vec::new(),
-                        width_px: png.width_px,
-                        height_px: png.height_px,
-                        natural_width_px_hint,
-                        natural_height_px_hint,
-                        display_width_twips: picture.display_width_twips,
-                        display_height_twips: picture.display_height_twips,
-                        scale_x_percent: picture.scale_x_percent,
-                        scale_y_percent: picture.scale_y_percent,
-                        crop: picture.crop,
-                        placement: None,
-                    };
-                    self.apply_picture_color_mode(
-                        &mut image,
-                        PictureAdjustments {
-                            grayscale: picture.grayscale,
-                            bilevel: picture.bilevel,
-                            brightness_fixed: picture.brightness_fixed,
-                            contrast_fixed: picture.contrast_fixed,
-                        },
-                        offset,
-                    );
-                    self.push_static_image(picture.owner_destination, image, offset)?;
-                    self.mark_shape_visual_result_rendered();
-                }
-                None => {
-                    self.diagnostics.push(Diagnostic::warning(
+            }
+            PictureKind::Png => {
+                match parse_png_image_data(&picture.bytes, self.limits().max_image_pixels) {
+                    Ok(png) => {
+                        self.ensure_image_pixels(png.width_px, png.height_px, offset)?;
+                        let natural_width_px_hint =
+                            self.normalized_picture_natural_size_hint(&picture, true, offset);
+                        let natural_height_px_hint =
+                            self.normalized_picture_natural_size_hint(&picture, false, offset);
+                        let mut image = StaticImage {
+                            format: png.format,
+                            bytes: png.idat,
+                            palette: png.palette,
+                            alpha_mask: png.alpha_mask,
+                            tone_adjustment: None,
+                            vector_commands: Vec::new(),
+                            width_px: png.width_px,
+                            height_px: png.height_px,
+                            natural_width_px_hint,
+                            natural_height_px_hint,
+                            display_width_twips: picture.display_width_twips,
+                            display_height_twips: picture.display_height_twips,
+                            scale_x_percent: picture.scale_x_percent,
+                            scale_y_percent: picture.scale_y_percent,
+                            crop: picture.crop,
+                            placement: None,
+                        };
+                        self.apply_picture_color_mode(
+                            &mut image,
+                            PictureAdjustments {
+                                grayscale: picture.grayscale,
+                                bilevel: picture.bilevel,
+                                brightness_fixed: picture.brightness_fixed,
+                                contrast_fixed: picture.contrast_fixed,
+                            },
+                            offset,
+                        );
+                        self.push_static_image(picture.owner_destination, image, offset)?;
+                        self.mark_shape_visual_result_rendered();
+                    }
+                    Err(MediaDecodeError::PixelLimitExceeded {
+                        width_px: _,
+                        height_px: _,
+                    }) => {
+                        return Err(ParseError::ResourceLimitExceeded {
+                            resource: "image pixels".to_string(),
+                            offset,
+                        });
+                    }
+                    Err(MediaDecodeError::Malformed) => {
+                        self.diagnostics.push(Diagnostic::warning(
                             "unsupported or malformed PNG picture data replaced with bounded passive geometry placeholder",
                             Some(offset),
                         ));
-                    self.push_picture_placeholder_for_destination(
-                        picture.owner_destination,
-                        "[Image skipped: unsupported PNG]".to_string(),
-                        offset,
-                    )?;
+                        self.push_picture_placeholder_for_destination(
+                            picture.owner_destination,
+                            "[Image skipped: unsupported PNG]".to_string(),
+                            offset,
+                        )?;
+                    }
                 }
-            },
+            }
             PictureKind::Dib => {
                 if let Some(compressed) =
                     parse_compressed_dib_image_data(&picture.bytes, self.limits().max_image_pixels)
@@ -15988,9 +16028,15 @@ impl Parser {
                         "\u{200b}",
                         offset,
                     )?;
-                } else if let Some(bitmap) =
-                    parse_windows_bitmap_image_data(&picture, self.limits().max_image_pixels)
-                {
+                } else if let Some(bitmap) = parse_windows_bitmap_image_data(
+                    &picture.bytes,
+                    picture.width_px_hint,
+                    picture.height_px_hint,
+                    picture.windows_bitmap_planes,
+                    picture.windows_bitmap_bits_per_pixel,
+                    picture.windows_bitmap_width_bytes,
+                    self.limits().max_image_pixels,
+                ) {
                     self.ensure_image_pixels(bitmap.width_px, bitmap.height_px, offset)?;
                     let natural_width_px_hint =
                         self.normalized_picture_natural_size_hint(&picture, true, offset);
@@ -33010,14 +33056,6 @@ const CP850_HIGH: [char; 128] = [
 ];
 
 #[derive(Debug)]
-struct ParsedJpeg {
-    width_px: u32,
-    height_px: u32,
-    format: ImageFormat,
-    data_end: usize,
-}
-
-#[derive(Debug)]
 struct ParsedEmfHeader {
     width_px: u32,
     height_px: u32,
@@ -33715,165 +33753,6 @@ impl EmfPathBuilder {
         }
         Some((start, path_segments, current == start))
     }
-}
-
-fn parse_jpeg_image_data(bytes: &[u8]) -> Option<ParsedJpeg> {
-    if bytes.len() < 4 || bytes[0] != 0xff || bytes[1] != 0xd8 {
-        return None;
-    }
-    let data_end = jpeg_eoi_end(bytes)?;
-
-    let mut parsed_frame = None;
-    let mut pos = 2;
-    while pos + 3 < bytes.len() {
-        while pos < bytes.len() && bytes[pos] != 0xff {
-            pos += 1;
-        }
-        while pos < bytes.len() && bytes[pos] == 0xff {
-            pos += 1;
-        }
-        if pos >= bytes.len() {
-            return None;
-        }
-
-        let marker = bytes[pos];
-        pos += 1;
-        if marker == 0xd9 {
-            return None;
-        }
-        if marker == 0xda {
-            return parsed_frame;
-        }
-        if is_standalone_jpeg_marker(marker) {
-            continue;
-        }
-        if pos + 1 >= bytes.len() {
-            return None;
-        }
-
-        let segment_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
-        if segment_len < 2 || pos + segment_len > bytes.len() {
-            return None;
-        }
-
-        if is_jpeg_start_of_frame(marker) {
-            if segment_len < 8 {
-                return None;
-            }
-            let height = u16::from_be_bytes([bytes[pos + 3], bytes[pos + 4]]) as u32;
-            let width = u16::from_be_bytes([bytes[pos + 5], bytes[pos + 6]]) as u32;
-            let components = bytes[pos + 7];
-            let expected_segment_len =
-                8usize.checked_add(usize::from(components).checked_mul(3)?)?;
-            if segment_len < expected_segment_len {
-                return None;
-            }
-            if width == 0 || height == 0 {
-                return None;
-            }
-            let format = match components {
-                1 => ImageFormat::JpegGrayscale,
-                3 => ImageFormat::Jpeg,
-                4 => ImageFormat::JpegCmyk,
-                _ => return None,
-            };
-            parsed_frame = Some(ParsedJpeg {
-                width_px: width,
-                height_px: height,
-                format,
-                data_end,
-            });
-        }
-
-        pos += segment_len;
-    }
-
-    None
-}
-
-fn jpeg_image_data_is_decodable(bytes: &[u8], jpeg: &ParsedJpeg) -> bool {
-    let Some(encoded) = bytes.get(..jpeg.data_end) else {
-        return false;
-    };
-    let mut decoder = JpegDecoder::new(encoded);
-    let Ok(decoded) = decoder.decode() else {
-        return false;
-    };
-    let Some(info) = decoder.info() else {
-        return false;
-    };
-    if u32::from(info.width) != jpeg.width_px || u32::from(info.height) != jpeg.height_px {
-        return false;
-    }
-    let Some(pixel_count) = usize::from(info.width).checked_mul(usize::from(info.height)) else {
-        return false;
-    };
-    let expected_components = match info.pixel_format {
-        JpegPixelFormat::L8 => 1,
-        JpegPixelFormat::RGB24 => 3,
-        JpegPixelFormat::CMYK32 => 4,
-        _ => return false,
-    };
-    pixel_count
-        .checked_mul(expected_components)
-        .is_some_and(|expected_len| decoded.len() == expected_len)
-}
-
-fn jpeg_eoi_end(bytes: &[u8]) -> Option<usize> {
-    let mut pos = 2;
-    while pos < bytes.len() {
-        while pos < bytes.len() && bytes[pos] != 0xff {
-            pos += 1;
-        }
-        while pos < bytes.len() && bytes[pos] == 0xff {
-            pos += 1;
-        }
-        if pos >= bytes.len() {
-            return None;
-        }
-
-        let marker = bytes[pos];
-        pos += 1;
-        if marker == 0xd9 {
-            return Some(pos);
-        }
-        if marker == 0xda {
-            if pos + 1 >= bytes.len() {
-                return None;
-            }
-            let segment_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
-            if segment_len < 2 || pos.checked_add(segment_len)? > bytes.len() {
-                return None;
-            }
-            pos += segment_len;
-            while pos + 1 < bytes.len() {
-                if bytes[pos] == 0xff {
-                    let marker = bytes[pos + 1];
-                    if marker == 0x00 {
-                        pos += 2;
-                        continue;
-                    }
-                    if marker == 0xd9 {
-                        return Some(pos + 2);
-                    }
-                }
-                pos += 1;
-            }
-            return None;
-        }
-        if is_standalone_jpeg_marker(marker) {
-            continue;
-        }
-        if pos + 1 >= bytes.len() {
-            return None;
-        }
-        let segment_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
-        if segment_len < 2 || pos.checked_add(segment_len)? > bytes.len() {
-            return None;
-        }
-        pos += segment_len;
-    }
-    None
 }
 
 fn parse_emf_header_dimensions(bytes: &[u8]) -> Option<ParsedEmfHeader> {
@@ -38497,7 +38376,14 @@ fn keyed_jpeg_alpha_mask(
     format: ImageFormat,
     transparent: Color,
 ) -> Option<Option<StaticImageAlphaMask>> {
-    let rgb = decode_bounded_jpeg_to_rgb8(bytes, width_px, height_px, format)?;
+    let rgb = decode_bounded_jpeg_to_rgb8(
+        bytes,
+        width_px,
+        height_px,
+        format,
+        MAX_EXACT_JPEG_COLOR_MODE_BYTES,
+        MAX_EXACT_JPEG_COLOR_MODE_PIXELS,
+    )?;
     keyed_rgb_alpha_mask(&rgb, width_px, height_px, transparent)
 }
 
@@ -40039,9 +39925,14 @@ fn apply_jpeg_picture_color_mode_as_rgb8(
     {
         return true;
     }
-    let Some(mut rgb) =
-        decode_bounded_jpeg_to_rgb8(&image.bytes, image.width_px, image.height_px, image.format)
-    else {
+    let Some(mut rgb) = decode_bounded_jpeg_to_rgb8(
+        &image.bytes,
+        image.width_px,
+        image.height_px,
+        image.format,
+        MAX_EXACT_JPEG_COLOR_MODE_BYTES,
+        MAX_EXACT_JPEG_COLOR_MODE_PIXELS,
+    ) else {
         return false;
     };
     for pixel in rgb.chunks_exact_mut(3) {
@@ -40051,63 +39942,6 @@ fn apply_jpeg_picture_color_mode_as_rgb8(
     image.bytes = rgb;
     image.tone_adjustment = None;
     true
-}
-
-fn decode_bounded_jpeg_to_rgb8(
-    bytes: &[u8],
-    width_px: u32,
-    height_px: u32,
-    format: ImageFormat,
-) -> Option<Vec<u8>> {
-    let pixel_count_u64 = u64::from(width_px).checked_mul(u64::from(height_px))?;
-    if bytes.len() > MAX_EXACT_JPEG_COLOR_MODE_BYTES
-        || pixel_count_u64 > MAX_EXACT_JPEG_COLOR_MODE_PIXELS
-    {
-        return None;
-    }
-    let mut decoder = JpegDecoder::new(bytes);
-    let decoded = decoder.decode().ok()?;
-    let info = decoder.info()?;
-    if u32::from(info.width) != width_px || u32::from(info.height) != height_px {
-        return None;
-    }
-    let pixel_count = usize::from(info.width).checked_mul(usize::from(info.height))?;
-    let expected_rgb_len = pixel_count.checked_mul(3)?;
-    let inverted = matches!(
-        format,
-        ImageFormat::JpegInverted
-            | ImageFormat::JpegGrayscaleInverted
-            | ImageFormat::JpegCmykInverted
-    );
-    let mut rgb = Vec::with_capacity(expected_rgb_len);
-    match info.pixel_format {
-        JpegPixelFormat::RGB24 if decoded.len() == expected_rgb_len => {
-            rgb.extend_from_slice(&decoded);
-        }
-        JpegPixelFormat::L8 if decoded.len() == pixel_count => {
-            for sample in decoded {
-                rgb.extend_from_slice(&[sample, sample, sample]);
-            }
-        }
-        JpegPixelFormat::CMYK32 if decoded.len() == pixel_count.saturating_mul(4) => {
-            for pixel in decoded.chunks_exact(4) {
-                let cyan = u16::from(pixel[0]);
-                let magenta = u16::from(pixel[1]);
-                let yellow = u16::from(pixel[2]);
-                let black = u16::from(pixel[3]);
-                rgb.push((((255 - cyan) * (255 - black) + 127) / 255) as u8);
-                rgb.push((((255 - magenta) * (255 - black) + 127) / 255) as u8);
-                rgb.push((((255 - yellow) * (255 - black) + 127) / 255) as u8);
-            }
-        }
-        _ => return None,
-    }
-    if inverted {
-        for component in &mut rgb {
-            *component = 255 - *component;
-        }
-    }
-    Some(rgb)
 }
 
 fn passive_jpeg_tone_adjustment(
@@ -40321,205 +40155,6 @@ fn apply_jpeg_passive_picture_color_mode(
     true
 }
 
-fn inflate_zlib_png_scanlines(bytes: &[u8], expected_len: usize) -> Option<Vec<u8>> {
-    if let Some(output) = inflate_zlib_stored_blocks(bytes) {
-        return (output.len() == expected_len).then_some(output);
-    }
-    match miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(bytes, expected_len) {
-        Ok(output) if output.len() == expected_len => Some(output),
-        _ => None,
-    }
-}
-
-fn unfilter_png_scanlines(scanlines: &mut [u8], row_len: usize, bpp: usize) -> bool {
-    if row_len <= 1 || bpp == 0 || scanlines.len() % row_len != 0 {
-        return false;
-    }
-    let pixel_len = row_len - 1;
-    let mut previous = vec![0u8; pixel_len];
-    for row in scanlines.chunks_exact_mut(row_len) {
-        let filter = row[0];
-        {
-            let pixels = &mut row[1..];
-            match filter {
-                0 => {}
-                1 => {
-                    for index in 0..pixel_len {
-                        let left = if index >= bpp { pixels[index - bpp] } else { 0 };
-                        pixels[index] = pixels[index].wrapping_add(left);
-                    }
-                }
-                2 => {
-                    for index in 0..pixel_len {
-                        pixels[index] = pixels[index].wrapping_add(previous[index]);
-                    }
-                }
-                3 => {
-                    for index in 0..pixel_len {
-                        let left = if index >= bpp { pixels[index - bpp] } else { 0 };
-                        let up = previous[index];
-                        let average = ((u16::from(left) + u16::from(up)) / 2) as u8;
-                        pixels[index] = pixels[index].wrapping_add(average);
-                    }
-                }
-                4 => {
-                    for index in 0..pixel_len {
-                        let left = if index >= bpp { pixels[index - bpp] } else { 0 };
-                        let up = previous[index];
-                        let upper_left = if index >= bpp {
-                            previous[index - bpp]
-                        } else {
-                            0
-                        };
-                        pixels[index] =
-                            pixels[index].wrapping_add(paeth_predictor(left, up, upper_left));
-                    }
-                }
-                _ => return false,
-            }
-            previous.copy_from_slice(pixels);
-        }
-        row[0] = 0;
-    }
-    true
-}
-
-fn paeth_predictor(left: u8, up: u8, upper_left: u8) -> u8 {
-    let left = i32::from(left);
-    let up = i32::from(up);
-    let upper_left = i32::from(upper_left);
-    let prediction = left + up - upper_left;
-    let left_distance = (prediction - left).abs();
-    let up_distance = (prediction - up).abs();
-    let upper_left_distance = (prediction - upper_left).abs();
-    if left_distance <= up_distance && left_distance <= upper_left_distance {
-        left as u8
-    } else if up_distance <= upper_left_distance {
-        up as u8
-    } else {
-        upper_left as u8
-    }
-}
-
-fn inflate_zlib_stored_blocks(bytes: &[u8]) -> Option<Vec<u8>> {
-    if bytes.len() < 6 {
-        return None;
-    }
-    let cmf = bytes[0];
-    let flg = bytes[1];
-    if cmf & 0x0f != 8 || ((u16::from(cmf) << 8) | u16::from(flg)) % 31 != 0 {
-        return None;
-    }
-    if flg & 0x20 != 0 {
-        return None;
-    }
-    let expected_adler = u32::from_be_bytes(bytes[bytes.len() - 4..].try_into().ok()?);
-    let mut pos = 2usize;
-    let end = bytes.len() - 4;
-    let mut output = Vec::new();
-    loop {
-        if pos >= end {
-            return None;
-        }
-        let header = bytes[pos];
-        pos += 1;
-        let is_final = header & 0x01 != 0;
-        if header & 0x06 != 0 {
-            return None;
-        }
-        if pos.checked_add(4)? > end {
-            return None;
-        }
-        let len = u16::from_le_bytes([bytes[pos], bytes[pos + 1]]) as usize;
-        let nlen = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]);
-        if nlen != !(len as u16) {
-            return None;
-        }
-        pos += 4;
-        let data_end = pos.checked_add(len)?;
-        if data_end > end {
-            return None;
-        }
-        output.extend_from_slice(&bytes[pos..data_end]);
-        pos = data_end;
-        if is_final {
-            if pos != end || adler32(&output) != expected_adler {
-                return None;
-            }
-            return Some(output);
-        }
-    }
-}
-
-#[cfg(test)]
-fn deflate_zlib_stored_blocks(data: &[u8]) -> Vec<u8> {
-    let mut output = vec![0x78, 0x01];
-    let mut remaining = data;
-    while !remaining.is_empty() {
-        let len = remaining.len().min(u16::MAX as usize);
-        let is_final = len == remaining.len();
-        output.push(if is_final { 0x01 } else { 0x00 });
-        let len_u16 = len as u16;
-        output.extend_from_slice(&len_u16.to_le_bytes());
-        output.extend_from_slice(&(!len_u16).to_le_bytes());
-        output.extend_from_slice(&remaining[..len]);
-        remaining = &remaining[len..];
-    }
-    if data.is_empty() {
-        output.extend_from_slice(&[0x01, 0x00, 0x00, 0xff, 0xff]);
-    }
-    output.extend_from_slice(&adler32(data).to_be_bytes());
-    output
-}
-
-fn adler32(data: &[u8]) -> u32 {
-    const MOD_ADLER: u32 = 65_521;
-    let mut a = 1u32;
-    let mut b = 0u32;
-    for byte in data {
-        a = (a + u32::from(*byte)) % MOD_ADLER;
-        b = (b + a) % MOD_ADLER;
-    }
-    (b << 16) | a
-}
-
-#[derive(Debug)]
-struct ParsedPng {
-    width_px: u32,
-    height_px: u32,
-    format: ImageFormat,
-    idat: Vec<u8>,
-    palette: Vec<u8>,
-    alpha_mask: Option<StaticImageAlphaMask>,
-}
-
-#[derive(Debug)]
-struct ParsedDib {
-    width_px: u32,
-    height_px: u32,
-    rgb: Vec<u8>,
-    alpha: Option<Vec<u8>>,
-    top_down: bool,
-}
-
-#[derive(Debug)]
-struct ParsedWindowsBitmap {
-    width_px: u32,
-    height_px: u32,
-    rgb: Vec<u8>,
-}
-
-#[derive(Debug)]
-struct ParsedCompressedDibImage {
-    width_px: u32,
-    height_px: u32,
-    format: ImageFormat,
-    bytes: Vec<u8>,
-    palette: Vec<u8>,
-    alpha_mask: Option<StaticImageAlphaMask>,
-    top_down: bool,
-}
-
 #[derive(Debug)]
 struct ParsedVectorRasterImage {
     width_px: u32,
@@ -40611,32 +40246,6 @@ fn source_ignoring_passive_source_raster_command(
             selected_fill_color,
         }),
         _ => None,
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-struct DibColorMasks {
-    red: u32,
-    green: u32,
-    blue: u32,
-    alpha: Option<u32>,
-}
-
-impl DibColorMasks {
-    fn are_supported(self) -> bool {
-        if self.red == 0
-            || self.green == 0
-            || self.blue == 0
-            || self.red & self.green != 0
-            || self.red & self.blue != 0
-            || self.green & self.blue != 0
-        {
-            return false;
-        }
-        let Some(alpha) = self.alpha else {
-            return true;
-        };
-        alpha != 0 && self.red & alpha == 0 && self.green & alpha == 0 && self.blue & alpha == 0
     }
 }
 
@@ -40931,326 +40540,6 @@ impl WmfCoordinateMap {
             .saturating_mul(i128::from(viewport_extent))
             .saturating_div(i128::from(logical_extent));
         scaled.clamp(-i128::from(image_extent), i128::from(image_extent)) as f32
-    }
-}
-
-fn parse_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
-    const BITMAPCOREHEADER_SIZE: usize = 12;
-    const BITMAPINFOHEADER_SIZE: usize = 40;
-    const BI_RGB: u32 = 0;
-    const BI_RLE8: u32 = 1;
-    const BI_RLE4: u32 = 2;
-    const BI_BITFIELDS: u32 = 3;
-    const BI_ALPHABITFIELDS: u32 = 6;
-
-    if bytes.len() < 4 {
-        return None;
-    }
-
-    let header_size = read_le_u32(bytes, 0)? as usize;
-    if header_size == BITMAPCOREHEADER_SIZE {
-        return parse_bitmap_core_dib_image_data(bytes, max_pixels);
-    }
-    if header_size < BITMAPINFOHEADER_SIZE || header_size > bytes.len() {
-        return None;
-    }
-
-    let width = read_le_i32(bytes, 4)?;
-    let raw_height = read_le_i32(bytes, 8)?;
-    let planes = read_le_u16(bytes, 12)?;
-    let bits_per_pixel = read_le_u16(bytes, 14)?;
-    let compression = read_le_u32(bytes, 16)?;
-    if width <= 0 || raw_height == 0 || planes != 1 {
-        return None;
-    }
-    let uses_bitfields = matches!(compression, BI_BITFIELDS | BI_ALPHABITFIELDS)
-        && matches!(bits_per_pixel, 16 | 32);
-    let uses_rle8 = compression == BI_RLE8 && bits_per_pixel == 8 && raw_height > 0;
-    let uses_rle4 = compression == BI_RLE4 && bits_per_pixel == 4 && raw_height > 0;
-    if compression != BI_RGB && !uses_bitfields && !uses_rle8 && !uses_rle4 {
-        return None;
-    }
-
-    let width_px = u32::try_from(width).ok()?;
-    let height_px = raw_height.unsigned_abs();
-    let pixels = usize::try_from(width_px)
-        .ok()?
-        .checked_mul(usize::try_from(height_px).ok()?)?;
-    if pixels == 0 || pixels > max_pixels {
-        return None;
-    }
-
-    let width = usize::try_from(width_px).ok()?;
-    let colors_used = read_le_u32(bytes, 32)?;
-    let color_masks = if uses_bitfields {
-        let mask_offset = if header_size == BITMAPINFOHEADER_SIZE {
-            BITMAPINFOHEADER_SIZE
-        } else if header_size >= BITMAPINFOHEADER_SIZE + 12 {
-            BITMAPINFOHEADER_SIZE
-        } else {
-            return None;
-        };
-        let has_alpha_mask = matches!(bits_per_pixel, 16 | 32)
-            && (compression == BI_ALPHABITFIELDS || header_size >= 56);
-        let masks = DibColorMasks {
-            red: read_le_u32(bytes, mask_offset)?,
-            green: read_le_u32(bytes, mask_offset + 4)?,
-            blue: read_le_u32(bytes, mask_offset + 8)?,
-            alpha: if has_alpha_mask {
-                Some(read_le_u32(bytes, mask_offset + 12)?)
-            } else {
-                None
-            },
-        };
-        if !masks.are_supported() {
-            return None;
-        }
-        Some(masks)
-    } else {
-        None
-    };
-    let bitfield_mask_bytes = if uses_bitfields && header_size == BITMAPINFOHEADER_SIZE {
-        if compression == BI_ALPHABITFIELDS && matches!(bits_per_pixel, 16 | 32) {
-            16
-        } else {
-            12
-        }
-    } else {
-        0
-    };
-    let pixel_data_start = header_size.checked_add(bitfield_mask_bytes)?;
-    if pixel_data_start > bytes.len() {
-        return None;
-    }
-
-    if uses_rle8 {
-        return parse_rle8_dib_pixels(bytes, width_px, height_px, header_size, colors_used);
-    }
-    if uses_rle4 {
-        return parse_rle4_dib_pixels(bytes, width_px, height_px, header_size, colors_used);
-    }
-
-    let (row_stride, pixel_start, palette_entries) = match bits_per_pixel {
-        1 | 4 | 8 => {
-            if color_masks.is_some() {
-                return None;
-            }
-            let palette_capacity = 1usize.checked_shl(u32::from(bits_per_pixel))?;
-            let palette_entries = if colors_used == 0 {
-                palette_capacity
-            } else {
-                usize::try_from(colors_used).ok()?
-            };
-            if palette_entries == 0 || palette_entries > palette_capacity {
-                return None;
-            }
-            let palette_bytes = palette_entries.checked_mul(4)?;
-            let palette_end = pixel_data_start.checked_add(palette_bytes)?;
-            if palette_end > bytes.len() {
-                return None;
-            }
-            let row_bits = width.checked_mul(usize::from(bits_per_pixel))?;
-            let row_stride = row_bits.checked_add(31)?.checked_div(32)?.checked_mul(4)?;
-            (row_stride, palette_end, Some(palette_entries))
-        }
-        16 => {
-            let row_bits = width.checked_mul(16)?;
-            let row_stride = row_bits.checked_add(31)?.checked_div(32)?.checked_mul(4)?;
-            (row_stride, pixel_data_start, None)
-        }
-        24 => {
-            if color_masks.is_some() {
-                return None;
-            }
-            let unpadded_row_bytes = width.checked_mul(3)?;
-            let row_stride = unpadded_row_bytes
-                .checked_add(3)?
-                .checked_div(4)?
-                .checked_mul(4)?;
-            (row_stride, pixel_data_start, None)
-        }
-        32 => {
-            let row_stride = width.checked_mul(4)?;
-            (row_stride, pixel_data_start, None)
-        }
-        _ => return None,
-    };
-    let pixel_bytes = row_stride.checked_mul(usize::try_from(height_px).ok()?)?;
-    let pixel_end = pixel_start.checked_add(pixel_bytes)?;
-    if pixel_end > bytes.len() {
-        return None;
-    }
-
-    decode_uncompressed_dib_pixels(
-        bytes,
-        width_px,
-        height_px,
-        bits_per_pixel,
-        row_stride,
-        pixel_start,
-        palette_entries,
-        header_size,
-        4,
-        raw_height < 0,
-        color_masks,
-    )
-}
-
-fn parse_windows_bitmap_image_data(
-    picture: &PictureBuilder,
-    max_pixels: usize,
-) -> Option<ParsedWindowsBitmap> {
-    let width_px = picture.width_px_hint?;
-    let height_px = picture.height_px_hint?;
-    let planes = picture.windows_bitmap_planes.unwrap_or(1);
-    let bits_per_pixel = picture.windows_bitmap_bits_per_pixel?;
-    if planes != 1 || !matches!(bits_per_pixel, 1 | 24 | 32) {
-        return None;
-    }
-
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let pixels = width.checked_mul(height)?;
-    if pixels == 0 || pixels > max_pixels {
-        return None;
-    }
-    let minimum_row_bytes = match bits_per_pixel {
-        1 => width.checked_add(7)?.checked_div(8)?,
-        24 => width.checked_mul(3)?,
-        32 => width.checked_mul(4)?,
-        _ => return None,
-    };
-    let row_stride = picture
-        .windows_bitmap_width_bytes
-        .unwrap_or_else(|| word_aligned_bitmap_row_stride(width, bits_per_pixel).unwrap_or(0));
-    if row_stride < minimum_row_bytes {
-        return None;
-    }
-    let required_bytes = row_stride.checked_mul(height)?;
-    if picture.bytes.len() < required_bytes {
-        return None;
-    }
-
-    let mut rgb = vec![0; pixels.checked_mul(3)?];
-    for output_y in 0..height {
-        let source_y = height - 1 - output_y;
-        let source_row = source_y.checked_mul(row_stride)?;
-        let output_row = output_y.checked_mul(width)?.checked_mul(3)?;
-        for x in 0..width {
-            let output = output_row.checked_add(x.checked_mul(3)?)?;
-            match bits_per_pixel {
-                1 => {
-                    let byte = *picture.bytes.get(source_row.checked_add(x / 8)?)?;
-                    let bit = (byte >> (7 - (x % 8))) & 0x01;
-                    let sample = if bit == 0 { 0 } else { 255 };
-                    rgb[output] = sample;
-                    rgb[output + 1] = sample;
-                    rgb[output + 2] = sample;
-                }
-                24 => {
-                    let source = source_row.checked_add(x.checked_mul(3)?)?;
-                    rgb[output] = *picture.bytes.get(source + 2)?;
-                    rgb[output + 1] = *picture.bytes.get(source + 1)?;
-                    rgb[output + 2] = *picture.bytes.get(source)?;
-                }
-                32 => {
-                    let source = source_row.checked_add(x.checked_mul(4)?)?;
-                    rgb[output] = *picture.bytes.get(source + 2)?;
-                    rgb[output + 1] = *picture.bytes.get(source + 1)?;
-                    rgb[output + 2] = *picture.bytes.get(source)?;
-                }
-                _ => return None,
-            }
-        }
-    }
-
-    Some(ParsedWindowsBitmap {
-        width_px,
-        height_px,
-        rgb,
-    })
-}
-
-fn word_aligned_bitmap_row_stride(width: usize, bits_per_pixel: u16) -> Option<usize> {
-    width
-        .checked_mul(usize::from(bits_per_pixel))?
-        .checked_add(15)?
-        .checked_div(16)?
-        .checked_mul(2)
-}
-
-fn parse_compressed_dib_image_data(
-    bytes: &[u8],
-    max_pixels: usize,
-) -> Option<ParsedCompressedDibImage> {
-    const BITMAPINFOHEADER_SIZE: usize = 40;
-    const BI_JPEG: u32 = 4;
-    const BI_PNG: u32 = 5;
-
-    if bytes.len() < BITMAPINFOHEADER_SIZE {
-        return None;
-    }
-    let header_size = read_le_u32(bytes, 0)? as usize;
-    if header_size < BITMAPINFOHEADER_SIZE || header_size > bytes.len() {
-        return None;
-    }
-    let width = read_le_i32(bytes, 4)?;
-    let raw_height = read_le_i32(bytes, 8)?;
-    let planes = read_le_u16(bytes, 12)?;
-    let compression = read_le_u32(bytes, 16)?;
-    if width <= 0 || raw_height == 0 || planes != 1 || !matches!(compression, BI_JPEG | BI_PNG) {
-        return None;
-    }
-    let payload_len = usize::try_from(read_le_u32(bytes, 20)?).ok()?;
-    if payload_len == 0 {
-        return None;
-    }
-    let payload_end = header_size.checked_add(payload_len)?;
-    let payload = bytes.get(header_size..payload_end)?;
-    let width_px = u32::try_from(width).ok()?;
-    let height_px = raw_height.unsigned_abs();
-    let pixels = usize::try_from(width_px)
-        .ok()?
-        .checked_mul(usize::try_from(height_px).ok()?)?;
-    if pixels == 0 || pixels > max_pixels {
-        return None;
-    }
-
-    match compression {
-        BI_JPEG => {
-            let jpeg = parse_jpeg_image_data(payload)?;
-            if jpeg.width_px != width_px || jpeg.height_px != height_px {
-                return None;
-            }
-            if !jpeg_image_data_is_decodable(payload, &jpeg) {
-                return None;
-            }
-            Some(ParsedCompressedDibImage {
-                width_px,
-                height_px,
-                format: jpeg.format,
-                bytes: payload[..jpeg.data_end].to_vec(),
-                palette: Vec::new(),
-                alpha_mask: None,
-                top_down: raw_height < 0,
-            })
-        }
-        BI_PNG => {
-            let png = parse_png_image_data(payload)?;
-            if png.width_px != width_px || png.height_px != height_px {
-                return None;
-            }
-            Some(ParsedCompressedDibImage {
-                width_px,
-                height_px,
-                format: png.format,
-                bytes: png.idat,
-                palette: png.palette,
-                alpha_mask: png.alpha_mask,
-                top_down: raw_height < 0,
-            })
-        }
-        _ => None,
     }
 }
 
@@ -41651,545 +40940,6 @@ fn clipped_compressed_jpeg_source_raster_command(
         },
         StaticImageVectorCommand::RestoreState,
     ]))
-}
-
-fn parse_bitmap_core_dib_image_data(bytes: &[u8], max_pixels: usize) -> Option<ParsedDib> {
-    const BITMAPCOREHEADER_SIZE: usize = 12;
-
-    if bytes.len() < BITMAPCOREHEADER_SIZE {
-        return None;
-    }
-
-    let width_px = u32::from(read_le_u16(bytes, 4)?);
-    let height_px = u32::from(read_le_u16(bytes, 6)?);
-    let planes = read_le_u16(bytes, 8)?;
-    let bits_per_pixel = read_le_u16(bytes, 10)?;
-    if width_px == 0 || height_px == 0 || planes != 1 {
-        return None;
-    }
-
-    let pixels = usize::try_from(width_px)
-        .ok()?
-        .checked_mul(usize::try_from(height_px).ok()?)?;
-    if pixels == 0 || pixels > max_pixels {
-        return None;
-    }
-
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let (row_stride, pixel_start, palette_entries) =
-        dib_layout_for_uncompressed_bitmap(width, bits_per_pixel, BITMAPCOREHEADER_SIZE, 3)?;
-    let pixel_bytes = row_stride.checked_mul(height)?;
-    let pixel_end = pixel_start.checked_add(pixel_bytes)?;
-    if pixel_end > bytes.len() {
-        return None;
-    }
-
-    decode_uncompressed_dib_pixels(
-        bytes,
-        width_px,
-        height_px,
-        bits_per_pixel,
-        row_stride,
-        pixel_start,
-        palette_entries,
-        BITMAPCOREHEADER_SIZE,
-        3,
-        false,
-        None,
-    )
-}
-
-fn dib_layout_for_uncompressed_bitmap(
-    width: usize,
-    bits_per_pixel: u16,
-    header_size: usize,
-    palette_entry_size: usize,
-) -> Option<(usize, usize, Option<usize>)> {
-    match bits_per_pixel {
-        1 | 4 | 8 => {
-            let palette_entries = 1usize.checked_shl(u32::from(bits_per_pixel))?;
-            let palette_bytes = palette_entries.checked_mul(palette_entry_size)?;
-            let palette_end = header_size.checked_add(palette_bytes)?;
-            let row_bits = width.checked_mul(usize::from(bits_per_pixel))?;
-            let row_stride = row_bits.checked_add(31)?.checked_div(32)?.checked_mul(4)?;
-            Some((row_stride, palette_end, Some(palette_entries)))
-        }
-        24 => {
-            let unpadded_row_bytes = width.checked_mul(3)?;
-            let row_stride = unpadded_row_bytes
-                .checked_add(3)?
-                .checked_div(4)?
-                .checked_mul(4)?;
-            Some((row_stride, header_size, None))
-        }
-        _ => None,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn decode_uncompressed_dib_pixels(
-    bytes: &[u8],
-    width_px: u32,
-    height_px: u32,
-    bits_per_pixel: u16,
-    row_stride: usize,
-    pixel_start: usize,
-    palette_entries: Option<usize>,
-    palette_start: usize,
-    palette_entry_size: usize,
-    top_down: bool,
-    color_masks: Option<DibColorMasks>,
-) -> Option<ParsedDib> {
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let pixels = width.checked_mul(height)?;
-    let output_len = pixels.checked_mul(3)?;
-    let mut rgb = vec![0; output_len];
-    let mut alpha = if (bits_per_pixel == 32 && color_masks.is_none())
-        || color_masks.and_then(|masks| masks.alpha).is_some()
-    {
-        Some(vec![0; pixels])
-    } else {
-        None
-    };
-
-    for output_y in 0..height {
-        let source_y = if top_down {
-            output_y
-        } else {
-            height - 1 - output_y
-        };
-        let source_row = pixel_start.checked_add(source_y.checked_mul(row_stride)?)?;
-        let output_row = output_y.checked_mul(width)?.checked_mul(3)?;
-        for x in 0..width {
-            let output = output_row.checked_add(x.checked_mul(3)?)?;
-            match bits_per_pixel {
-                1 => {
-                    let source = source_row.checked_add(x / 8)?;
-                    let byte = *bytes.get(source)?;
-                    let shift = 7 - (x % 8);
-                    let palette_index = usize::from((byte >> shift) & 0x01);
-                    copy_dib_palette_color(
-                        bytes,
-                        palette_start,
-                        palette_entries?,
-                        palette_entry_size,
-                        palette_index,
-                        &mut rgb[output..output + 3],
-                    )?;
-                }
-                4 => {
-                    let source = source_row.checked_add(x / 2)?;
-                    let byte = *bytes.get(source)?;
-                    let palette_index = if x % 2 == 0 {
-                        usize::from(byte >> 4)
-                    } else {
-                        usize::from(byte & 0x0f)
-                    };
-                    copy_dib_palette_color(
-                        bytes,
-                        palette_start,
-                        palette_entries?,
-                        palette_entry_size,
-                        palette_index,
-                        &mut rgb[output..output + 3],
-                    )?;
-                }
-                8 => {
-                    let source = source_row.checked_add(x)?;
-                    let palette_index = usize::from(*bytes.get(source)?);
-                    copy_dib_palette_color(
-                        bytes,
-                        palette_start,
-                        palette_entries?,
-                        palette_entry_size,
-                        palette_index,
-                        &mut rgb[output..output + 3],
-                    )?;
-                }
-                16 => {
-                    let source = source_row.checked_add(x.checked_mul(2)?)?;
-                    let pixel = read_le_u16(bytes, source)?;
-                    if let Some(masks) = color_masks {
-                        rgb[output] = expand_masked_color_channel(u32::from(pixel), masks.red)?;
-                        rgb[output + 1] =
-                            expand_masked_color_channel(u32::from(pixel), masks.green)?;
-                        rgb[output + 2] =
-                            expand_masked_color_channel(u32::from(pixel), masks.blue)?;
-                        if let (Some(alpha_mask), Some(alpha)) = (alpha.as_mut(), masks.alpha) {
-                            alpha_mask[output_y.checked_mul(width)?.checked_add(x)?] =
-                                expand_masked_color_channel(u32::from(pixel), alpha)?;
-                        }
-                    } else {
-                        let red = ((pixel >> 10) & 0x1f) as u8;
-                        let green = ((pixel >> 5) & 0x1f) as u8;
-                        let blue = (pixel & 0x1f) as u8;
-                        rgb[output] = expand_5bit_color_channel(red);
-                        rgb[output + 1] = expand_5bit_color_channel(green);
-                        rgb[output + 2] = expand_5bit_color_channel(blue);
-                    }
-                }
-                24 => {
-                    let bytes_per_pixel = usize::from(bits_per_pixel / 8);
-                    let source = source_row.checked_add(x.checked_mul(bytes_per_pixel)?)?;
-                    rgb[output] = bytes[source + 2];
-                    rgb[output + 1] = bytes[source + 1];
-                    rgb[output + 2] = bytes[source];
-                }
-                32 => {
-                    let source = source_row.checked_add(x.checked_mul(4)?)?;
-                    if let Some(masks) = color_masks {
-                        let pixel = read_le_u32(bytes, source)?;
-                        rgb[output] = expand_masked_color_channel(pixel, masks.red)?;
-                        rgb[output + 1] = expand_masked_color_channel(pixel, masks.green)?;
-                        rgb[output + 2] = expand_masked_color_channel(pixel, masks.blue)?;
-                        if let (Some(alpha_mask), Some(alpha)) = (alpha.as_mut(), masks.alpha) {
-                            alpha_mask[output_y.checked_mul(width)?.checked_add(x)?] =
-                                expand_masked_color_channel(pixel, alpha)?;
-                        }
-                    } else {
-                        rgb[output] = bytes[source + 2];
-                        rgb[output + 1] = bytes[source + 1];
-                        rgb[output + 2] = bytes[source];
-                        if let Some(alpha) = alpha.as_mut() {
-                            alpha[output_y.checked_mul(width)?.checked_add(x)?] = bytes[source + 3];
-                        }
-                    }
-                }
-                _ => return None,
-            }
-        }
-    }
-
-    Some(ParsedDib {
-        width_px,
-        height_px,
-        rgb,
-        alpha,
-        top_down,
-    })
-}
-
-fn parse_rle8_dib_pixels(
-    bytes: &[u8],
-    width_px: u32,
-    height_px: u32,
-    header_size: usize,
-    colors_used: u32,
-) -> Option<ParsedDib> {
-    let palette_entries = if colors_used == 0 {
-        256usize
-    } else {
-        usize::try_from(colors_used).ok()?
-    };
-    if palette_entries == 0 || palette_entries > 256 {
-        return None;
-    }
-    let palette_bytes = palette_entries.checked_mul(4)?;
-    let pixel_start = header_size.checked_add(palette_bytes)?;
-    if pixel_start > bytes.len() {
-        return None;
-    }
-
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let pixels = width.checked_mul(height)?;
-    let output_len = pixels.checked_mul(3)?;
-    let mut rgb = vec![0; output_len];
-    let mut x = 0usize;
-    let mut y_from_bottom = 0usize;
-    let mut pos = pixel_start;
-    let mut reached_eof = false;
-
-    while pos < bytes.len() && !reached_eof {
-        let count = *bytes.get(pos)?;
-        let value = *bytes.get(pos + 1)?;
-        pos = pos.checked_add(2)?;
-        if count > 0 {
-            let run = usize::from(count);
-            if x.checked_add(run)? > width || y_from_bottom >= height {
-                return None;
-            }
-            for _ in 0..run {
-                write_rle_output_pixel(
-                    bytes,
-                    header_size,
-                    palette_entries,
-                    width,
-                    height,
-                    x,
-                    y_from_bottom,
-                    value,
-                    &mut rgb,
-                )?;
-                x = x.checked_add(1)?;
-            }
-            continue;
-        }
-
-        match value {
-            0 => {
-                x = 0;
-                y_from_bottom = y_from_bottom.checked_add(1)?;
-                if y_from_bottom > height {
-                    return None;
-                }
-            }
-            1 => reached_eof = true,
-            2 => {
-                let dx = usize::from(*bytes.get(pos)?);
-                let dy = usize::from(*bytes.get(pos + 1)?);
-                pos = pos.checked_add(2)?;
-                x = x.checked_add(dx)?;
-                y_from_bottom = y_from_bottom.checked_add(dy)?;
-                if x > width || y_from_bottom >= height {
-                    return None;
-                }
-            }
-            absolute_count => {
-                let literal_count = usize::from(absolute_count);
-                if literal_count < 3
-                    || x.checked_add(literal_count)? > width
-                    || y_from_bottom >= height
-                {
-                    return None;
-                }
-                let literal_end = pos.checked_add(literal_count)?;
-                let literals = bytes.get(pos..literal_end)?;
-                for &palette_index in literals {
-                    write_rle_output_pixel(
-                        bytes,
-                        header_size,
-                        palette_entries,
-                        width,
-                        height,
-                        x,
-                        y_from_bottom,
-                        palette_index,
-                        &mut rgb,
-                    )?;
-                    x = x.checked_add(1)?;
-                }
-                pos = literal_end;
-                if literal_count % 2 == 1 {
-                    pos = pos.checked_add(1)?;
-                    bytes.get(pos - 1)?;
-                }
-            }
-        }
-    }
-
-    if !reached_eof {
-        return None;
-    }
-
-    Some(ParsedDib {
-        width_px,
-        height_px,
-        rgb,
-        alpha: None,
-        top_down: false,
-    })
-}
-
-fn parse_rle4_dib_pixels(
-    bytes: &[u8],
-    width_px: u32,
-    height_px: u32,
-    header_size: usize,
-    colors_used: u32,
-) -> Option<ParsedDib> {
-    let palette_entries = if colors_used == 0 {
-        16usize
-    } else {
-        usize::try_from(colors_used).ok()?
-    };
-    if palette_entries == 0 || palette_entries > 16 {
-        return None;
-    }
-    let palette_bytes = palette_entries.checked_mul(4)?;
-    let pixel_start = header_size.checked_add(palette_bytes)?;
-    if pixel_start > bytes.len() {
-        return None;
-    }
-
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let pixels = width.checked_mul(height)?;
-    let output_len = pixels.checked_mul(3)?;
-    let mut rgb = vec![0; output_len];
-    let mut x = 0usize;
-    let mut y_from_bottom = 0usize;
-    let mut pos = pixel_start;
-    let mut reached_eof = false;
-
-    while pos < bytes.len() && !reached_eof {
-        let count = *bytes.get(pos)?;
-        let value = *bytes.get(pos + 1)?;
-        pos = pos.checked_add(2)?;
-        if count > 0 {
-            let run = usize::from(count);
-            if x.checked_add(run)? > width || y_from_bottom >= height {
-                return None;
-            }
-            let indexes = [value >> 4, value & 0x0f];
-            for index in 0..run {
-                write_rle_output_pixel(
-                    bytes,
-                    header_size,
-                    palette_entries,
-                    width,
-                    height,
-                    x,
-                    y_from_bottom,
-                    indexes[index % 2],
-                    &mut rgb,
-                )?;
-                x = x.checked_add(1)?;
-            }
-            continue;
-        }
-
-        match value {
-            0 => {
-                x = 0;
-                y_from_bottom = y_from_bottom.checked_add(1)?;
-                if y_from_bottom > height {
-                    return None;
-                }
-            }
-            1 => reached_eof = true,
-            2 => {
-                let dx = usize::from(*bytes.get(pos)?);
-                let dy = usize::from(*bytes.get(pos + 1)?);
-                pos = pos.checked_add(2)?;
-                x = x.checked_add(dx)?;
-                y_from_bottom = y_from_bottom.checked_add(dy)?;
-                if x > width || y_from_bottom >= height {
-                    return None;
-                }
-            }
-            absolute_count => {
-                let literal_count = usize::from(absolute_count);
-                if literal_count < 3
-                    || x.checked_add(literal_count)? > width
-                    || y_from_bottom >= height
-                {
-                    return None;
-                }
-                let literal_bytes = literal_count.checked_add(1)?.checked_div(2)?;
-                let literal_end = pos.checked_add(literal_bytes)?;
-                let literals = bytes.get(pos..literal_end)?;
-                for index in 0..literal_count {
-                    let byte = *literals.get(index / 2)?;
-                    let palette_index = if index % 2 == 0 {
-                        byte >> 4
-                    } else {
-                        byte & 0x0f
-                    };
-                    write_rle_output_pixel(
-                        bytes,
-                        header_size,
-                        palette_entries,
-                        width,
-                        height,
-                        x,
-                        y_from_bottom,
-                        palette_index,
-                        &mut rgb,
-                    )?;
-                    x = x.checked_add(1)?;
-                }
-                pos = literal_end;
-                if literal_bytes % 2 == 1 {
-                    pos = pos.checked_add(1)?;
-                    bytes.get(pos - 1)?;
-                }
-            }
-        }
-    }
-
-    if !reached_eof {
-        return None;
-    }
-
-    Some(ParsedDib {
-        width_px,
-        height_px,
-        rgb,
-        alpha: None,
-        top_down: false,
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn write_rle_output_pixel(
-    bytes: &[u8],
-    palette_start: usize,
-    palette_entries: usize,
-    width: usize,
-    height: usize,
-    x: usize,
-    y_from_bottom: usize,
-    palette_index: u8,
-    rgb: &mut [u8],
-) -> Option<()> {
-    let output_y = height.checked_sub(1)?.checked_sub(y_from_bottom)?;
-    let output = output_y
-        .checked_mul(width)?
-        .checked_add(x)?
-        .checked_mul(3)?;
-    copy_dib_palette_color(
-        bytes,
-        palette_start,
-        palette_entries,
-        4,
-        usize::from(palette_index),
-        rgb.get_mut(output..output + 3)?,
-    )
-}
-
-fn copy_dib_palette_color(
-    bytes: &[u8],
-    palette_start: usize,
-    palette_entries: usize,
-    palette_entry_size: usize,
-    palette_index: usize,
-    output: &mut [u8],
-) -> Option<()> {
-    if palette_index >= palette_entries || output.len() < 3 {
-        return None;
-    }
-    if palette_entry_size < 3 {
-        return None;
-    }
-    let palette = palette_start.checked_add(palette_index.checked_mul(palette_entry_size)?)?;
-    output[0] = *bytes.get(palette + 2)?;
-    output[1] = *bytes.get(palette + 1)?;
-    output[2] = *bytes.get(palette)?;
-    Some(())
-}
-
-fn expand_5bit_color_channel(value: u8) -> u8 {
-    (value << 3) | (value >> 2)
-}
-
-fn expand_masked_color_channel(pixel: u32, mask: u32) -> Option<u8> {
-    if mask == 0 {
-        return None;
-    }
-    let shift = mask.trailing_zeros();
-    let raw = (pixel & mask) >> shift;
-    let max = mask >> shift;
-    if max == 0 {
-        return None;
-    }
-    let scaled = raw
-        .checked_mul(255)?
-        .checked_add(max / 2)?
-        .checked_div(max)?;
-    u8::try_from(scaled).ok()
 }
 
 fn read_le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
@@ -45910,797 +44660,6 @@ fn color_from_colorref(data: &[u8], offset: usize) -> Option<Color> {
         green: *data.get(offset + 1)?,
         blue: *data.get(offset + 2)?,
     })
-}
-
-fn parse_png_image_data(bytes: &[u8]) -> Option<ParsedPng> {
-    const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
-    if bytes.len() < PNG_SIGNATURE.len() || &bytes[..8] != PNG_SIGNATURE {
-        return None;
-    }
-
-    let mut pos = PNG_SIGNATURE.len();
-    let mut width_px = 0;
-    let mut height_px = 0;
-    let mut bit_depth = 0;
-    let mut color_type = 0;
-    let mut interlace_method = 0;
-    let mut format = None;
-    let mut saw_ihdr = false;
-    let mut saw_plte = false;
-    let mut saw_trns = false;
-    let mut saw_iend = false;
-    let mut idat = Vec::new();
-    let mut palette = Vec::new();
-    let mut transparency = None;
-
-    while pos.checked_add(12)? <= bytes.len() {
-        let len = u32::from_be_bytes(bytes[pos..pos + 4].try_into().ok()?) as usize;
-        let chunk_type = &bytes[pos + 4..pos + 8];
-        let data_start = pos + 8;
-        let data_end = data_start.checked_add(len)?;
-        let next = data_end.checked_add(4)?;
-        if next > bytes.len() {
-            return None;
-        }
-        let data = &bytes[data_start..data_end];
-
-        match chunk_type {
-            b"IHDR" => {
-                if saw_ihdr || len != 13 || pos != PNG_SIGNATURE.len() {
-                    return None;
-                }
-                width_px = u32::from_be_bytes(data[0..4].try_into().ok()?);
-                height_px = u32::from_be_bytes(data[4..8].try_into().ok()?);
-                bit_depth = data[8];
-                color_type = data[9];
-                let compression = data[10];
-                let filter = data[11];
-                let interlace = data[12];
-                interlace_method = interlace;
-                let supported_bit_depth = match color_type {
-                    0 => matches!(bit_depth, 1 | 2 | 4 | 8 | 16),
-                    2 | 4 | 6 => matches!(bit_depth, 8 | 16),
-                    3 => matches!(bit_depth, 1 | 2 | 4 | 8),
-                    _ => false,
-                };
-                if width_px == 0
-                    || height_px == 0
-                    || !supported_bit_depth
-                    || compression != 0
-                    || filter != 0
-                    || !matches!(interlace, 0 | 1)
-                {
-                    return None;
-                }
-                format = Some(match color_type {
-                    0 => ImageFormat::PngGrayscale,
-                    2 => ImageFormat::Png,
-                    3 => ImageFormat::PngIndexed,
-                    4 => ImageFormat::PngGrayscale,
-                    6 => ImageFormat::Png,
-                    _ => return None,
-                });
-                saw_ihdr = true;
-            }
-            b"PLTE" => {
-                if !saw_ihdr || saw_plte || saw_trns || saw_iend || !idat.is_empty() {
-                    return None;
-                }
-                if len == 0 || len % 3 != 0 || len > 256 * 3 {
-                    return None;
-                }
-                palette.extend_from_slice(data);
-                saw_plte = true;
-            }
-            b"tRNS" => {
-                if !saw_ihdr || saw_trns || saw_iend || !idat.is_empty() {
-                    return None;
-                }
-                transparency = Some(match color_type {
-                    0 => {
-                        if len != 2 || bit_depth != 8 {
-                            return None;
-                        }
-                        PngTransparency::Grayscale(u16::from_be_bytes(data.try_into().ok()?))
-                    }
-                    2 => {
-                        if len != 6 || bit_depth != 8 {
-                            return None;
-                        }
-                        PngTransparency::Rgb {
-                            red: u16::from_be_bytes(data[0..2].try_into().ok()?),
-                            green: u16::from_be_bytes(data[2..4].try_into().ok()?),
-                            blue: u16::from_be_bytes(data[4..6].try_into().ok()?),
-                        }
-                    }
-                    3 => {
-                        let palette_entries = palette.len() / 3;
-                        if !saw_plte || len == 0 || len > palette_entries {
-                            return None;
-                        }
-                        PngTransparency::Indexed(data.to_vec())
-                    }
-                    _ => return None,
-                });
-                saw_trns = true;
-            }
-            b"IDAT" => {
-                if !saw_ihdr || saw_iend {
-                    return None;
-                }
-                if matches!(format, Some(ImageFormat::PngIndexed)) && !saw_plte {
-                    return None;
-                }
-                idat.extend_from_slice(data);
-            }
-            b"IEND" => {
-                if len != 0 || !saw_ihdr {
-                    return None;
-                }
-                saw_iend = true;
-                break;
-            }
-            _ => {}
-        }
-
-        pos = next;
-    }
-
-    if !saw_ihdr || !saw_iend || idat.is_empty() {
-        return None;
-    }
-    if matches!(format, Some(ImageFormat::PngIndexed)) && palette.is_empty() {
-        return None;
-    }
-    let format = format?;
-    let mut alpha_mask = None;
-    let idat = if interlace_method == 1 {
-        if matches!(bit_depth, 1 | 2 | 4) {
-            normalize_adam7_low_bit_depth_png_idat(
-                &idat,
-                width_px,
-                height_px,
-                bit_depth,
-                format,
-                palette.len() / 3,
-            )?
-        } else {
-            let source_pixel_bytes = png_pixel_bytes(bit_depth, color_type)?;
-            let deinterlaced =
-                normalize_adam7_png_idat(&idat, width_px, height_px, source_pixel_bytes)?;
-            match (bit_depth, color_type) {
-                (8, 4 | 6) => {
-                    let normalized =
-                        normalize_alpha_png_idat(&deinterlaced, width_px, height_px, color_type)?;
-                    alpha_mask = Some(normalized.alpha_mask);
-                    normalized.idat
-                }
-                (8, 0 | 2 | 3) => deinterlaced,
-                (16, 0 | 2 | 4 | 6) => {
-                    let normalized =
-                        normalize_16_bit_png_idat(&deinterlaced, width_px, height_px, color_type)?;
-                    alpha_mask = normalized.alpha_mask;
-                    normalized.idat
-                }
-                _ => return None,
-            }
-        }
-    } else {
-        match (bit_depth, color_type) {
-            (8, 4 | 6) => {
-                let normalized = normalize_alpha_png_idat(&idat, width_px, height_px, color_type)?;
-                alpha_mask = Some(normalized.alpha_mask);
-                normalized.idat
-            }
-            (8, _) => idat,
-            (16, 0 | 2 | 4 | 6) => {
-                let normalized = normalize_16_bit_png_idat(&idat, width_px, height_px, color_type)?;
-                alpha_mask = normalized.alpha_mask;
-                normalized.idat
-            }
-            _ => normalize_low_bit_depth_png_idat(
-                &idat,
-                width_px,
-                height_px,
-                bit_depth,
-                format,
-                palette.len() / 3,
-            )?,
-        }
-    };
-    if let Some(transparency) = transparency {
-        alpha_mask = Some(png_transparency_alpha_mask(
-            &idat,
-            width_px,
-            height_px,
-            bit_depth,
-            format,
-            transparency,
-        )?);
-    }
-
-    Some(ParsedPng {
-        width_px,
-        height_px,
-        format,
-        idat,
-        palette,
-        alpha_mask,
-    })
-}
-
-const PNG_ADAM7_PASSES: [(usize, usize, usize, usize); 7] = [
-    (0, 0, 8, 8),
-    (4, 0, 8, 8),
-    (0, 4, 4, 8),
-    (2, 0, 4, 4),
-    (0, 2, 2, 4),
-    (1, 0, 2, 2),
-    (0, 1, 1, 2),
-];
-
-fn normalize_adam7_png_idat(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    pixel_bytes: usize,
-) -> Option<Vec<u8>> {
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let output_row_pixels_len = width.checked_mul(pixel_bytes)?;
-    let output_row_len = output_row_pixels_len.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let expected_source_len = adam7_expected_scanline_len(width, height, pixel_bytes)?;
-    let mut source = inflate_zlib_png_scanlines(idat, expected_source_len)?;
-
-    let mut output = vec![0u8; output_len];
-    for row in output.chunks_exact_mut(output_row_len) {
-        row[0] = 0;
-    }
-
-    let mut source_pos = 0usize;
-    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
-        let pass_width = adam7_pass_dimension(width, start_x, step_x);
-        let pass_height = adam7_pass_dimension(height, start_y, step_y);
-        if pass_width == 0 || pass_height == 0 {
-            continue;
-        }
-        let pass_pixels_len = pass_width.checked_mul(pixel_bytes)?;
-        let pass_row_len = pass_pixels_len.checked_add(1)?;
-        let pass_len = pass_row_len.checked_mul(pass_height)?;
-        let pass_end = source_pos.checked_add(pass_len)?;
-        let pass = source.get_mut(source_pos..pass_end)?;
-        if !unfilter_png_scanlines(pass, pass_row_len, pixel_bytes) {
-            return None;
-        }
-        for pass_y in 0..pass_height {
-            let output_y = start_y.checked_add(pass_y.checked_mul(step_y)?)?;
-            let source_row_start = pass_y.checked_mul(pass_row_len)?.checked_add(1)?;
-            let source_row = pass.get(source_row_start..source_row_start + pass_pixels_len)?;
-            for pass_x in 0..pass_width {
-                let output_x = start_x.checked_add(pass_x.checked_mul(step_x)?)?;
-                let source_pixel_start = pass_x.checked_mul(pixel_bytes)?;
-                let output_pixel_start = output_y
-                    .checked_mul(output_row_len)?
-                    .checked_add(1)?
-                    .checked_add(output_x.checked_mul(pixel_bytes)?)?;
-                output[output_pixel_start..output_pixel_start + pixel_bytes].copy_from_slice(
-                    &source_row[source_pixel_start..source_pixel_start + pixel_bytes],
-                );
-            }
-        }
-        source_pos = pass_end;
-    }
-
-    if source_pos != source.len() {
-        return None;
-    }
-    Some(miniz_oxide::deflate::compress_to_vec_zlib(&output, 6))
-}
-
-fn normalize_adam7_low_bit_depth_png_idat(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    bit_depth: u8,
-    format: ImageFormat,
-    palette_entries: usize,
-) -> Option<Vec<u8>> {
-    if !matches!(bit_depth, 1 | 2 | 4)
-        || !matches!(format, ImageFormat::PngGrayscale | ImageFormat::PngIndexed)
-    {
-        return None;
-    }
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let expected_source_len = adam7_expected_packed_scanline_len(width, height, bit_depth)?;
-    let mut source = inflate_zlib_png_scanlines(idat, expected_source_len)?;
-
-    let output_row_len = width.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let mut output = vec![0u8; output_len];
-    let max_sample = (1u16 << bit_depth) - 1;
-    let mut source_pos = 0usize;
-    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
-        let pass_width = adam7_pass_dimension(width, start_x, step_x);
-        let pass_height = adam7_pass_dimension(height, start_y, step_y);
-        if pass_width == 0 || pass_height == 0 {
-            continue;
-        }
-        let pass_row_len = adam7_packed_pass_row_len(pass_width, bit_depth)?;
-        let pass_len = pass_row_len.checked_mul(pass_height)?;
-        let pass_end = source_pos.checked_add(pass_len)?;
-        let pass = source.get_mut(source_pos..pass_end)?;
-        if !unfilter_png_scanlines(pass, pass_row_len, 1) {
-            return None;
-        }
-        for pass_y in 0..pass_height {
-            let output_y = start_y.checked_add(pass_y.checked_mul(step_y)?)?;
-            let source_row_start = pass_y.checked_mul(pass_row_len)?.checked_add(1)?;
-            let source_row = pass.get(source_row_start..source_row_start + (pass_row_len - 1))?;
-            for pass_x in 0..pass_width {
-                let sample = packed_png_sample(source_row, pass_x, bit_depth)?;
-                let value = match format {
-                    ImageFormat::PngIndexed => {
-                        if usize::from(sample) >= palette_entries {
-                            return None;
-                        }
-                        sample
-                    }
-                    ImageFormat::PngGrayscale => ((u16::from(sample) * 255) / max_sample) as u8,
-                    _ => return None,
-                };
-                let output_x = start_x.checked_add(pass_x.checked_mul(step_x)?)?;
-                let output_index = output_y
-                    .checked_mul(output_row_len)?
-                    .checked_add(1)?
-                    .checked_add(output_x)?;
-                output[output_index] = value;
-            }
-        }
-        source_pos = pass_end;
-    }
-
-    if source_pos != source.len() {
-        return None;
-    }
-    Some(miniz_oxide::deflate::compress_to_vec_zlib(&output, 6))
-}
-
-fn png_pixel_bytes(bit_depth: u8, color_type: u8) -> Option<usize> {
-    let components = match color_type {
-        0 | 3 => 1usize,
-        2 => 3usize,
-        4 => 2usize,
-        6 => 4usize,
-        _ => return None,
-    };
-    components.checked_mul(usize::from(bit_depth).checked_div(8)?)
-}
-
-fn adam7_expected_scanline_len(width: usize, height: usize, components: usize) -> Option<usize> {
-    let mut total = 0usize;
-    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
-        let pass_width = adam7_pass_dimension(width, start_x, step_x);
-        let pass_height = adam7_pass_dimension(height, start_y, step_y);
-        if pass_width == 0 || pass_height == 0 {
-            continue;
-        }
-        let row_pixels_len = pass_width.checked_mul(components)?;
-        let row_len = row_pixels_len.checked_add(1)?;
-        total = total.checked_add(row_len.checked_mul(pass_height)?)?;
-    }
-    Some(total)
-}
-
-fn adam7_expected_packed_scanline_len(width: usize, height: usize, bit_depth: u8) -> Option<usize> {
-    let mut total = 0usize;
-    for (start_x, start_y, step_x, step_y) in PNG_ADAM7_PASSES {
-        let pass_width = adam7_pass_dimension(width, start_x, step_x);
-        let pass_height = adam7_pass_dimension(height, start_y, step_y);
-        if pass_width == 0 || pass_height == 0 {
-            continue;
-        }
-        let row_len = adam7_packed_pass_row_len(pass_width, bit_depth)?;
-        total = total.checked_add(row_len.checked_mul(pass_height)?)?;
-    }
-    Some(total)
-}
-
-fn adam7_packed_pass_row_len(width: usize, bit_depth: u8) -> Option<usize> {
-    let row_bits = width.checked_mul(usize::from(bit_depth))?;
-    row_bits.div_ceil(8).checked_add(1)
-}
-
-fn adam7_pass_dimension(size: usize, start: usize, step: usize) -> usize {
-    if size <= start {
-        0
-    } else {
-        ((size - 1 - start) / step) + 1
-    }
-}
-
-struct NormalizedPngData {
-    idat: Vec<u8>,
-    alpha_mask: Option<StaticImageAlphaMask>,
-}
-
-struct NormalizedAlphaPngData {
-    idat: Vec<u8>,
-    alpha_mask: StaticImageAlphaMask,
-}
-
-fn normalize_16_bit_png_idat(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    color_type: u8,
-) -> Option<NormalizedPngData> {
-    let (source_components, output_components) = match color_type {
-        0 => (1usize, 1usize),
-        2 => (3usize, 3usize),
-        4 => (2usize, 1usize),
-        6 => (4usize, 3usize),
-        _ => return None,
-    };
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let source_pixel_bytes = source_components.checked_mul(2)?;
-    let source_pixels_len = width.checked_mul(source_pixel_bytes)?;
-    let source_row_len = source_pixels_len.checked_add(1)?;
-    let expected_source_len = source_row_len.checked_mul(height)?;
-    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_source_len)?;
-    if !unfilter_png_scanlines(&mut scanlines, source_row_len, source_pixel_bytes) {
-        return None;
-    }
-
-    let output_pixels_len = width.checked_mul(output_components)?;
-    let output_row_len = output_pixels_len.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let mut output = Vec::with_capacity(output_len);
-    let mut alpha = if matches!(color_type, 4 | 6) {
-        Some(Vec::with_capacity(
-            width.checked_add(1)?.checked_mul(height)?,
-        ))
-    } else {
-        None
-    };
-    for row in scanlines.chunks_exact(source_row_len) {
-        output.push(0);
-        if let Some(alpha) = alpha.as_mut() {
-            alpha.push(0);
-        }
-        let pixels = &row[1..];
-        match color_type {
-            0 => {
-                for sample in pixels.chunks_exact(2) {
-                    output.push(scale_png_16_to_8(u16::from_be_bytes([
-                        sample[0], sample[1],
-                    ])));
-                }
-            }
-            2 => {
-                for pixel in pixels.chunks_exact(6) {
-                    output.push(scale_png_16_to_8(u16::from_be_bytes([pixel[0], pixel[1]])));
-                    output.push(scale_png_16_to_8(u16::from_be_bytes([pixel[2], pixel[3]])));
-                    output.push(scale_png_16_to_8(u16::from_be_bytes([pixel[4], pixel[5]])));
-                }
-            }
-            4 => {
-                for pixel in pixels.chunks_exact(4) {
-                    let gray = u16::from_be_bytes([pixel[0], pixel[1]]);
-                    let alpha_sample = u16::from_be_bytes([pixel[2], pixel[3]]);
-                    output.push(scale_png_16_to_8(gray));
-                    if let Some(mask) = alpha.as_mut() {
-                        mask.push(scale_png_16_to_8(alpha_sample));
-                    }
-                }
-            }
-            6 => {
-                for pixel in pixels.chunks_exact(8) {
-                    let red = u16::from_be_bytes([pixel[0], pixel[1]]);
-                    let green = u16::from_be_bytes([pixel[2], pixel[3]]);
-                    let blue = u16::from_be_bytes([pixel[4], pixel[5]]);
-                    let alpha_sample = u16::from_be_bytes([pixel[6], pixel[7]]);
-                    output.push(scale_png_16_to_8(red));
-                    output.push(scale_png_16_to_8(green));
-                    output.push(scale_png_16_to_8(blue));
-                    if let Some(mask) = alpha.as_mut() {
-                        mask.push(scale_png_16_to_8(alpha_sample));
-                    }
-                }
-            }
-            _ => return None,
-        }
-    }
-    Some(NormalizedPngData {
-        idat: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
-        alpha_mask: alpha.map(|bytes| StaticImageAlphaMask {
-            bytes: miniz_oxide::deflate::compress_to_vec_zlib(&bytes, 6),
-        }),
-    })
-}
-
-fn scale_png_16_to_8(value: u16) -> u8 {
-    ((u32::from(value) * 255 + 32_767) / 65_535) as u8
-}
-
-#[derive(Debug)]
-enum PngTransparency {
-    Grayscale(u16),
-    Rgb { red: u16, green: u16, blue: u16 },
-    Indexed(Vec<u8>),
-}
-
-fn png_transparency_alpha_mask(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    bit_depth: u8,
-    format: ImageFormat,
-    transparency: PngTransparency,
-) -> Option<StaticImageAlphaMask> {
-    match (format, transparency) {
-        (ImageFormat::PngIndexed, PngTransparency::Indexed(alpha_values)) => {
-            indexed_png_transparency_alpha_mask(idat, width_px, height_px, &alpha_values)
-        }
-        (ImageFormat::PngGrayscale, PngTransparency::Grayscale(gray)) if bit_depth == 8 => {
-            if gray > u16::from(u8::MAX) {
-                return None;
-            }
-            grayscale_png_transparency_alpha_mask(idat, width_px, height_px, gray as u8)
-        }
-        (ImageFormat::Png, PngTransparency::Rgb { red, green, blue }) if bit_depth == 8 => {
-            if red > u16::from(u8::MAX) || green > u16::from(u8::MAX) || blue > u16::from(u8::MAX) {
-                return None;
-            }
-            rgb_png_transparency_alpha_mask(
-                idat,
-                width_px,
-                height_px,
-                red as u8,
-                green as u8,
-                blue as u8,
-            )
-        }
-        _ => None,
-    }
-}
-
-fn indexed_png_transparency_alpha_mask(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    alpha_values: &[u8],
-) -> Option<StaticImageAlphaMask> {
-    let (width, height, row_len, mut scanlines) =
-        unfiltered_png_scanlines(idat, width_px, height_px, 1)?;
-    let output_row_len = width.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let mut output = Vec::with_capacity(output_len);
-    for row in scanlines.chunks_exact_mut(row_len) {
-        output.push(0);
-        for sample in &row[1..] {
-            output.push(
-                alpha_values
-                    .get(usize::from(*sample))
-                    .copied()
-                    .unwrap_or(u8::MAX),
-            );
-        }
-    }
-    Some(StaticImageAlphaMask {
-        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
-    })
-}
-
-fn grayscale_png_transparency_alpha_mask(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    transparent_gray: u8,
-) -> Option<StaticImageAlphaMask> {
-    let (width, height, row_len, mut scanlines) =
-        unfiltered_png_scanlines(idat, width_px, height_px, 1)?;
-    let output_row_len = width.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let mut output = Vec::with_capacity(output_len);
-    for row in scanlines.chunks_exact_mut(row_len) {
-        output.push(0);
-        for sample in &row[1..] {
-            output.push(if *sample == transparent_gray {
-                0
-            } else {
-                u8::MAX
-            });
-        }
-    }
-    Some(StaticImageAlphaMask {
-        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
-    })
-}
-
-fn rgb_png_transparency_alpha_mask(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    transparent_red: u8,
-    transparent_green: u8,
-    transparent_blue: u8,
-) -> Option<StaticImageAlphaMask> {
-    let (width, height, row_len, mut scanlines) =
-        unfiltered_png_scanlines(idat, width_px, height_px, 3)?;
-    let output_row_len = width.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let mut output = Vec::with_capacity(output_len);
-    for row in scanlines.chunks_exact_mut(row_len) {
-        output.push(0);
-        for pixel in row[1..].chunks_exact(3) {
-            output.push(
-                if pixel[0] == transparent_red
-                    && pixel[1] == transparent_green
-                    && pixel[2] == transparent_blue
-                {
-                    0
-                } else {
-                    u8::MAX
-                },
-            );
-        }
-    }
-    Some(StaticImageAlphaMask {
-        bytes: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
-    })
-}
-
-fn unfiltered_png_scanlines(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    components: usize,
-) -> Option<(usize, usize, usize, Vec<u8>)> {
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let row_pixels_len = width.checked_mul(components)?;
-    let row_len = row_pixels_len.checked_add(1)?;
-    let expected_len = row_len.checked_mul(height)?;
-    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_len)?;
-    if !unfilter_png_scanlines(&mut scanlines, row_len, components) {
-        return None;
-    }
-    Some((width, height, row_len, scanlines))
-}
-
-fn normalize_alpha_png_idat(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    color_type: u8,
-) -> Option<NormalizedAlphaPngData> {
-    let (source_components, output_components) = match color_type {
-        4 => (2usize, 1usize),
-        6 => (4usize, 3usize),
-        _ => return None,
-    };
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let source_pixels_len = width.checked_mul(source_components)?;
-    let source_row_len = source_pixels_len.checked_add(1)?;
-    let expected_source_len = source_row_len.checked_mul(height)?;
-    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_source_len)?;
-    if !unfilter_png_scanlines(&mut scanlines, source_row_len, source_components) {
-        return None;
-    }
-
-    let output_pixels_len = width.checked_mul(output_components)?;
-    let output_row_len = output_pixels_len.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let mut output = Vec::with_capacity(output_len);
-    let alpha_row_len = width.checked_add(1)?;
-    let alpha_len = alpha_row_len.checked_mul(height)?;
-    let mut alpha_mask = Vec::with_capacity(alpha_len);
-    for row in scanlines.chunks_exact(source_row_len) {
-        output.push(0);
-        alpha_mask.push(0);
-        let pixels = &row[1..];
-        match color_type {
-            4 => {
-                for pixel in pixels.chunks_exact(2) {
-                    output.push(pixel[0]);
-                    alpha_mask.push(pixel[1]);
-                }
-            }
-            6 => {
-                for pixel in pixels.chunks_exact(4) {
-                    output.push(pixel[0]);
-                    output.push(pixel[1]);
-                    output.push(pixel[2]);
-                    alpha_mask.push(pixel[3]);
-                }
-            }
-            _ => return None,
-        }
-    }
-    Some(NormalizedAlphaPngData {
-        idat: miniz_oxide::deflate::compress_to_vec_zlib(&output, 6),
-        alpha_mask: StaticImageAlphaMask {
-            bytes: miniz_oxide::deflate::compress_to_vec_zlib(&alpha_mask, 6),
-        },
-    })
-}
-
-fn normalize_low_bit_depth_png_idat(
-    idat: &[u8],
-    width_px: u32,
-    height_px: u32,
-    bit_depth: u8,
-    format: ImageFormat,
-    palette_entries: usize,
-) -> Option<Vec<u8>> {
-    if !matches!(bit_depth, 1 | 2 | 4)
-        || !matches!(format, ImageFormat::PngGrayscale | ImageFormat::PngIndexed)
-    {
-        return None;
-    }
-    let width = usize::try_from(width_px).ok()?;
-    let height = usize::try_from(height_px).ok()?;
-    let row_bits = width.checked_mul(usize::from(bit_depth))?;
-    let packed_row_len = row_bits.div_ceil(8);
-    let source_row_len = packed_row_len.checked_add(1)?;
-    let expected_source_len = source_row_len.checked_mul(height)?;
-    let mut scanlines = inflate_zlib_png_scanlines(idat, expected_source_len)?;
-    if !unfilter_png_scanlines(&mut scanlines, source_row_len, 1) {
-        return None;
-    }
-
-    let output_row_len = width.checked_add(1)?;
-    let output_len = output_row_len.checked_mul(height)?;
-    let mut output = Vec::with_capacity(output_len);
-    let max_sample = (1u16 << bit_depth) - 1;
-    for row in scanlines.chunks_exact(source_row_len) {
-        output.push(0);
-        let packed = &row[1..];
-        for index in 0..width {
-            let sample = packed_png_sample(packed, index, bit_depth)?;
-            let value = match format {
-                ImageFormat::PngIndexed => {
-                    if usize::from(sample) >= palette_entries {
-                        return None;
-                    }
-                    sample
-                }
-                ImageFormat::PngGrayscale => ((u16::from(sample) * 255) / max_sample) as u8,
-                _ => return None,
-            };
-            output.push(value);
-        }
-    }
-    Some(miniz_oxide::deflate::compress_to_vec_zlib(&output, 6))
-}
-
-fn packed_png_sample(row: &[u8], index: usize, bit_depth: u8) -> Option<u8> {
-    let bits_per_sample = usize::from(bit_depth);
-    let samples_per_byte = 8usize.checked_div(bits_per_sample)?;
-    let byte = *row.get(index.checked_div(samples_per_byte)?)?;
-    let bit_offset = index
-        .checked_rem(samples_per_byte)?
-        .checked_mul(bits_per_sample)?;
-    let shift = 8usize
-        .checked_sub(bits_per_sample)?
-        .checked_sub(bit_offset)?;
-    let mask = (1u16 << bit_depth) - 1;
-    Some(((u16::from(byte) >> shift) & mask) as u8)
-}
-
-fn is_standalone_jpeg_marker(marker: u8) -> bool {
-    marker == 0x01 || (0xd0..=0xd7).contains(&marker)
-}
-
-fn is_jpeg_start_of_frame(marker: u8) -> bool {
-    matches!(
-        marker,
-        0xc0 | 0xc1 | 0xc2 | 0xc3 | 0xc5 | 0xc6 | 0xc7 | 0xc9 | 0xca | 0xcb | 0xcd | 0xce | 0xcf
-    )
 }
 
 #[cfg(test)]
