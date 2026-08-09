@@ -52,11 +52,10 @@ fn advanced_layout_rejects_out_of_range_section_and_block_indexes() {
 #[test]
 fn advanced_layout_rejects_invalid_inline_and_note_identifiers() {
     let mut document = Document::default();
-    first_paragraph(&mut document).runs.push(Run {
-        dynamic_field: Some(InlineKind::InlineImage(InlineImageId::new(7))),
-        text: String::new(),
-        style: CharacterStyle::default(),
-    });
+    first_paragraph(&mut document).runs.push(Run::inline(
+        InlineKind::InlineImage(InlineImageId::new(7)),
+        CharacterStyle::default(),
+    ));
     assert!(matches!(
         LayoutEngine::try_layout(&document),
         Err(ModelInvariantError::IndexOutOfBounds {
@@ -81,31 +80,32 @@ fn advanced_layout_rejects_invalid_inline_and_note_identifiers() {
 }
 
 #[test]
-fn advanced_layout_rejects_semantic_inline_nodes_that_also_carry_text() {
-    let mut document = Document::default();
-    first_paragraph(&mut document).runs.push(Run {
-        dynamic_field: Some(InlineKind::DynamicField(DynamicField::TotalPages)),
-        text: "not atomic".to_owned(),
-        style: CharacterStyle::default(),
-    });
+fn public_run_constructors_keep_text_and_semantics_disjoint() {
+    let text = Run::text("ordinary", CharacterStyle::default());
+    assert_eq!(text.text_content(), "ordinary");
+    assert_eq!(text.inline_kind(), None);
 
-    assert!(matches!(
-        LayoutEngine::try_layout(&document),
-        Err(ModelInvariantError::InlineKindWithText { .. })
-    ));
+    let field = Run::inline(
+        InlineKind::DynamicField(DynamicField::TotalPages),
+        CharacterStyle::default(),
+    );
+    assert_eq!(field.text_content(), "");
+    assert_eq!(
+        field.inline_kind(),
+        Some(InlineKind::DynamicField(DynamicField::TotalPages))
+    );
 }
 
 #[test]
 fn advanced_layout_rejects_invalid_style_indexes() {
     let mut document = Document::default();
-    first_paragraph(&mut document).runs.push(Run {
-        dynamic_field: None,
-        text: "invalid style".to_owned(),
-        style: CharacterStyle {
+    first_paragraph(&mut document).runs.push(Run::text(
+        "invalid style",
+        CharacterStyle {
             font_index: 42,
             ..CharacterStyle::default()
         },
-    });
+    ));
     assert!(matches!(
         LayoutEngine::try_layout(&document),
         Err(ModelInvariantError::UnknownFontIndex { index: 42, .. })

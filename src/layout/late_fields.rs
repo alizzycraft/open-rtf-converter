@@ -13,7 +13,6 @@ pub(in crate::layout) struct DocumentStatsBuilder {
 
 impl DocumentStatsBuilder {
     fn push_text(&mut self, text: &str) {
-        let text = remove_internal_stat_markers(text);
         for ch in text.chars() {
             if ch.is_whitespace() {
                 self.in_word = false;
@@ -616,10 +615,6 @@ pub(in crate::layout) fn push_paragraph_stats(
         }
     }
     builder.finish_text_boundary();
-}
-
-pub(in crate::layout) fn remove_internal_stat_markers(text: &str) -> String {
-    text.to_string()
 }
 
 pub(in crate::layout) fn format_page_number(value: usize, format: PageNumberFormat) -> String {

@@ -140,10 +140,6 @@ pub(in crate::rtf::parser) fn apply_field_format_switches(
         }
         return Some(result);
     }
-    if contains_internal_marker(&result.text) {
-        return None;
-    }
-
     if let Some(picture) = field_numeric_picture_switch(instruction)? {
         result.text = apply_field_numeric_picture_switch(&result.text, &picture)?;
         if result.text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS {
@@ -176,7 +172,7 @@ pub(in crate::rtf::parser) fn apply_field_format_switches(
         }
     }
 
-    if result.text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&result.text) {
+    if result.text.chars().any(|ch| ch.is_control()) {
         return None;
     }
 
@@ -203,7 +199,6 @@ pub(in crate::rtf::parser) fn field_instruction_dynamic_field(
 pub(in crate::rtf::parser) fn passive_field_result_text_is_safe(text: &str) -> bool {
     text.chars().count() <= MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         && !text.chars().any(|ch| ch.is_control())
-        && !contains_internal_marker(text)
 }
 
 pub(in crate::rtf::parser) fn field_uses_numeric_formatting(instruction: &str) -> bool {
@@ -507,7 +502,7 @@ pub(in crate::rtf::parser) fn clean_document_property_text(
     let text = text.trim().to_string();
     if text.is_empty()
         || text.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&text)
+        || contains_reserved_private_use(&text)
         || contains_active_pdf_marker_text(&text)
     {
         return Ok(None);
@@ -529,7 +524,7 @@ pub(in crate::rtf::parser) fn clean_field_bookmark_value(
     let text = text.trim().to_string();
     if text.is_empty()
         || text.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&text)
+        || contains_reserved_private_use(&text)
         || contains_active_pdf_marker_text(&text)
     {
         return Ok(None);
@@ -549,7 +544,9 @@ pub(in crate::rtf::parser) fn clean_style_name(
     limits: &RtfLimits,
 ) -> Result<Option<String>, ParseError> {
     let text = text.trim().trim_end_matches(';').trim().to_string();
-    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    if text.is_empty()
+        || text.chars().any(|ch| ch.is_control())
+        || contains_reserved_private_use(&text)
     {
         return Ok(None);
     }
@@ -1011,7 +1008,7 @@ pub(in crate::rtf::parser) fn passive_if_field_result_with_resolver(
     };
     if text.chars().count() > 1024
         || text.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&text)
+        || contains_reserved_private_use(&text)
         || contains_active_pdf_marker_text(&text)
     {
         return None;
@@ -1255,7 +1252,7 @@ pub(in crate::rtf::parser) fn passive_gotobutton_field_result_with_quote_mode(
     if text.is_empty()
         || text.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         || text.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&text)
+        || contains_reserved_private_use(&text)
         || contains_active_pdf_marker_text(&text)
     {
         return None;
@@ -1276,7 +1273,7 @@ pub(in crate::rtf::parser) fn passive_mergefield_result(
     let name = field_first_argument(instruction)?;
     if name.is_empty()
         || name.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&name)
+        || contains_reserved_private_use(&name)
         || contains_active_pdf_marker_text(&name)
     {
         return None;
@@ -1335,9 +1332,9 @@ pub(in crate::rtf::parser) fn passive_symbol_field_result(
         mapped.to_string()
     } else {
         let ch = char::from_u32(value)?;
-        let mut buffer = [0; 4];
-        let text = ch.encode_utf8(&mut buffer);
-        if ch.is_control() || contains_internal_marker(text) {
+        // Visible field text crosses the same sanitizing boundary as ordinary
+        // document text, so reserved private-use scalars become U+FFFD there.
+        if ch.is_control() {
             return None;
         }
         ch.to_string()
@@ -1377,7 +1374,9 @@ pub(in crate::rtf::parser) fn field_if_operand(input: &str) -> Option<(String, &
         (input[..end].to_string(), &input[end..])
     };
     let text = text.trim().to_string();
-    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    if text.is_empty()
+        || text.chars().any(|ch| ch.is_control())
+        || contains_reserved_private_use(&text)
     {
         return None;
     }
@@ -1439,7 +1438,7 @@ pub(in crate::rtf::parser) fn is_safe_passive_eq_component(text: &str) -> bool {
     !text.is_empty()
         && text.chars().count() <= MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         && !text.chars().any(|ch| ch.is_control())
-        && !contains_internal_marker(text)
+        && !contains_reserved_private_use(text)
         && !contains_active_pdf_marker_text(text)
         && !text.contains('\\')
         && !text.contains('{')
@@ -1566,7 +1565,7 @@ pub(in crate::rtf::parser) fn field_numeric_picture_argument_with_rest(
     if picture.is_empty()
         || picture.chars().count() > MAX_PASSIVE_FIELD_NUMERIC_PICTURE_CHARS
         || picture.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&picture)
+        || contains_reserved_private_use(&picture)
     {
         return None;
     }
@@ -1668,7 +1667,7 @@ pub(in crate::rtf::parser) fn field_date_picture_argument(input: &str) -> Option
     if picture.is_empty()
         || picture.chars().count() > MAX_PASSIVE_FIELD_DATE_PICTURE_CHARS
         || picture.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&picture)
+        || contains_reserved_private_use(&picture)
         || !picture
             .chars()
             .all(|ch| ch.is_ascii() && !matches!(ch, '\\' | '{' | '}'))
@@ -2347,7 +2346,9 @@ pub(in crate::rtf::parser) fn field_set_instruction(
 
 pub(in crate::rtf::parser) fn clean_style_ref_name(name: &str) -> Option<String> {
     let name = name.trim().to_string();
-    if name.is_empty() || name.chars().any(|ch| ch.is_control()) || contains_internal_marker(&name)
+    if name.is_empty()
+        || name.chars().any(|ch| ch.is_control())
+        || contains_reserved_private_use(&name)
     {
         return None;
     }
@@ -2378,7 +2379,7 @@ pub(in crate::rtf::parser) fn clean_bookmark_name(name: String) -> Option<String
     if name.is_empty()
         || name.starts_with('_')
         || name.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&name)
+        || contains_reserved_private_use(&name)
         || contains_active_pdf_marker_text(&name)
     {
         return None;

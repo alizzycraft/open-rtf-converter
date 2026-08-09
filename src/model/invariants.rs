@@ -893,4 +893,21 @@ mod tests {
             Err(ModelInvariantError::PendingNoteReference { .. })
         ));
     }
+
+    #[test]
+    fn rejects_semantic_inline_node_with_text() {
+        let mut document = Document::default();
+        let Block::Paragraph(paragraph) = &mut document.blocks[0] else {
+            panic!("default block must be a paragraph");
+        };
+        paragraph.runs.push(Run {
+            dynamic_field: Some(InlineKind::DynamicField(DynamicField::TotalPages)),
+            text: "not atomic".to_owned(),
+            style: CharacterStyle::default(),
+        });
+        assert!(matches!(
+            validate_document_invariants(&document),
+            Err(ModelInvariantError::InlineKindWithText { .. })
+        ));
+    }
 }

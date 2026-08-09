@@ -42,7 +42,7 @@ pub(in crate::rtf::parser) fn passive_formula_reference_value(text: &str) -> Opt
     if text.is_empty()
         || text.len() > 128
         || text.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(text)
+        || contains_reserved_private_use(text)
     {
         return None;
     }

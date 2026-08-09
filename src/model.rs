@@ -1373,12 +1373,41 @@ const fn hidden_border() -> TableCellBorder {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Run {
-    // Transitional field name retained until MODEL-06 privatizes construction.
-    // It now carries every non-text inline node, including dynamic fields.
     pub dynamic_field: Option<InlineKind>,
     pub text: String,
     pub style: CharacterStyle,
+}
+
+impl Run {
+    pub fn text(text: impl Into<String>, style: CharacterStyle) -> Self {
+        Self {
+            dynamic_field: None,
+            text: text.into(),
+            style,
+        }
+    }
+
+    pub fn inline(kind: InlineKind, style: CharacterStyle) -> Self {
+        Self {
+            dynamic_field: Some(kind),
+            text: String::new(),
+            style,
+        }
+    }
+
+    pub fn text_content(&self) -> &str {
+        &self.text
+    }
+
+    pub fn inline_kind(&self) -> Option<InlineKind> {
+        self.dynamic_field
+    }
+
+    pub fn character_style(&self) -> &CharacterStyle {
+        &self.style
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -9927,18 +9927,14 @@ impl Parser {
             text
         };
         let sanitized_text;
-        let text = if is_internal_marker(text) {
-            text
-        } else if contains_internal_marker(text) || contains_reserved_private_use(text) {
-            sanitized_text = sanitize_internal_markers(text);
+        let text = if contains_reserved_private_use(text) {
+            sanitized_text = sanitize_reserved_private_use(text);
             &sanitized_text
         } else {
             text
         };
         let font_mapped_text;
-        let text = if !contains_internal_marker(text)
-            && let Some(mapped) = self.map_symbol_like_font_text(text)
-        {
+        let text = if let Some(mapped) = self.map_symbol_like_font_text(text) {
             font_mapped_text = mapped;
             font_mapped_text.as_str()
         } else {
@@ -10152,7 +10148,7 @@ impl Parser {
 
     fn word_associated_font_runs(&self, text: &str) -> Option<Vec<(String, i32)>> {
         if self.options.compatibility_mode != CompatibilityMode::WordCompatiblePassive
-            || contains_internal_marker(text)
+            || contains_reserved_private_use(text)
             || (self.state.low_ansi_font_index.is_none()
                 && self.state.high_ansi_font_index.is_none()
                 && self.state.double_byte_font_index.is_none())
@@ -10464,9 +10460,7 @@ impl Parser {
         self.mark_object_result_visible_content();
         self.mark_field_result_visible_content();
         let font_mapped_text;
-        let text = if !contains_internal_marker(text)
-            && let Some(mapped) = self.map_symbol_like_font_text(text)
-        {
+        let text = if let Some(mapped) = self.map_symbol_like_font_text(text) {
             font_mapped_text = mapped;
             font_mapped_text.as_str()
         } else {
@@ -11020,7 +11014,7 @@ impl Parser {
 
     fn bookmark_text(&self, name: &str) -> Option<String> {
         let text = self.bookmark_captured_text(name)?;
-        if contains_internal_marker(&text) || text.chars().any(|ch| ch.is_control()) {
+        if contains_reserved_private_use(&text) || text.chars().any(|ch| ch.is_control()) {
             return None;
         }
         Some(text)
@@ -11134,7 +11128,7 @@ impl Parser {
 
     fn push_document_property_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes(text.len(), offset)?;
-        if contains_internal_marker(text) {
+        if contains_reserved_private_use(text) {
             return Ok(());
         }
 
@@ -11184,7 +11178,7 @@ impl Parser {
         let text = text.trim().to_string();
         if text.is_empty()
             || text.chars().any(|ch| ch.is_control())
-            || contains_internal_marker(&text)
+            || contains_reserved_private_use(&text)
         {
             return Ok(());
         }
@@ -11408,7 +11402,7 @@ impl Parser {
 
     fn push_user_property_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes(text.len(), offset)?;
-        if contains_internal_marker(text) {
+        if contains_reserved_private_use(text) {
             return Ok(());
         }
 
@@ -11447,7 +11441,7 @@ impl Parser {
 
     fn push_document_variable_text(&mut self, text: &str, offset: usize) -> Result<(), ParseError> {
         self.count_skipped_destination_bytes(text.len(), offset)?;
-        if contains_internal_marker(text) {
+        if contains_reserved_private_use(text) {
             return Ok(());
         }
 
@@ -12359,7 +12353,7 @@ impl Parser {
                     && bookmark.note_references.is_empty()
             })
             .map(|bookmark| bookmark.text.clone())?;
-        if contains_internal_marker(&text) || text.chars().any(|ch| ch.is_control()) {
+        if contains_reserved_private_use(&text) || text.chars().any(|ch| ch.is_control()) {
             return None;
         }
         Some(text)
@@ -12784,7 +12778,7 @@ impl Parser {
         if text.is_empty()
             || text.chars().count() > self.limits().max_text_run_len
             || text.chars().any(|ch| ch.is_control())
-            || contains_internal_marker(&text)
+            || contains_reserved_private_use(&text)
         {
             return Ok(());
         }
@@ -12815,7 +12809,7 @@ impl Parser {
         if text.is_empty()
             || text.chars().count() > self.limits().max_text_run_len
             || text.chars().any(|ch| ch.is_control())
-            || contains_internal_marker(&text)
+            || contains_reserved_private_use(&text)
         {
             return Ok(());
         }
@@ -22871,7 +22865,9 @@ fn field_sequence_instruction(instruction: &str) -> Option<FieldSequenceInstruct
         rest[..end].to_string()
     };
     let text = text.trim().to_string();
-    if text.is_empty() || text.chars().any(|ch| ch.is_control()) || contains_internal_marker(&text)
+    if text.is_empty()
+        || text.chars().any(|ch| ch.is_control())
+        || contains_reserved_private_use(&text)
     {
         return None;
     }
@@ -22917,7 +22913,7 @@ fn field_list_number_instruction(instruction: &str) -> Option<FieldListNumberIns
             .unwrap_or(rest.len());
         (rest[..end].trim().to_string(), &rest[end..])
     };
-    if name.chars().any(|ch| ch.is_control()) || contains_internal_marker(&name) {
+    if name.chars().any(|ch| ch.is_control()) || contains_reserved_private_use(&name) {
         return None;
     }
 
@@ -23206,7 +23202,7 @@ fn field_switch_character_value(instruction: &str, target: char) -> Option<char>
         return value.chars().next().filter(|ch| {
             !ch.is_control()
                 && !matches!(ch, '\\' | '{' | '}' | '\u{fffd}')
-                && !contains_internal_marker(&ch.to_string())
+                && !contains_reserved_private_use(&ch.to_string())
         });
     }
     None
@@ -23231,19 +23227,11 @@ fn field_switch_argument_value(input: &str) -> Option<String> {
         || value
             .chars()
             .any(|ch| ch.is_control() || matches!(ch, '\\' | '{' | '}') || ch == '\u{fffd}')
-        || contains_internal_marker(value)
+        || contains_reserved_private_use(value)
     {
         return None;
     }
     Some(value.to_string())
-}
-
-fn is_internal_marker(_text: &str) -> bool {
-    false
-}
-
-fn contains_internal_marker(_text: &str) -> bool {
-    false
 }
 
 fn contains_reserved_private_use(text: &str) -> bool {
@@ -23251,7 +23239,7 @@ fn contains_reserved_private_use(text: &str) -> bool {
         .any(|ch| ('\u{f0000}'..='\u{ffffd}').contains(&ch))
 }
 
-fn sanitize_internal_markers(text: &str) -> String {
+fn sanitize_reserved_private_use(text: &str) -> String {
     text.chars()
         .map(|ch| {
             if ('\u{f0000}'..='\u{ffffd}').contains(&ch) {
@@ -23684,7 +23672,7 @@ fn paragraph_style_ref_number_text(paragraph: &Paragraph) -> Option<String> {
     if marker.is_empty()
         || marker.chars().count() > MAX_PASSIVE_FIELD_FORMAT_TEXT_CHARS
         || marker.chars().any(|ch| ch.is_control())
-        || contains_internal_marker(&marker)
+        || contains_reserved_private_use(&marker)
     {
         return None;
     }

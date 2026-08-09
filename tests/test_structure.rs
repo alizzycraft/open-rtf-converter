@@ -19,6 +19,16 @@ fn module_test_count(relative_directory: &str) -> usize {
     files.iter().map(|path| test_attribute_count(path)).sum()
 }
 
+fn production_source(relative_path: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_path);
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+    source
+        .split_once("#[cfg(test)]")
+        .map_or(source.as_str(), |(production, _)| production)
+        .to_owned()
+}
+
 #[test]
 fn decomposed_targets_preserve_the_recorded_test_inventory() {
     assert_eq!(module_test_count("tests/security"), 1_044);
@@ -45,6 +55,42 @@ fn decomposed_targets_preserve_the_recorded_test_inventory() {
             test_attribute_count(&root.join(relative_path)),
             0,
             "{relative_path} should remain an orchestration and shared-support root"
+        );
+    }
+}
+
+#[test]
+fn production_model_pipeline_has_no_semantic_sentinel_protocols() {
+    let source = [
+        production_source("src/model.rs"),
+        production_source("src/rtf/parser.rs"),
+        production_source("src/rtf/parser/fields/formatting.rs"),
+        production_source("src/rtf/parser/fields/formula.rs"),
+        production_source("src/layout.rs"),
+        production_source("src/layout/late_fields.rs"),
+    ]
+    .join("\n");
+
+    for forbidden in [
+        "BOOKMARK_PAGE_ANCHOR_MARKER",
+        "BOOKMARK_PAGE_REF_MARKER",
+        "BOOKMARK_PAGE_MARKER_END",
+        "PASSIVE_ADVANCE_MARKER",
+        "NESTED_TABLE_ANCHOR_MARKER",
+        "INLINE_IMAGE_MARKER_BASE",
+        "FOOTNOTE_REFERENCE_MARKER",
+        "ENDNOTE_REFERENCE_MARKER",
+        "PENDING_NOTE_REFERENCE_MARKER",
+        "PASSIVE_MATH_FRACTION_RULE_MARKER",
+        "PASSIVE_MATH_STACK_ANCHOR_MARKER",
+        "PASSIVE_MATH_INLINE_LEAD_MARKER",
+        "contains_internal_marker",
+        "sanitize_internal_markers",
+        "remove_internal_stat_markers",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "production source still contains obsolete sentinel protocol {forbidden}"
         );
     }
 }
