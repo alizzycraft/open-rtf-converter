@@ -1,5 +1,5 @@
     #[test]
-    fn estimated_pdf_object_count_matches_rendered_supplied_font_and_image_objects() {
+    fn pdf_plan_borrows_payloads_and_records_supplied_font_and_image_resources() {
         let mut document = Document {
             fonts: vec![FontDef {
                 index: 0,
@@ -51,13 +51,37 @@
             limits: Default::default(),
         };
 
-        let layout = LayoutEngine::layout_with_font_provider(&document, Some(&provider));
-        let estimated = estimate_passive_pdf_object_count(&layout, Some(&provider));
-        let pdf = render_pdf_with_font_provider(&layout, Some(&provider));
+        let font_bytes = provider.assets[0].bytes.as_ptr();
+        let prepared = PreparedFontCatalog::prepare(&provider).unwrap();
+        let font_session = FontSession::new(&prepared);
+        let layout = LayoutEngine::layout_with_font_session(&document, &font_session);
+        let plan = plan_pdf(&layout, &font_session).unwrap();
+
+        assert!(std::ptr::eq(plan.layout(), &layout));
+        assert_eq!(font_bytes, plan.font_session().provider().assets[0].bytes.as_ptr());
+        assert_eq!(plan.pages().len(), 1);
+        assert!(plan.builtin_fonts().is_empty());
+        assert_eq!(plan.supplied_fonts().len(), 1);
+        assert_eq!(plan.supplied_fonts()[0].asset_index, 0);
+        assert_eq!(plan.pages()[0].supplied_font_indexes, [0]);
+        assert_eq!(plan.images().len(), 1);
+        assert_eq!(plan.images()[0].page_index, 0);
+        assert_eq!(plan.images()[0].format, ImageFormat::Rgb8);
+        assert_eq!(plan.pages()[0].image_count, 1);
+        assert!(
+            std::mem::size_of::<PlannedImage>() <= std::mem::size_of::<usize>() * 2,
+            "planned images must not own image payloads"
+        );
+        assert_eq!(
+            plan.object_count(),
+            estimate_passive_pdf_object_count(&layout, Some(font_session.provider()))
+        );
+
+        let pdf = render_pdf_plan(&plan).unwrap();
         let parsed = lopdf::Document::load_mem(&pdf).unwrap();
 
-        assert_eq!(estimated, parsed.objects.len());
-        assert_eq!(estimated, 11);
+        assert_eq!(plan.object_count(), parsed.objects.len());
+        assert_eq!(plan.object_count(), 11);
         assert!(
             pdf.windows(b"/FontFile2".len())
                 .any(|window| window == b"/FontFile2")
@@ -67,6 +91,22 @@
                 .any(|window| window == b"/Subtype /Image")
         );
         audit_passive_pdf_bytes(&pdf).unwrap();
+    }
+
+    #[test]
+    fn malformed_pdf_plan_resource_metadata_returns_an_error() {
+        let prepared = PreparedFontCatalog::prepare(&FontProvider::browser_safe_defaults()).unwrap();
+        let font_session = FontSession::new(&prepared);
+        let layout = LayoutEngine::layout(&Document::default());
+        let mut plan = plan_pdf(&layout, &font_session).unwrap();
+        plan.corrupt_page_index_for_test(0, 1);
+
+        assert_eq!(
+            render_pdf_plan(&plan),
+            Err(PdfRenderError::InternalPlanMismatch {
+                context: "page resource metadata",
+            })
+        );
     }
 
     #[test]

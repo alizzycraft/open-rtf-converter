@@ -316,17 +316,16 @@ mod writer;
 
 use fonts::*;
 use images::*;
+pub(crate) use plan::plan_pdf;
 use plan::*;
 pub(crate) use text::passive_base14_covers_latin_extended_char;
 use text::*;
 use vector::*;
+pub(crate) use writer::render_pdf_plan;
 pub use writer::{estimate_passive_pdf_object_count, render_pdf, render_pdf_with_font_provider};
-pub(crate) use writer::{
-    estimate_passive_pdf_object_count_with_font_session, render_pdf_with_font_session,
-};
 #[cfg(test)]
 mod tests {
-    use crate::fonts::{FontAsset, FontAssetStyle, FontProvider};
+    use crate::fonts::{FontAsset, FontAssetStyle, FontProvider, FontSession, PreparedFontCatalog};
     use crate::layout::{DrawingFragment, LayoutEngine, LayoutItem};
     use crate::model::{
         Alignment, Block, BorderStyle, CharacterStyle, Color, Document, DynamicField, FontDef,

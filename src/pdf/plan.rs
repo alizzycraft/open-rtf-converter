@@ -2,6 +2,187 @@
 
 use super::*;
 
+pub(crate) struct PdfPlan<'a, 'fonts> {
+    layout: &'a LayoutDocument,
+    font_session: &'a FontSession<'fonts>,
+    pages: Vec<PlannedPage>,
+    builtin_fonts: Vec<usize>,
+    supplied_fonts: Vec<PlannedSuppliedFont>,
+    images: Vec<PlannedImage>,
+    object_count: usize,
+}
+
+pub(crate) struct PlannedPage {
+    pub(crate) page_index: usize,
+    pub(crate) builtin_font_indexes: Vec<usize>,
+    pub(crate) supplied_font_indexes: Vec<usize>,
+    pub(crate) opacity_pairs: Vec<(u8, u8)>,
+    pub(crate) image_count: usize,
+}
+
+pub(crate) struct PlannedSuppliedFont {
+    pub(crate) asset_index: usize,
+}
+
+pub(crate) struct PlannedImage {
+    pub(crate) page_index: usize,
+    pub(crate) format: ImageFormat,
+}
+
+impl<'a, 'fonts> PdfPlan<'a, 'fonts> {
+    pub(crate) fn layout(&self) -> &'a LayoutDocument {
+        self.layout
+    }
+
+    pub(crate) fn font_session(&self) -> &'a FontSession<'fonts> {
+        self.font_session
+    }
+
+    pub(crate) fn object_count(&self) -> usize {
+        self.object_count
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pages(&self) -> &[PlannedPage] {
+        &self.pages
+    }
+
+    #[cfg(test)]
+    pub(crate) fn builtin_fonts(&self) -> &[usize] {
+        &self.builtin_fonts
+    }
+
+    #[cfg(test)]
+    pub(crate) fn supplied_fonts(&self) -> &[PlannedSuppliedFont] {
+        &self.supplied_fonts
+    }
+
+    #[cfg(test)]
+    pub(crate) fn images(&self) -> &[PlannedImage] {
+        &self.images
+    }
+
+    #[cfg(test)]
+    pub(crate) fn corrupt_page_index_for_test(&mut self, page_index: usize, value: usize) {
+        self.pages[page_index].page_index = value;
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), PdfRenderError> {
+        if self.pages.len() != self.layout.pages.len()
+            || self.pages.iter().enumerate().any(|(index, page)| {
+                page.page_index != index
+                    || page.builtin_font_indexes.iter().any(|font| *font >= 14)
+                    || page
+                        .supplied_font_indexes
+                        .iter()
+                        .any(|font| *font >= self.supplied_fonts.len())
+                    || page
+                        .opacity_pairs
+                        .iter()
+                        .any(|(fill, stroke)| *fill > 100 || *stroke > 100)
+            })
+        {
+            return Err(PdfRenderError::InternalPlanMismatch {
+                context: "page resource metadata",
+            });
+        }
+        if self
+            .pages
+            .iter()
+            .map(|page| page.image_count)
+            .sum::<usize>()
+            != self.images.len()
+            || self.images.iter().any(|image| {
+                image.page_index >= self.pages.len() || !image_format_uses_xobject(image.format)
+            })
+        {
+            return Err(PdfRenderError::InternalPlanMismatch {
+                context: "image resource metadata",
+            });
+        }
+        if let Some(asset_index) = self
+            .supplied_fonts
+            .iter()
+            .map(|font| font.asset_index)
+            .find(|asset_index| *asset_index >= self.font_session.provider().assets.len())
+        {
+            return Err(PdfRenderError::InvalidPreparedFontReference { asset_index });
+        }
+        if self.builtin_fonts.iter().any(|font| *font >= 14) {
+            return Err(PdfRenderError::InternalPlanMismatch {
+                context: "built-in font resource metadata",
+            });
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn plan_pdf<'a, 'fonts>(
+    layout: &'a LayoutDocument,
+    font_session: &'a FontSession<'fonts>,
+) -> Result<PdfPlan<'a, 'fonts>, PdfRenderError> {
+    let provider = Some(font_session.provider());
+    let page_font_indexes = collect_page_used_font_indexes(layout, provider);
+    let builtin_fonts = collect_used_font_indexes(&page_font_indexes);
+    let supplied_fonts = collect_used_supplied_font_asset_indexes(layout, provider)
+        .into_iter()
+        .map(|asset_index| PlannedSuppliedFont { asset_index })
+        .collect::<Vec<_>>();
+    let mut images = Vec::new();
+    let pages = layout
+        .pages
+        .iter()
+        .enumerate()
+        .map(|(page_index, page)| {
+            let image_start = images.len();
+            page.for_each_image_fragment(&mut |fragment| {
+                if image_format_uses_xobject(fragment.image.format) {
+                    images.push(PlannedImage {
+                        page_index,
+                        format: fragment.image.format,
+                    });
+                }
+                for command in &fragment.image.vector_commands {
+                    if let StaticImageVectorCommand::RasterImage { image, .. } = command
+                        && image_format_uses_xobject(image.format)
+                    {
+                        images.push(PlannedImage {
+                            page_index,
+                            format: image.format,
+                        });
+                    }
+                }
+            });
+            PlannedPage {
+                page_index,
+                builtin_font_indexes: page_font_indexes[page_index].clone(),
+                supplied_font_indexes: collect_used_supplied_font_asset_indexes_for_page(
+                    layout, page, provider,
+                )
+                .into_iter()
+                .filter_map(|asset_index| {
+                    supplied_fonts
+                        .iter()
+                        .position(|font| font.asset_index == asset_index)
+                })
+                .collect(),
+                opacity_pairs: collect_page_opacity_pairs(page),
+                image_count: images.len() - image_start,
+            }
+        })
+        .collect::<Vec<_>>();
+    let object_count = super::writer::estimate_passive_pdf_object_count(layout, provider);
+    Ok(PdfPlan {
+        layout,
+        font_session,
+        pages,
+        builtin_fonts,
+        supplied_fonts,
+        images,
+        object_count,
+    })
+}
+
 pub(in crate::pdf) fn next_ref(next_object_id: &mut i32) -> Ref {
     let reference = Ref::new(*next_object_id);
     *next_object_id += 1;
@@ -186,6 +367,28 @@ pub(in crate::pdf) fn collect_used_supplied_font_asset_indexes(
             }
         });
     }
+    indexes
+}
+
+fn collect_used_supplied_font_asset_indexes_for_page(
+    layout: &LayoutDocument,
+    page: &crate::layout::LayoutPage,
+    font_provider: Option<&FontProvider>,
+) -> Vec<usize> {
+    let Some(font_provider) = font_provider else {
+        return Vec::new();
+    };
+    let mut indexes = Vec::<usize>::new();
+    page.for_each_text_fragment(&mut |fragment| {
+        let Some((asset_index, _glyphs, _encoded)) =
+            supplied_text_encoding_parts(fragment, layout, font_provider)
+        else {
+            return;
+        };
+        if !indexes.contains(&asset_index) {
+            indexes.push(asset_index);
+        }
+    });
     indexes
 }
 

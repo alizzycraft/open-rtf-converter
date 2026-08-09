@@ -17,8 +17,7 @@ use crate::layout::{
 use crate::model::{Document, FontDef, ImageFormat, StaticImageVectorCommand};
 use crate::pdf::{
     PassivePdfError, PdfRenderError, audit_passive_pdf_bytes,
-    estimate_passive_pdf_object_count_with_font_session, passive_base14_covers_latin_extended_char,
-    render_pdf_with_font_session,
+    passive_base14_covers_latin_extended_char, plan_pdf, render_pdf_plan,
 };
 use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 
@@ -193,7 +192,8 @@ fn convert_rtf_with_prepared_fonts(
             limit: page_limit,
         });
     }
-    let object_count = estimate_passive_pdf_object_count_with_font_session(&layout, &font_session);
+    let pdf_plan = plan_pdf(&layout, &font_session)?;
+    let object_count = pdf_plan.object_count();
     let object_limit = options.parse_options.limits.max_pdf_indirect_objects;
     if object_count > object_limit {
         return Err(ConvertError::TooManyPdfObjects {
@@ -201,7 +201,7 @@ fn convert_rtf_with_prepared_fonts(
             limit: object_limit,
         });
     }
-    let pdf = render_pdf_with_font_session(&layout, &font_session)?;
+    let pdf = render_pdf_plan(&pdf_plan)?;
     let output_limit = options.parse_options.limits.max_pdf_output_bytes;
     if pdf.len() > output_limit {
         return Err(ConvertError::OutputTooLarge {

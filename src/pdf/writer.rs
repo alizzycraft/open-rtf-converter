@@ -38,13 +38,6 @@ pub fn estimate_passive_pdf_object_count(
         .saturating_add(count_image_xobjects(layout))
 }
 
-pub(crate) fn estimate_passive_pdf_object_count_with_font_session(
-    layout: &LayoutDocument,
-    font_session: &FontSession<'_>,
-) -> usize {
-    estimate_passive_pdf_object_count(layout, Some(font_session.provider()))
-}
-
 pub fn render_pdf_with_font_provider(
     layout: &LayoutDocument,
     font_provider: Option<&FontProvider>,
@@ -310,9 +303,7 @@ fn try_render_pdf_with_font_provider(
     Ok(pdf.finish())
 }
 
-pub(crate) fn render_pdf_with_font_session(
-    layout: &LayoutDocument,
-    font_session: &FontSession<'_>,
-) -> Result<Vec<u8>, PdfRenderError> {
-    try_render_pdf_with_font_provider(layout, Some(font_session.provider()))
+pub(crate) fn render_pdf_plan(plan: &PdfPlan<'_, '_>) -> Result<Vec<u8>, PdfRenderError> {
+    plan.validate()?;
+    try_render_pdf_with_font_provider(plan.layout(), Some(plan.font_session().provider()))
 }
