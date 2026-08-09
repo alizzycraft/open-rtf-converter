@@ -1,0 +1,211 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.converter {
+  padding: 24px;
+  border-radius: 30px;
+  text-align: center;
+}
+
+.dropzone {
+  width: 100%;
+  min-height: 330px;
+  padding: 34px 20px;
+  border: 1.5px dashed color-mix(in oklch, var(--accent) 50%, transparent);
+  border-radius: 22px;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.dropzone:hover,
+.dropzone:focus-visible,
+.dropzone.dragging {
+  outline: none;
+  border-color: var(--accent);
+  background: oklch(100% 0 0 / 0.3);
+  box-shadow: 0 0 0 4px oklch(62% 0.2 262 / 0.1);
+  transform: translateY(-2px);
+}
+
+.dropzone[aria-disabled='true'] {
+  cursor: wait;
+  transform: none;
+}
+
+.format-swap {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.file-icon {
+  width: 74px;
+  height: 82px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  color: var(--accent);
+}
+
+.file-icon svg {
+  position: absolute;
+  width: 60px;
+  inset: 0;
+  margin: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
+.file-icon b {
+  margin-top: 34px;
+  font-size: 13px;
+}
+
+.file-icon.pdf {
+  color: var(--accent-2);
+}
+
+.file-icon.selected {
+  margin-bottom: 18px;
+}
+
+.arrow {
+  color: color-mix(in oklch, var(--accent) 65%, var(--accent-2));
+  font-size: 32px;
+}
+
+.drop-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: 730 clamp(21px, 3vw, 28px) / 1.2 var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+.drop-copy {
+  margin-top: 9px;
+  color: var(--muted);
+}
+
+.status-row {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 4px 0 2px;
+}
+
+.status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status.error {
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.clear {
+  min-height: 36px;
+  padding: 0 6px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.primary {
+  width: min(100%, 420px);
+  min-height: 58px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: 17px;
+  color: white;
+  background: linear-gradient(105deg, var(--accent), var(--accent-2));
+  box-shadow:
+    0 15px 36px oklch(58% 0.19 285 / 0.28),
+    inset 0 1px 0 oklch(100% 0 0 / 0.45);
+  font-weight: 760;
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow:
+    0 19px 42px oklch(58% 0.19 285 / 0.34),
+    inset 0 1px 0 oklch(100% 0 0 / 0.5);
+}
+
+.primary:focus-visible,
+.clear:focus-visible {
+  outline: 3px solid oklch(48% 0.2 262);
+  outline-offset: 3px;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary svg {
+  width: 19px;
+  margin-right: 8px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vertical-align: -5px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 9px;
+  border: 2px solid oklch(100% 0 0 / 0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  vertical-align: -3px;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 560px) {
+  .converter {
+    padding: 12px;
+    border-radius: 24px;
+  }
+
+  .dropzone {
+    min-height: 300px;
+    border-radius: 18px;
+  }
+
+  .status-row {
+    min-height: 54px;
+    padding-inline: 8px;
+  }
+}

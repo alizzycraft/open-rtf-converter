@@ -1,0 +1,72 @@
+<div class="atmosphere" aria-hidden="true">
+  <span class="orbit"></span>
+  <span class="bubble bubble-one"></span>
+  <span class="bubble bubble-two"></span>
+  <span class="bubble bubble-three"></span>
+</div>
+
+<header class="shell">
+  <nav class="nav glass" aria-label="Primary navigation">
+    <a class="brand" href="#main" aria-label="Open RTF Converter home">
+      <svg viewBox="0 0 32 38" fill="none" aria-hidden="true">
+        <path
+          d="M5 1.5h13l9 9V35a1.5 1.5 0 0 1-1.5 1.5h-20A1.5 1.5 0 0 1 4 35V3A1.5 1.5 0 0 1 5.5 1.5Z"
+        />
+        <path d="M18 2v9h9" />
+      </svg>
+      <span>Open RTF Converter</span>
+    </a>
+    <span class="local-badge">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3 5 6v5c0 4.7 2.8 8 7 10 4.2-2 7-5.3 7-10V6l-7-3Z" />
+      </svg>
+      100% local processing
+    </span>
+  </nav>
+</header>
+
+<main id="main" class="shell">
+  <section class="hero" aria-labelledby="page-title">
+    <p class="eyebrow"><span></span>Open source · browser native</p>
+    <h1 id="page-title"><span>RTF to PDF, instantly.</span><br />No server required.</h1>
+    <p class="lede">
+      A fast, private converter running entirely in your browser. Your document never leaves your
+      device.
+    </p>
+  </section>
+
+  <section class="converter-layout" aria-label="RTF to PDF converter">
+    <app-converter />
+
+    <aside class="features glass" aria-label="Product qualities">
+      <h2>Built for privacy</h2>
+      <div class="feature">
+        <span>01</span>
+        <div>
+          <strong>Private & secure</strong
+          ><small>WebAssembly processes the file on this device</small>
+        </div>
+      </div>
+      <div class="feature">
+        <span>02</span>
+        <div>
+          <strong>Responsive</strong><small>A browser worker keeps the interface moving</small>
+        </div>
+      </div>
+      <div class="feature">
+        <span>03</span>
+        <div>
+          <strong>Open source</strong><small>Inspect, adapt, and self-host the converter</small>
+        </div>
+      </div>
+    </aside>
+  </section>
+</main>
+
+<footer class="shell">
+  <span>Rust + WebAssembly</span>
+  <i aria-hidden="true"></i>
+  <a href="https://github.com/alizzycraft/open-rtf-converter">GitHub repository</a>
+  <i aria-hidden="true"></i>
+  <span>Angular 22 · zoneless</span>
+</footer>

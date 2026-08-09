@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. The project uses pre-1.0 semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- A static Angular 22 website that converts RTF files through the Rust WASM facade in a browser worker.
+- A version-pinned WASM build script, zoneless signal-driven UI, website tests, and GitHub Pages deployment workflow.
+
 ## [0.2.0] - 2026-08-09
 
 ### Added

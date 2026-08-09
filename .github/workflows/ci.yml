@@ -144,3 +144,29 @@ jobs:
 
       - name: Run the WASM dependency policy test
         run: cargo test --test wasm_dependency_policy
+
+  web:
+    name: Angular website
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install website dependencies
+        run: npm ci --prefix web
+
+      - name: Run website tests
+        run: npm test --prefix web -- --watch=false
+
+      - name: Build the Angular application
+        run: npm run build:angular --prefix web

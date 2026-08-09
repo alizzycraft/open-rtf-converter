@@ -1,0 +1,90 @@
+<section class="converter glass" aria-labelledby="converter-title">
+  <h2 id="converter-title" class="visually-hidden">Convert an RTF document</h2>
+  <input
+    #fileInput
+    id="rtf-file"
+    class="visually-hidden"
+    type="file"
+    accept=".rtf,application/rtf,text/rtf"
+    [disabled]="state() === 'converting'"
+    (change)="onFileInput($event)"
+  />
+
+  <div
+    class="dropzone"
+    role="button"
+    tabindex="0"
+    [class.dragging]="isDragging()"
+    [class.has-file]="file()"
+    [attr.aria-disabled]="state() === 'converting'"
+    [attr.aria-busy]="state() === 'converting'"
+    (click)="chooseFile(fileInput)"
+    (keydown)="onDropzoneKeydown($event, fileInput)"
+    (dragover)="onDragOver($event)"
+    (dragleave)="onDragLeave($event)"
+    (drop)="onDrop($event)"
+  >
+    @if (file(); as selectedFile) {
+      <span class="file-icon selected" aria-hidden="true">
+        <svg viewBox="0 0 32 38">
+          <path
+            d="M5 1.5h13l9 9V35a1.5 1.5 0 0 1-1.5 1.5h-20A1.5 1.5 0 0 1 4 35V3A1.5 1.5 0 0 1 5.5 1.5Z"
+          />
+          <path d="M18 2v9h9" />
+        </svg>
+        <b>RTF</b>
+      </span>
+      <span class="drop-title">{{ selectedFile.name }}</span>
+      <span class="drop-copy">{{ formattedSize() }} · Select to replace</span>
+    } @else {
+      <span class="format-swap" aria-hidden="true">
+        <span class="file-icon"
+          ><svg viewBox="0 0 32 38">
+            <path
+              d="M5 1.5h13l9 9V35a1.5 1.5 0 0 1-1.5 1.5h-20A1.5 1.5 0 0 1 4 35V3A1.5 1.5 0 0 1 5.5 1.5Z"
+            />
+            <path d="M18 2v9h9" /></svg
+          ><b>RTF</b></span
+        >
+        <span class="arrow">→</span>
+        <span class="file-icon pdf"
+          ><svg viewBox="0 0 32 38">
+            <path
+              d="M5 1.5h13l9 9V35a1.5 1.5 0 0 1-1.5 1.5h-20A1.5 1.5 0 0 1 4 35V3A1.5 1.5 0 0 1 5.5 1.5Z"
+            />
+            <path d="M18 2v9h9" /></svg
+          ><b>PDF</b></span
+        >
+      </span>
+      <span class="drop-title">Drag & drop your .rtf file here</span>
+      <span class="drop-copy">or <u>browse from your device</u></span>
+    }
+  </div>
+
+  <div class="status-row">
+    <p class="status" [class.error]="state() === 'error'" aria-live="polite">
+      {{ statusMessage() }}
+    </p>
+    @if (file() && state() !== 'converting') {
+      <button class="clear" type="button" (click)="clearFile()">Clear file</button>
+    }
+  </div>
+
+  <button
+    class="primary"
+    type="button"
+    [disabled]="!file() || state() === 'converting'"
+    (click)="convertOrDownload()"
+  >
+    @if (state() === 'converting') {
+      <span class="spinner" aria-hidden="true"></span>Converting locally…
+    } @else if (state() === 'ready') {
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14" />
+      </svg>
+      Download PDF
+    } @else {
+      Convert file locally
+    }
+  </button>
+</section>

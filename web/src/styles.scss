@@ -1,0 +1,70 @@
+:root {
+  --bg: oklch(96% 0.025 265);
+  --surface: oklch(100% 0 0 / 0.5);
+  --fg: oklch(22% 0.035 265);
+  --muted: oklch(43% 0.032 265);
+  --border: oklch(100% 0 0 / 0.72);
+  --accent: oklch(55% 0.22 262);
+  --accent-2: oklch(59% 0.22 305);
+  --success: oklch(55% 0.16 155);
+  --danger: oklch(49% 0.2 25);
+  --font-display: ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'SFMono-Regular', Consolas, ui-monospace, monospace;
+  --shadow: 0 26px 70px oklch(48% 0.13 275 / 0.14), inset 0 1px 0 oklch(100% 0 0 / 0.85);
+}
+
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  color: var(--fg);
+  background: var(--bg);
+  font-family: var(--font-body);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.glass {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(28px) saturate(125%);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -4,6 +4,20 @@ A Rust CLI and library core for converting RTF documents to passive PDF output w
 
 The implementation owns the RTF tokenization/parsing, normalized document model, layout, pagination, and PDF drawing pipeline. The core API converts in-memory RTF bytes to PDF bytes so it can be used by CLI, desktop, server-worker, and browser/WASM wrappers.
 
+## Browser app
+
+The `web` workspace is a static Angular 22 application using signals and zoneless change detection. It sends document bytes to a module worker, calls the same browser-safe Rust conversion facade through WebAssembly, and downloads the resulting PDF without uploading the source document.
+
+Build it from the repository root after installing the pinned Rust toolchain, Node.js 22, and `wasm-bindgen-cli` 0.2.127:
+
+```powershell
+cargo install wasm-bindgen-cli --version 0.2.127 --locked
+npm ci --prefix web
+npm run build --prefix web
+```
+
+The static output is written to `web/dist/web/browser`. The Pages workflow builds with the repository base path and deploys that directory; enable **GitHub Actions** as the Pages source in the repository settings before the first deployment.
+
 ## Usage
 
 ```powershell

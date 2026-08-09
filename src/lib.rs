@@ -42,6 +42,8 @@ mod layout;
 mod model;
 mod pdf;
 mod rtf;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 
 /// Unstable, non-default entry points used only by the repository's fuzz crate.
 #[cfg(feature = "fuzzing")]

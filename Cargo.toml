@@ -4,6 +4,9 @@ version = "0.2.0"
 edition = "2024"
 rust-version = "1.96"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [features]
 default = ["cli"]
 cli = ["dep:clap"]
@@ -33,3 +36,6 @@ tempfile = "3.24.0"
 name = "open-rtf-converter"
 path = "src/main.rs"
 required-features = ["cli"]
+
+[target.wasm32-unknown-unknown.dependencies]
+wasm-bindgen = "0.2.127"
