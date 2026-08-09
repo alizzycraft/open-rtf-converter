@@ -52,6 +52,7 @@ cargo test --bin open-rtf-converter
 cargo test --test conversion
 cargo test --test public_api
 cargo test --test test_structure
+cargo test --lib security_tests::
 cargo test --test security
 cargo test --test reference_fixtures
 cargo test --test fuzz_regression

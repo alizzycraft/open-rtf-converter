@@ -337,6 +337,7 @@ The initial CI matrix must run on a hosted Linux runner and contain these logica
    - `cargo test --bin open-rtf-converter`
    - `cargo test --test conversion`
 3. `security-tests`
+   - `cargo test --lib security_tests::`
    - `cargo test --test security`
 4. `reference-and-regression`
    - `cargo test --test reference_fixtures`
@@ -1160,7 +1161,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | PDF-02 | Add conversion-local `PdfPlan` and planned resource records | PDF-01, FONT-02, MODEL-06 | A conversion-local borrowing plan now records stable per-page built-in/supplied-font, opacity, and image metadata while sharing layout and font payloads; compact-record/pointer-identity and malformed-plan tests, 1,307 library/1,044 security/81 PDF tests, full native/reference/fuzz/Clippy/WASM gates, unchanged sample PDF, and a 138.789 ms local median passed on 2026-08-09 |
 | [x] | PDF-03 | Add checked contiguous object allocator and exact pre-render limit | PDF-02 | One checked allocator now assigns contiguous catalog/page/content/font/CMap/image/mask references, returns typed overflow/limit errors during planning, and proves planned count/highest ID equal emitted objects at exact limit boundaries; 1,309 library/1,044 security/83 PDF tests, full native/reference/fuzz/Clippy/WASM gates, unchanged sample PDF, and a 145.084 ms local median passed on 2026-08-09 |
 | [x] | PDF-04 | Render exclusively from `PdfPlan`; remove duplicate estimator traversal | PDF-03 | The renderer and compatibility estimator now build/consume only `PdfPlan`; render-ready page/font/CMap/text/image records eliminate duplicate estimator discovery and reuse planned supplied encodings, with deterministic repeat-render, malformed-record, and single-path source-policy coverage; 1,309 library/1,044 security/83 PDF tests, full native/reference/fuzz/Clippy/WASM gates, unchanged sample PDF, and a 114.107 ms local median passed on 2026-08-09 |
-| [ ] | API-04 | Migrate white-box tests and add non-default narrow fuzz hooks | MODEL-06, PDF-04 | Normal tests need no raw public modules; fuzz targets compile |
+| [x] | API-04 | Migrate white-box tests and add non-default narrow fuzz hooks | MODEL-06, PDF-04 | All 1,044 security white-box and five model-invariant tests now run crate-internally, while two black-box security tests and every other normal integration target use only the supported façade; the fuzz crate explicitly enables two payload-opaque hooks under a non-default `fuzzing` feature, with recursive source policies, 2,358 library tests, compiled fuzz targets, full native/reference/regression/Clippy/WASM gates, unchanged sample PDF, and a 115.194 ms local median passed on 2026-08-09 |
 | [ ] | API-05 | Make layout/model/raw parser/raw renderer modules crate-private | API-03, API-04 | Public docs contain only intentional APIs |
 | [ ] | DOC-01 | Finalize architecture docs, changelog, and version migration notes | API-05 | Definition of done is fully evidenced |
 
@@ -1287,6 +1288,7 @@ cargo test --bin open-rtf-converter
 cargo test --test conversion
 cargo test --test public_api
 cargo test --test test_structure
+cargo test --lib security_tests::
 cargo test --test security
 cargo test --test reference_fixtures
 cargo test --test fuzz_regression

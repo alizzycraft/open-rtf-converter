@@ -1,31 +1,7 @@
 use std::panic;
 
 use open_rtf_converter::audit_passive_pdf_bytes;
-use open_rtf_converter::rtf::{Lexer, parse_rtf_bytes_with_options};
-use open_rtf_converter::{ConvertOptions, RtfLimits, RtfParseOptions, convert_rtf_to_pdf};
-
-#[test]
-fn tokenizer_and_parser_mutation_corpus_return_typed_results_without_panics() {
-    let parse_options = RtfParseOptions::browser_safe_defaults();
-
-    for (case_idx, case) in mutation_corpus().into_iter().enumerate() {
-        let lex_result =
-            panic::catch_unwind(|| Lexer::new(&case, RtfLimits::browser_defaults()).tokenize());
-        assert!(
-            lex_result.is_ok(),
-            "lexer panicked for mutation corpus case {case_idx}: {:?}",
-            String::from_utf8_lossy(&case)
-        );
-
-        let parse_result =
-            panic::catch_unwind(|| parse_rtf_bytes_with_options(&case, &parse_options));
-        assert!(
-            parse_result.is_ok(),
-            "parser panicked for mutation corpus case {case_idx}: {:?}",
-            String::from_utf8_lossy(&case)
-        );
-    }
-}
+use open_rtf_converter::{ConvertOptions, RtfParseOptions, convert_rtf_to_pdf};
 
 #[test]
 fn converter_mutation_corpus_rejects_or_emits_passive_pdf_without_payload_leakage() {

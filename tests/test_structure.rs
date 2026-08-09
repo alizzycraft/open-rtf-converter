@@ -29,9 +29,30 @@ fn production_source(relative_path: &str) -> String {
         .to_owned()
 }
 
+fn rust_sources_below(relative_directory: &str) -> Vec<(PathBuf, String)> {
+    fn collect(directory: &Path, sources: &mut Vec<(PathBuf, String)>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect(&path, sources);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                sources.push((path.clone(), std::fs::read_to_string(path).unwrap()));
+            }
+        }
+    }
+
+    let mut sources = Vec::new();
+    collect(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_directory),
+        &mut sources,
+    );
+    sources.sort_by(|left, right| left.0.cmp(&right.0));
+    sources
+}
+
 #[test]
 fn decomposed_targets_preserve_the_recorded_test_inventory() {
-    assert_eq!(module_test_count("tests/security"), 1_044);
+    assert_eq!(module_test_count("src/security_tests"), 1_044);
     assert_eq!(module_test_count("tests/conversion"), 46);
     assert_eq!(module_test_count("tests/reference"), 4);
     assert_eq!(module_test_count("src/rtf/parser_tests"), 845);
@@ -46,17 +67,17 @@ fn decomposed_targets_preserve_the_recorded_test_inventory() {
     );
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for relative_path in [
-        "tests/security.rs",
-        "tests/conversion.rs",
-        "tests/reference_fixtures.rs",
-    ] {
+    for relative_path in ["tests/conversion.rs", "tests/reference_fixtures.rs"] {
         assert_eq!(
             test_attribute_count(&root.join(relative_path)),
             0,
             "{relative_path} should remain an orchestration and shared-support root"
         );
     }
+    assert_eq!(
+        test_attribute_count(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/security.rs")),
+        2
+    );
 }
 
 #[test]
@@ -114,4 +135,39 @@ fn production_pdf_writer_has_one_plan_backed_resource_path() {
     }
     assert!(writer.contains("fn try_render_pdf_plan("));
     assert!(writer.contains("render_pdf_plan(&plan)"));
+}
+
+#[test]
+fn normal_integration_tests_use_only_the_supported_crate_facade() {
+    for (path, source) in rust_sources_below("tests") {
+        for module in ["rtf", "model", "layout", "pdf"] {
+            let forbidden = format!("open_rtf_converter::{module}");
+            assert!(
+                !source.contains(&forbidden),
+                "{} imports raw implementation module {module}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn fuzz_targets_use_only_explicit_non_default_hooks_and_the_facade() {
+    let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let package_manifest = std::fs::read_to_string(manifest_root.join("Cargo.toml")).unwrap();
+    let fuzz_manifest = std::fs::read_to_string(manifest_root.join("fuzz/Cargo.toml")).unwrap();
+    assert!(package_manifest.contains("fuzzing = []"));
+    assert!(!package_manifest.contains("default = [\"cli\", \"fuzzing\"]"));
+    assert!(fuzz_manifest.contains("features = [\"fuzzing\"]"));
+
+    for (path, source) in rust_sources_below("fuzz/fuzz_targets") {
+        for module in ["rtf", "model", "layout", "pdf"] {
+            let forbidden = format!("open_rtf_converter::{module}");
+            assert!(
+                !source.contains(&forbidden),
+                "{} bypasses fuzz hooks through raw module {module}",
+                path.display()
+            );
+        }
+    }
 }

@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-open-rtf-converter = { path = "..", default-features = false }
+open-rtf-converter = { path = "..", default-features = false, features = ["fuzzing"] }
 
 [[bin]]
 name = "rtf_lexer"

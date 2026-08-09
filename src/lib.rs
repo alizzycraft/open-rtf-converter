@@ -49,6 +49,24 @@ pub mod pdf;
 #[doc(hidden)]
 pub mod rtf;
 
+/// Unstable, non-default entry points used only by the repository's fuzz crate.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing {
+    use crate::rtf::{Lexer, parse_rtf_bytes_with_options};
+    use crate::{RtfLimits, RtfParseOptions};
+
+    /// Exercises bounded tokenization without exposing lexer tokens or errors.
+    pub fn exercise_lexer(input: &[u8], limits: RtfLimits) {
+        let _ = Lexer::new(input, limits).tokenize();
+    }
+
+    /// Exercises bounded parsing without exposing the normalized model.
+    pub fn exercise_parser(input: &[u8], options: &RtfParseOptions) {
+        let _ = parse_rtf_bytes_with_options(input, options);
+    }
+}
+
 pub use config::{
     ActiveContentPolicy, CompatibilityMode, LimitValidationError, PdfLinkPolicy, RtfLimits,
     RtfParseOptions,
@@ -67,3 +85,10 @@ pub use fonts::{
 pub use inspect::{InspectError, RtfInspection, inspect_rtf};
 pub use pdf::{PassivePdfError, PassivePdfIssue, PdfRenderError, audit_passive_pdf_bytes};
 pub use rtf::ParseError;
+
+#[cfg(test)]
+extern crate self as open_rtf_converter;
+#[cfg(test)]
+mod model_invariant_tests;
+#[cfg(test)]
+mod security_tests;

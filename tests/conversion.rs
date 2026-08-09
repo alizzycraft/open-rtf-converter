@@ -7,10 +7,10 @@ use lopdf::Document as PdfDocument;
 use open_rtf_converter::ConvertReport;
 #[cfg(feature = "cli")]
 use open_rtf_converter::convert_rtf_file_to_pdf;
-use open_rtf_converter::rtf::ParseError;
 use open_rtf_converter::{
     ConvertError, ConvertOptions, ConvertOptionsError, FontAsset, FontAssetStyle, FontProvider,
-    FontProviderLimits, LimitValidationError, RtfLimits, RtfParseOptions, convert_rtf_to_pdf,
+    FontProviderLimits, LimitValidationError, ParseError, RtfLimits, RtfParseOptions,
+    convert_rtf_to_pdf,
 };
 use tempfile::tempdir;
 

@@ -1,9 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use open_rtf_converter::RtfLimits;
-use open_rtf_converter::rtf::Lexer;
+use open_rtf_converter::{RtfLimits, fuzzing::exercise_lexer};
 
 fuzz_target!(|data: &[u8]| {
-    let _ = Lexer::new(data, RtfLimits::browser_defaults()).tokenize();
+    exercise_lexer(data, RtfLimits::browser_defaults());
 });

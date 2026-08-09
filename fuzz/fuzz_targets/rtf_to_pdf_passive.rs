@@ -1,8 +1,9 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use open_rtf_converter::pdf::audit_passive_pdf_bytes;
-use open_rtf_converter::{ConvertOptions, RtfParseOptions, convert_rtf_to_pdf};
+use open_rtf_converter::{
+    ConvertOptions, RtfParseOptions, audit_passive_pdf_bytes, convert_rtf_to_pdf,
+};
 
 fuzz_target!(|data: &[u8]| {
     let options = ConvertOptions {
