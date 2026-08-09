@@ -12,6 +12,7 @@ use pdf_writer::types::{
     TextRenderingMode, UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
+use thiserror::Error;
 use ttf_parser::{Face, name_id};
 
 use crate::fonts::{FontAsset, FontProvider, FontSession, font_asset_pair_kerning_points};
@@ -27,6 +28,22 @@ use crate::model::{
     StaticImageVectorCommand, StaticImageVectorFillRule, StaticImageVectorPathSegment, TextRelief,
     UnderlineStyle,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PdfRenderError {
+    #[error("PDF object count exceeded limit: {count} > {limit}")]
+    TooManyObjects { count: usize, limit: usize },
+    #[error("PDF object identifier overflow")]
+    ObjectIdOverflow,
+    #[error("invalid prepared font reference at asset index {asset_index}")]
+    InvalidPreparedFontReference { asset_index: usize },
+    #[error("invalid planned image reference on page {page_index}")]
+    InvalidImageReference { page_index: usize },
+    #[error("pdf-writer emitted an unexpected Unicode CMap template")]
+    UnexpectedUnicodeCmapTemplate,
+    #[error("PDF plan and writer diverged: {context}")]
+    InternalPlanMismatch { context: &'static str },
+}
 
 const HELVETICA_REGULAR: &[u8] = b"F1";
 const HELVETICA_BOLD: &[u8] = b"F2";

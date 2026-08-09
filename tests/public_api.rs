@@ -3,8 +3,8 @@ use std::error::Error;
 use open_rtf_converter::{
     ActiveContentPolicy, CompatibilityMode, ConvertError, ConvertOptions, ConvertOptionsError,
     Converter, InspectError, LimitValidationError, ParseError, PassivePdfError, PdfLinkPolicy,
-    RtfInspection, RtfLimits, RtfParseOptions, audit_passive_pdf_bytes, convert_rtf_bytes_to_pdf,
-    convert_rtf_to_pdf, inspect_rtf,
+    PdfRenderError, RtfInspection, RtfLimits, RtfParseOptions, audit_passive_pdf_bytes,
+    convert_rtf_bytes_to_pdf, convert_rtf_to_pdf, inspect_rtf,
 };
 
 fn assert_public_error<E: Error>() {}
@@ -60,6 +60,7 @@ fn supported_root_facade_exposes_configuration_and_error_types() {
     assert_public_error::<LimitValidationError>();
     assert_public_error::<ParseError>();
     assert_public_error::<PassivePdfError>();
+    assert_public_error::<PdfRenderError>();
 
     let options = RtfParseOptions {
         compatibility_mode: CompatibilityMode::WordCompatiblePassive,

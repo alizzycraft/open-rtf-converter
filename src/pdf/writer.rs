@@ -49,6 +49,13 @@ pub fn render_pdf_with_font_provider(
     layout: &LayoutDocument,
     font_provider: Option<&FontProvider>,
 ) -> Vec<u8> {
+    try_render_pdf_with_font_provider(layout, font_provider).unwrap_or_default()
+}
+
+fn try_render_pdf_with_font_provider(
+    layout: &LayoutDocument,
+    font_provider: Option<&FontProvider>,
+) -> Result<Vec<u8>, PdfRenderError> {
     let mut pdf = Pdf::new();
     let catalog_id = Ref::new(1);
     let page_tree_id = Ref::new(2);
@@ -194,14 +201,14 @@ pub fn render_pdf_with_font_provider(
 
     if let Some(to_unicode_ref) = symbol_to_unicode_ref {
         let symbol_to_unicode =
-            passive_to_unicode_cmap(b"OpenRtfConverter-Symbol", PASSIVE_SYMBOL_TO_UNICODE);
+            passive_to_unicode_cmap(b"OpenRtfConverter-Symbol", PASSIVE_SYMBOL_TO_UNICODE)?;
         pdf.stream(to_unicode_ref, &symbol_to_unicode);
     }
     if let Some(to_unicode_ref) = zapf_dingbats_to_unicode_ref {
         let zapf_dingbats_to_unicode = passive_to_unicode_cmap(
             b"OpenRtfConverter-ZapfDingbats",
             PASSIVE_ZAPF_DINGBATS_TO_UNICODE,
-        );
+        )?;
         pdf.stream(to_unicode_ref, &zapf_dingbats_to_unicode);
     }
     for (font_idx, to_unicode_ref) in extended_latin_to_unicode_refs.iter().enumerate() {
@@ -210,10 +217,10 @@ pub fn render_pdf_with_font_provider(
         };
         let entries = extended_latin_usage[font_idx].to_unicode_entries();
         let extended_latin_to_unicode =
-            passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", &entries);
+            passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", &entries)?;
         pdf.stream(to_unicode_ref, &extended_latin_to_unicode);
     }
-    write_supplied_pdf_fonts(&mut pdf, font_provider, &supplied_fonts);
+    write_supplied_pdf_fonts(&mut pdf, font_provider, &supplied_fonts)?;
 
     for (page_idx, page) in layout.pages.iter().enumerate() {
         let page_images = image_refs.get(page_idx).map(Vec::as_slice).unwrap_or(&[]);
@@ -300,12 +307,12 @@ pub fn render_pdf_with_font_provider(
         });
     }
 
-    pdf.finish()
+    Ok(pdf.finish())
 }
 
 pub(crate) fn render_pdf_with_font_session(
     layout: &LayoutDocument,
     font_session: &FontSession<'_>,
-) -> Vec<u8> {
-    render_pdf_with_font_provider(layout, Some(font_session.provider()))
+) -> Result<Vec<u8>, PdfRenderError> {
+    try_render_pdf_with_font_provider(layout, Some(font_session.provider()))
 }

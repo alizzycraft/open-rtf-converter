@@ -879,3 +879,35 @@
         audit_passive_pdf_bytes(&below_threshold).unwrap();
         audit_passive_pdf_bytes(&at_threshold).unwrap();
     }
+    #[test]
+    fn malformed_unicode_cmap_template_returns_typed_error() {
+        assert_eq!(
+            standards_compliant_to_unicode_cmap(b"not a cmap".to_vec()),
+            Err(PdfRenderError::UnexpectedUnicodeCmapTemplate)
+        );
+    }
+
+    #[test]
+    fn invalid_supplied_font_reference_returns_typed_error() {
+        let supplied = SuppliedPdfFont {
+            asset_index: usize::MAX,
+            resource_name: b"TF1".to_vec(),
+            base_name: b"Invalid".to_vec(),
+            type0_ref: Ref::new(1),
+            cid_ref: Ref::new(2),
+            descriptor_ref: Ref::new(3),
+            font_file_ref: Ref::new(4),
+            cid_to_gid_map_ref: Ref::new(5),
+            to_unicode_ref: Ref::new(6),
+            used_glyphs: Vec::new(),
+        };
+        let mut pdf = Pdf::new();
+        let provider = FontProvider::browser_safe_defaults();
+
+        assert_eq!(
+            write_supplied_pdf_fonts(&mut pdf, Some(&provider), &[supplied]),
+            Err(PdfRenderError::InvalidPreparedFontReference {
+                asset_index: usize::MAX
+            })
+        );
+    }

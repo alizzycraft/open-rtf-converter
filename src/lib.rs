@@ -65,5 +65,5 @@ pub use fonts::{
     FontProviderLimits,
 };
 pub use inspect::{InspectError, RtfInspection, inspect_rtf};
-pub use pdf::{PassivePdfError, PassivePdfIssue, audit_passive_pdf_bytes};
+pub use pdf::{PassivePdfError, PassivePdfIssue, PdfRenderError, audit_passive_pdf_bytes};
 pub use rtf::ParseError;

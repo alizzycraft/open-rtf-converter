@@ -16,8 +16,9 @@ use crate::layout::{
 };
 use crate::model::{Document, FontDef, ImageFormat, StaticImageVectorCommand};
 use crate::pdf::{
-    PassivePdfError, audit_passive_pdf_bytes, estimate_passive_pdf_object_count_with_font_session,
-    passive_base14_covers_latin_extended_char, render_pdf_with_font_session,
+    PassivePdfError, PdfRenderError, audit_passive_pdf_bytes,
+    estimate_passive_pdf_object_count_with_font_session, passive_base14_covers_latin_extended_char,
+    render_pdf_with_font_session,
 };
 use crate::rtf::{ParseError, parse_rtf_bytes_with_options};
 
@@ -112,6 +113,8 @@ pub enum ConvertError {
     WriteOutput(#[source] std::io::Error),
     #[error(transparent)]
     PdfSafety(#[from] PassivePdfError),
+    #[error(transparent)]
+    PdfRender(#[from] PdfRenderError),
     #[error("rendered PDF output exceeded limit: {size} bytes > {limit} bytes")]
     OutputTooLarge { size: usize, limit: usize },
     #[error("rendered PDF layout item count exceeded limit: {items} items > {limit} items")]
@@ -198,7 +201,7 @@ fn convert_rtf_with_prepared_fonts(
             limit: object_limit,
         });
     }
-    let pdf = render_pdf_with_font_session(&layout, &font_session);
+    let pdf = render_pdf_with_font_session(&layout, &font_session)?;
     let output_limit = options.parse_options.limits.max_pdf_output_bytes;
     if pdf.len() > output_limit {
         return Err(ConvertError::OutputTooLarge {

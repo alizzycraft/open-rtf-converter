@@ -34,7 +34,7 @@ pub(in crate::pdf) fn font_resource_for_style(
 pub(in crate::pdf) fn passive_to_unicode_cmap(
     name: &'static [u8],
     mappings: &[(u8, char)],
-) -> Vec<u8> {
+) -> Result<Vec<u8>, PdfRenderError> {
     let mut cmap = UnicodeCmap::<u8>::new(
         Name(name),
         SystemInfo {
@@ -49,7 +49,9 @@ pub(in crate::pdf) fn passive_to_unicode_cmap(
     standards_compliant_to_unicode_cmap(cmap.finish().into_vec())
 }
 
-pub(in crate::pdf) fn standards_compliant_to_unicode_cmap(mut cmap: Vec<u8>) -> Vec<u8> {
+pub(in crate::pdf) fn standards_compliant_to_unicode_cmap(
+    mut cmap: Vec<u8>,
+) -> Result<Vec<u8>, PdfRenderError> {
     // pdf-writer 0.15 emits a generic CMapType 0 declaration, while the PDF
     // specification requires a ToUnicode CMap to declare CMapType 2.
     const GENERIC_DECLARATION: &[u8] = b"/CMapType 0 def";
@@ -57,27 +59,34 @@ pub(in crate::pdf) fn standards_compliant_to_unicode_cmap(mut cmap: Vec<u8>) -> 
     let declaration = cmap
         .windows(GENERIC_DECLARATION.len())
         .position(|window| window == GENERIC_DECLARATION)
-        .expect("pdf-writer UnicodeCmap declaration");
+        .ok_or(PdfRenderError::UnexpectedUnicodeCmapTemplate)?;
     cmap[declaration..declaration + GENERIC_DECLARATION.len()]
         .copy_from_slice(TO_UNICODE_DECLARATION);
-    cmap
+    Ok(cmap)
 }
 
 pub(in crate::pdf) fn write_supplied_pdf_fonts(
     pdf: &mut Pdf,
     font_provider: Option<&FontProvider>,
     supplied_fonts: &[SuppliedPdfFont],
-) {
+) -> Result<(), PdfRenderError> {
     let Some(font_provider) = font_provider else {
-        return;
+        return supplied_fonts
+            .is_empty()
+            .then_some(())
+            .ok_or(PdfRenderError::InvalidPreparedFontReference { asset_index: 0 });
     };
     for supplied in supplied_fonts {
-        let Some(asset) = font_provider.assets.get(supplied.asset_index) else {
-            continue;
-        };
-        let Ok(face) = Face::parse(asset.bytes(), 0) else {
-            continue;
-        };
+        let asset = font_provider.assets.get(supplied.asset_index).ok_or(
+            PdfRenderError::InvalidPreparedFontReference {
+                asset_index: supplied.asset_index,
+            },
+        )?;
+        let face = Face::parse(asset.bytes(), 0).map_err(|_| {
+            PdfRenderError::InvalidPreparedFontReference {
+                asset_index: supplied.asset_index,
+            }
+        })?;
         let system_info = supplied_cid_system_info();
 
         pdf.type0_font(supplied.type0_ref)
@@ -148,9 +157,10 @@ pub(in crate::pdf) fn write_supplied_pdf_fonts(
         for glyph in &supplied.used_glyphs {
             cmap.pair(glyph.cid, glyph.unicode);
         }
-        let cmap = standards_compliant_to_unicode_cmap(cmap.finish().into_vec());
+        let cmap = standards_compliant_to_unicode_cmap(cmap.finish().into_vec())?;
         pdf.stream(supplied.to_unicode_ref, &cmap);
     }
+    Ok(())
 }
 
 pub(in crate::pdf) fn supplied_cid_to_gid_map(glyphs: &[SuppliedGlyph]) -> Vec<u8> {
