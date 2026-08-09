@@ -4,6 +4,7 @@ use std::path::Path;
 
 use jpeg_decoder::{Decoder as TestJpegDecoder, PixelFormat as TestJpegPixelFormat};
 use lopdf::{Document as PdfDocument, Object as PdfObject};
+use open_rtf_converter::audit_passive_pdf_bytes;
 #[cfg(feature = "cli")]
 use open_rtf_converter::convert_rtf_file_to_pdf;
 use open_rtf_converter::layout::{LayoutEngine, LayoutItem, LineJoin, LineStyle};
@@ -23,7 +24,6 @@ use open_rtf_converter::model::{
     TableCellTextDirection, TableRowAlignment, TextRelief, UnderlineStyle,
     inline_image_marker_index,
 };
-use open_rtf_converter::pdf::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{
     LexError, ParseError, parse_rtf_bytes, parse_rtf_bytes_with_options,
 };

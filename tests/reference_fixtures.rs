@@ -2,7 +2,7 @@ use std::path::Path;
 
 use lopdf::Document as PdfDocument;
 use lopdf::content::Content;
-use open_rtf_converter::pdf::audit_passive_pdf_bytes;
+use open_rtf_converter::audit_passive_pdf_bytes;
 use open_rtf_converter::{ConvertOptions, convert_rtf_to_pdf};
 
 const MANIFEST: &str = include_str!("../fixtures/reference/expected-policy.json");

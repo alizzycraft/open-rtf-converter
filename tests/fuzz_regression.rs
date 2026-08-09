@@ -1,6 +1,6 @@
 use std::panic;
 
-use open_rtf_converter::pdf::audit_passive_pdf_bytes;
+use open_rtf_converter::audit_passive_pdf_bytes;
 use open_rtf_converter::rtf::{Lexer, parse_rtf_bytes_with_options};
 use open_rtf_converter::{ConvertOptions, RtfLimits, RtfParseOptions, convert_rtf_to_pdf};
 

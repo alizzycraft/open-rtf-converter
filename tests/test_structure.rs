@@ -26,7 +26,13 @@ fn decomposed_targets_preserve_the_recorded_test_inventory() {
     assert_eq!(module_test_count("tests/reference"), 4);
     assert_eq!(module_test_count("src/rtf/parser_tests"), 845);
     assert_eq!(module_test_count("src/layout_tests"), 319);
-    assert_eq!(module_test_count("src/pdf_tests"), 96);
+    assert_eq!(module_test_count("src/pdf_tests"), 78);
+    assert_eq!(
+        test_attribute_count(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/pdf/audit_tests.rs")
+        ),
+        18
+    );
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for relative_path in [
