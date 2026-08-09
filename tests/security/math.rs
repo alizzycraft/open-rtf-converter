@@ -167,7 +167,8 @@ fn office_math_fractions_render_readable_passive_text() {
     let rendered_text = decoded_pdf_text(&content);
     assert!(rendered_text.contains("Before x+1"));
     assert!(rendered_text.contains("y After"));
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let page = &layout.pages[0];
     let numerator_fragment = page.items.iter().find_map(|item| match item {
         LayoutItem::Text(fragment) if fragment.text == "x" => Some(fragment),
@@ -1859,7 +1860,8 @@ fn office_math_group_characters_render_passive_lines_without_fallback_leakage() 
     assert!(over_style.overline);
     let under_style = run_style_for_text(&parsed.document, "y").expect("under group run");
     assert_eq!(under_style.underline, UnderlineStyle::Single);
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let passive_over_group_lines = layout.pages[0]
         .items
         .iter()
@@ -2333,7 +2335,8 @@ fn office_math_nary_hidden_limits_are_stripped_passively() {
             .any(|name| name.starts_with(b"TF")),
         "hidden-limit n-ary operator should use a passive supplied font"
     );
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let operator_position = layout.pages[0]
         .items
         .iter()
@@ -2987,7 +2990,8 @@ fn office_math_phantoms_are_stripped_from_passive_output() {
         rendered_text.contains("Before  After"),
         "visible text around Office math phantom missing from PDF text: {rendered_text:?}"
     );
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let before_x = layout.pages[0]
         .items
         .iter()
@@ -3075,7 +3079,8 @@ fn office_math_phantom_zero_width_suppresses_hidden_advance() {
         parsed.diagnostics
     );
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let before_x = layout.pages[0]
         .items
         .iter()

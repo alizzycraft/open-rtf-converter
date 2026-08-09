@@ -1953,7 +1953,8 @@ fn partial_office_shape_shadow_opacity_renders_passively_without_property_leakag
     )
     .unwrap();
     audit_passive_pdf_bytes(&output.pdf).unwrap();
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -2045,7 +2046,8 @@ fn invalid_office_shape_shadow_opacity_is_stripped_without_payload_leakage() {
         },
     )
     .unwrap();
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         !layout
             .pages
@@ -2658,7 +2660,8 @@ fn office_shape_pattern_fill_type_renders_passively_without_property_leakage() {
         );
     }
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -2758,7 +2761,8 @@ fn non_rectangular_office_shape_pattern_fills_are_clipped_without_property_leaka
         );
     }
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -3034,7 +3038,8 @@ fn non_rectangular_office_shape_gradient_fills_are_clipped_without_property_leak
         })
     );
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -3391,7 +3396,8 @@ fn invalid_office_shape_opacity_is_stripped_without_payload_leakage() {
         },
     )
     .unwrap();
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         !layout
             .pages
@@ -11033,7 +11039,8 @@ fn square_wrapped_static_shape_excludes_following_text_without_payload_leakage()
     assert!(shape.text_wrap);
     assert_eq!(shape.wrap_side, StaticImageWrapSide::Both);
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let page = &layout.pages[0];
     let shape_right = page
         .items
@@ -11619,7 +11626,8 @@ fn office_shape_diamond_arrowhead_renders_passively_without_property_leakage() {
             "forbidden diamond arrowhead content leaked to text: {forbidden}"
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -11749,7 +11757,8 @@ fn office_shape_oval_arrowhead_renders_passively_without_property_leakage() {
             "forbidden oval arrowhead content leaked to text: {forbidden}"
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -11879,7 +11888,8 @@ fn office_shape_stealth_arrowhead_renders_passively_without_property_leakage() {
             "forbidden stealth arrowhead content leaked to text: {forbidden}"
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -12009,7 +12019,8 @@ fn office_shape_block_arrowhead_renders_passively_without_property_leakage() {
             "forbidden block arrowhead content leaked to text: {forbidden}"
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -12156,7 +12167,8 @@ fn office_shape_arrowhead_size_renders_passively_without_property_leakage() {
             "forbidden arrowhead size content leaked to text: {forbidden}"
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages

@@ -127,7 +127,8 @@ fn inline_wmf_picture_stays_in_its_surrounding_safe_paragraph() {
             .any(|ch| inline_image_marker_index(&ch.to_string()) == Some(0))
     }));
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let page = &layout.pages[0];
     let image = page
         .items

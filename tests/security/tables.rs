@@ -915,7 +915,8 @@ fn table_cell_fit_text_renders_bounded_passive_scaling_without_payload_leakage()
         parsed.diagnostics
     );
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let fragments = layout.pages[0]
         .items
         .iter()
@@ -1117,7 +1118,8 @@ fn table_padding_unit_and_spacing_controls_warn_without_payload_leakage() {
             .contains("table cell spacing rendered as bounded passive border gaps")
     }));
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let text_x = |needle: &str| {
         layout.pages[0]
             .items
@@ -1669,7 +1671,8 @@ fn nested_table_content_normalizes_passively_without_control_leakage() {
         parsed.diagnostics
     );
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let line_count = layout
         .pages
         .iter()

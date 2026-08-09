@@ -2961,7 +2961,8 @@ fn word_layout_compatibility_controls_are_classified_without_payload_leakage() {
     assert!(parsed.document.blocks.iter().all(|block| {
         !matches!(block, Block::Paragraph(paragraph) if !paragraph.style.two_in_one)
     }));
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let fragments = layout.pages[0]
         .items
         .iter()
@@ -4922,7 +4923,8 @@ fn office_flowchart_document_variants_render_passively_without_payload_leakage()
         );
     }
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let overlay_path_count = layout
         .pages
         .iter()

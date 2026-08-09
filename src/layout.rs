@@ -37,20 +37,20 @@ use crate::model::{
     DOCUMENT_WORDS_MARKER, Document, ENDNOTE_REFERENCE_MARKER, ENDNOTE_REFERENCE_MARKER_END,
     EndnotePlacement, FOOTNOTE_REFERENCE_MARKER, FOOTNOTE_REFERENCE_MARKER_END, FontDef,
     FontFamilyHint, FontPitch, FootnotePlacement, ImageFormat, LineNumberRestart,
-    NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering, PAGE_NUMBER_MARKER,
-    PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER, PASSIVE_MATH_INLINE_LEAD_MARKER,
-    PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat, PageSettings, PageVerticalAlignment,
-    Paragraph, ParagraphBorders, ParagraphFrameVerticalAlignment, ParagraphStyle,
-    PassiveMathFractionPart, PassiveMathLimitPart, Run, SECTION_NUMBER_MARKER,
-    SECTION_PAGES_MARKER, ShadingPattern, StaticImage, StaticImageVectorCommand,
-    StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead, StaticShapeHorizontalAnchor,
-    StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin, StaticShapeTextVerticalAnchor,
-    StaticShapeVerticalAnchor, TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE,
-    TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS,
-    TOTAL_PAGES_MARKER, TabAlignment, TabLeader, Table, TableCell, TableCellBorder,
-    TableCellHorizontalMerge, TableCellTextDirection, TableCellVerticalAlign,
-    TableCellVerticalMerge, TableRow, TableRowAlignment, TableRowWrapMargins, UnderlineStyle,
-    inline_image_marker_index,
+    ModelInvariantError, NESTED_TABLE_ANCHOR_MARKER, NoteNumberRestart, NoteNumbering,
+    PAGE_NUMBER_MARKER, PASSIVE_ADVANCE_MARKER, PASSIVE_MATH_FRACTION_RULE_MARKER,
+    PASSIVE_MATH_INLINE_LEAD_MARKER, PASSIVE_MATH_STACK_ANCHOR_MARKER, PageNumberFormat,
+    PageSettings, PageVerticalAlignment, Paragraph, ParagraphBorders,
+    ParagraphFrameVerticalAlignment, ParagraphStyle, PassiveMathFractionPart, PassiveMathLimitPart,
+    Run, SECTION_NUMBER_MARKER, SECTION_PAGES_MARKER, ShadingPattern, StaticImage,
+    StaticImageVectorCommand, StaticImageVectorFillRule, StaticShape, StaticShapeArrowhead,
+    StaticShapeHorizontalAnchor, StaticShapeKind, StaticShapeLineCap, StaticShapeLineJoin,
+    StaticShapeTextVerticalAnchor, StaticShapeVerticalAnchor,
+    TABLE_ROW_DYNAMIC_VERTICAL_BOTTOM_OFFSET_BASE, TABLE_ROW_DYNAMIC_VERTICAL_CENTER_OFFSET_BASE,
+    TABLE_ROW_DYNAMIC_VERTICAL_OFFSET_SPAN_TWIPS, TOTAL_PAGES_MARKER, TabAlignment, TabLeader,
+    Table, TableCell, TableCellBorder, TableCellHorizontalMerge, TableCellTextDirection,
+    TableCellVerticalAlign, TableCellVerticalMerge, TableRow, TableRowAlignment,
+    TableRowWrapMargins, UnderlineStyle, inline_image_marker_index, validate_document_invariants,
 };
 
 const TWIPS_PER_POINT: f32 = 20.0;
@@ -964,11 +964,28 @@ struct ResolvedCellSpacing {
 }
 
 impl LayoutEngine {
-    pub fn layout(document: &Document) -> LayoutDocument {
+    /// Validate and lay out a temporarily public normalized document.
+    pub fn try_layout(document: &Document) -> Result<LayoutDocument, ModelInvariantError> {
+        Self::try_layout_with_font_provider(document, None)
+    }
+
+    /// Validate and lay out a normalized document with supplied fonts.
+    pub fn try_layout_with_font_provider(
+        document: &Document,
+        font_provider: Option<&FontProvider>,
+    ) -> Result<LayoutDocument, ModelInvariantError> {
+        validate_document_invariants(document)?;
+        Ok(Self::layout_with_font_provider(document, font_provider))
+    }
+
+    /// Internal compatibility helper for already validated parser output.
+    #[cfg(test)]
+    pub(crate) fn layout(document: &Document) -> LayoutDocument {
         Self::layout_with_font_provider(document, None)
     }
 
-    pub fn layout_with_font_provider(
+    /// Internal compatibility helper for already validated parser output.
+    pub(crate) fn layout_with_font_provider(
         document: &Document,
         font_provider: Option<&FontProvider>,
     ) -> LayoutDocument {

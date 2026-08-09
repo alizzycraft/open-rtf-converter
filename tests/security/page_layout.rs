@@ -4252,7 +4252,8 @@ fn extended_word_borders_stay_passive_without_control_leakage() {
         "extended border styles should normalize without border-style approximation: {:?}",
         parsed.diagnostics
     );
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let line_styles = layout
         .pages
         .iter()
@@ -4910,7 +4911,8 @@ fn ordinary_frame_text_distance_remains_bounded_passive_geometry() {
         vec![(0, 0), (180, 180), (240, 0), (0, 360), (240, 360), (0, 0)]
     );
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert_eq!(layout.pages.len(), 6);
     let expected_before_x = [36.0, 117.0, 36.0, 108.0, 120.0, 36.0];
     for (page_index, expected_x) in expected_before_x.into_iter().enumerate() {
@@ -5143,7 +5145,8 @@ fn ordinary_frame_vertical_alignments_remain_bounded_passive_geometry() {
         ]
     );
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert_eq!(layout.pages.len(), 7);
     let frame_baseline = |page_index: usize| {
         layout.pages[page_index]
@@ -5220,7 +5223,8 @@ fn ordinary_frame_vertical_precedence_and_edges_remain_bounded_passive() {
         ]
     );
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert_eq!(layout.pages.len(), 10);
     let frame_baseline = |page_index: usize| {
         layout.pages[page_index]
@@ -5864,7 +5868,8 @@ fn paragraph_frame_text_direction_remains_passive_rotated_text() {
         }));
     }
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let rotations = layout
         .pages
         .iter()
@@ -6157,7 +6162,8 @@ fn partial_office_shape_fill_and_line_opacity_render_passively_without_property_
     )
     .unwrap();
     audit_passive_pdf_bytes(&output.pdf).unwrap();
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -8873,7 +8879,8 @@ fn office_shape_round_line_join_renders_passively_without_property_leakage() {
         );
     }
 
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -9014,7 +9021,8 @@ fn invalid_office_shape_line_join_is_stripped_without_payload_leakage() {
             "forbidden invalid lineJoinStyle drawing content leaked to text: {forbidden}"
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         !layout
             .pages
@@ -9490,7 +9498,8 @@ fn office_shape_named_weighted_line_style_aliases_render_passively() {
     )
     .unwrap();
     audit_passive_pdf_bytes(&output.pdf).unwrap();
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     let line_styles = layout
         .pages
         .iter()
@@ -9631,7 +9640,8 @@ fn office_shape_weighted_line_style_renders_passively_without_property_leakage()
             String::from_utf8_lossy(forbidden)
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages
@@ -9726,7 +9736,8 @@ fn office_shape_round_line_cap_renders_passively_without_property_leakage() {
             "forbidden line cap drawing content leaked to text: {forbidden}"
         );
     }
-    let layout = LayoutEngine::layout(&parsed.document);
+    let layout = LayoutEngine::try_layout(&parsed.document)
+        .expect("parsed documents satisfy model invariants");
     assert!(
         layout
             .pages

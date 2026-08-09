@@ -218,6 +218,9 @@ fn passive_font_substitution_diagnostics(
     let mut seen = HashSet::<(String, PdfFontFamily)>::new();
     let used_font_indexes = collect_visible_font_indexes(layout);
     for font in &document.fonts {
+        if font.name.trim().is_empty() {
+            continue;
+        }
         if !used_font_indexes.contains(&font.index) {
             continue;
         }

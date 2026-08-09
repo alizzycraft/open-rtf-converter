@@ -1,3 +1,11 @@
+mod invariants;
+
+pub use invariants::ModelInvariantError;
+pub(crate) use invariants::{
+    normalize_missing_color_references, normalize_missing_font_references,
+    validate_document_invariants,
+};
+
 pub const PAGE_NUMBER_MARKER: &str = "\u{f0000}";
 pub const TOTAL_PAGES_MARKER: &str = "\u{f0001}";
 pub const SECTION_NUMBER_MARKER: &str = "\u{f0002}";

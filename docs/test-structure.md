@@ -12,9 +12,10 @@ The large test targets keep their established Cargo target names while test func
 | Layout unit tests | 9 | 319 |
 | PDF renderer unit tests | 5 | 78 |
 | PDF audit unit tests | 1 | 18 |
+| Model invariant integration tests | 1 | 5 |
 
-The domain files are under `tests/{security,conversion,reference}/`, `src/rtf/parser_tests/`, `src/rtf/parser/media/`, `src/layout_tests/`, `src/pdf_tests/`, and beside the renderer-independent audit at `src/pdf/audit_tests.rs`. `tests/test_structure.rs` locks these inventories so a later move cannot silently drop a test. The remaining crate, CLI, public-facade, fuzz-regression, WASM-policy, example, and doctest coverage remains in its existing focused files.
+The domain files are under `tests/{security,conversion,reference}/`, `src/rtf/parser_tests/`, `src/rtf/parser/media/`, `src/layout_tests/`, `src/pdf_tests/`, beside the renderer-independent audit at `src/pdf/audit_tests.rs`, and in `tests/model_invariants.rs`. `tests/test_structure.rs` locks the decomposed inventories so a later move cannot silently drop a test. The remaining crate, CLI, public-facade, model-invariant, fuzz-regression, WASM-policy, example, and doctest coverage remains in focused files.
 
-The repository now contains 2,430 `#[test]` functions. Including the crate doctest and the two baseline-example tests, the verified harness inventory is 2,433 tests; the increase over the earlier 2,402 baseline comes from the validation, public-inspection, CLI-policy, structure-guard, and explicit media-decoder limit tests added by plan items.
+The repository now contains 2,439 `#[test]` functions. Including the crate doctest and the two baseline-example tests, the verified harness inventory is 2,442 tests; the increase over the earlier 2,402 baseline comes from validation, public-inspection, CLI-policy, structure-guard, explicit media-decoder limit, and malformed-model invariant tests added by plan items.
 
 This is a structural organization only. Test functions and assertions were moved verbatim; relative compile-time fixture paths gained one parent component because the source files are now one directory deeper.

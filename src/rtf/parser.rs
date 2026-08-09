@@ -57,6 +57,8 @@ use crate::model::{
     TableCellBorders, TableCellHorizontalMerge, TableCellPadding, TableCellSpacing,
     TableCellTextDirection, TableCellVerticalAlign, TableCellVerticalMerge, TableRow,
     TableRowAlignment, TableRowWrapMargins, TextRelief, UnderlineStyle, inline_image_marker,
+    normalize_missing_color_references, normalize_missing_font_references,
+    validate_document_invariants,
 };
 
 use super::lexer::{Control, LexError, Lexer, Token, TokenKind};
@@ -104,6 +106,8 @@ pub enum ParseError {
     ActiveContentRejected { feature: String, offset: usize },
     #[error("invalid RTF limits: {0}")]
     InvalidLimits(#[from] LimitValidationError),
+    #[error("normalized document invariant failed: {0}")]
+    ModelInvariant(#[from] crate::model::ModelInvariantError),
 }
 
 #[derive(Debug, Clone)]
@@ -2248,6 +2252,9 @@ impl Parser {
         self.emit_deferred_note_diagnostics();
         self.retain_visible_document_blocks_and_remap_note_indices();
         self.enforce_retained_document_block_limit(self.last_offset)?;
+        normalize_missing_font_references(&mut self.document);
+        normalize_missing_color_references(&mut self.document);
+        validate_document_invariants(&self.document)?;
 
         Ok(ParseOutput {
             document: self.document,
