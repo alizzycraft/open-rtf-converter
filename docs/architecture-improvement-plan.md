@@ -1144,7 +1144,7 @@ This table is the implementation backlog. Update the checkbox and add a commit o
 | [x] | DEC-03 | Extract parser JPEG, PNG, and DIB modules | BASE-03, DEC-01 | Three independently limit-tested media modules, 57 existing raster tests, full native/security/reference/fuzz/Clippy/WASM gates, and unchanged sample hash passed on 2026-08-09 |
 | [x] | DEC-04 | Extract parser EMF and WMF modules | DEC-03 | Explicit active-limit plumbing, 187 EMF/71 WMF tests, full native/security/reference/fuzz/Clippy/WASM gates, and unchanged sample hash passed on 2026-08-09 |
 | [x] | DEC-05 | Extract parser formula, formatting, text, and shape helpers | DEC-03 | 97 field/formula, 70 text-encoding, and 30 shape tests plus full native/security/reference/fuzz/Clippy/WASM gates and unchanged sample hash passed on 2026-08-09 |
-| [ ] | DEC-06 | Extract layout notes, tables, wrapping, metrics, page, and late-field modules | DEC-01 | Layout/reference fixtures remain stable |
+| [x] | DEC-06 | Extract layout notes, tables, wrapping, metrics, page, and late-field modules | DEC-01 | Eight documented layout modules, all 319 layout tests, full native/security/reference/fuzz/Clippy/WASM gates, and unchanged sample PDF bytes/hash/page/object counts passed on 2026-08-09 |
 | [ ] | DEC-07 | Extract PDF images, fonts, vector, text, and writer modules | DEC-02 | Emitted PDFs remain byte-identical |
 | [ ] | MODEL-01 | Add transitional model invariant validator | DEC-01 | Deliberately malformed model tests return typed errors |
 | [ ] | MODEL-02 | Replace note/image parallel vectors with aggregate records and typed IDs | MODEL-01, DEC-06 | No parallel note/image metadata remains |
