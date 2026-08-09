@@ -55,7 +55,7 @@
         let prepared = PreparedFontCatalog::prepare(&provider).unwrap();
         let font_session = FontSession::new(&prepared);
         let layout = LayoutEngine::layout_with_font_session(&document, &font_session);
-        let plan = plan_pdf(&layout, &font_session, usize::MAX).unwrap();
+        let mut plan = plan_pdf(&layout, &font_session, usize::MAX).unwrap();
 
         assert!(std::ptr::eq(plan.layout(), &layout));
         assert_eq!(font_bytes, plan.font_session().provider().assets[0].bytes.as_ptr());
@@ -69,7 +69,7 @@
         assert_eq!(plan.images()[0].format, ImageFormat::Rgb8);
         assert_eq!(plan.pages()[0].image_count, 1);
         assert!(
-            std::mem::size_of::<PlannedImage>() <= std::mem::size_of::<usize>() * 4,
+            std::mem::size_of::<PlannedImage>() <= std::mem::size_of::<usize>() * 8,
             "planned images must not own image payloads"
         );
         assert_eq!(
@@ -78,6 +78,7 @@
         );
 
         let pdf = render_pdf_plan(&plan).unwrap();
+        assert_eq!(render_pdf_plan(&plan).unwrap(), pdf);
         let parsed = lopdf::Document::load_mem(&pdf).unwrap();
 
         assert_eq!(plan.object_count(), parsed.objects.len());
@@ -96,6 +97,14 @@
                 .any(|window| window == b"/Subtype /Image")
         );
         audit_passive_pdf_bytes(&pdf).unwrap();
+
+        plan.corrupt_first_supplied_encoding_for_test();
+        assert_eq!(
+            render_pdf_plan(&plan),
+            Err(PdfRenderError::InternalPlanMismatch {
+                context: "page resource metadata",
+            })
+        );
     }
 
     #[test]

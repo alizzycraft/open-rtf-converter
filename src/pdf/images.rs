@@ -191,7 +191,7 @@ pub(in crate::pdf) fn write_rgb8_image_xobject(
 pub(in crate::pdf) fn draw_image_layout_item(
     content: &mut Content,
     fragment: &crate::layout::ImageFragment,
-    page_images: &[PdfImageRef],
+    page_images: &[PlannedImage],
     image_ref_cursor: &mut usize,
 ) {
     if fragment.image.format == ImageFormat::Placeholder {

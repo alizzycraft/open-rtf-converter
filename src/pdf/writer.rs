@@ -10,90 +10,57 @@ pub fn estimate_passive_pdf_object_count(
     layout: &LayoutDocument,
     font_provider: Option<&FontProvider>,
 ) -> usize {
-    let page_used_font_indexes = collect_page_used_font_indexes(layout, font_provider);
-    let used_font_indexes = collect_used_font_indexes(&page_used_font_indexes);
-    let extended_latin_usage = collect_extended_latin_font_usage(layout, font_provider);
-    2usize
-        .saturating_add(layout.pages.len().saturating_mul(2))
-        .saturating_add(used_font_indexes.len())
-        .saturating_add(usize::from(
-            font_index_for_resource(SYMBOL_REGULAR)
-                .is_some_and(|index| used_font_indexes.contains(&index)),
-        ))
-        .saturating_add(usize::from(
-            font_index_for_resource(ZAPF_DINGBATS_REGULAR)
-                .is_some_and(|index| used_font_indexes.contains(&index)),
-        ))
-        .saturating_add(
-            extended_latin_usage
-                .iter()
-                .filter(|usage| !usage.is_empty())
-                .count(),
-        )
-        .saturating_add(
-            collect_used_supplied_font_asset_indexes(layout, font_provider)
-                .len()
-                .saturating_mul(6),
-        )
-        .saturating_add(count_image_xobjects(layout))
+    let provider = font_provider.cloned().unwrap_or_default();
+    let Ok(catalog) = PreparedFontCatalog::prepare(&provider) else {
+        return 0;
+    };
+    let session = FontSession::new(&catalog);
+    plan_pdf(layout, &session, usize::MAX)
+        .map(|plan| plan.object_count())
+        .unwrap_or(0)
 }
 
 pub fn render_pdf_with_font_provider(
     layout: &LayoutDocument,
     font_provider: Option<&FontProvider>,
 ) -> Vec<u8> {
-    try_render_pdf_with_font_provider(layout, font_provider).unwrap_or_default()
+    let provider = font_provider.cloned().unwrap_or_default();
+    let Ok(catalog) = PreparedFontCatalog::prepare(&provider) else {
+        return Vec::new();
+    };
+    let session = FontSession::new(&catalog);
+    let Ok(plan) = plan_pdf(layout, &session, usize::MAX) else {
+        return Vec::new();
+    };
+    render_pdf_plan(&plan).unwrap_or_default()
 }
 
-fn try_render_pdf_with_font_provider(
-    layout: &LayoutDocument,
-    font_provider: Option<&FontProvider>,
-) -> Result<Vec<u8>, PdfRenderError> {
+fn try_render_pdf_plan(plan: &PdfPlan<'_, '_>) -> Result<Vec<u8>, PdfRenderError> {
+    let layout = plan.layout;
+    let font_provider = Some(plan.font_session.provider());
     let mut pdf = Pdf::new();
-    let catalog_id = Ref::new(1);
-    let page_tree_id = Ref::new(2);
-    let first_page_id = 3;
-    let first_content_id = first_page_id + layout.pages.len() as i32;
-    let first_font_id = first_content_id + layout.pages.len() as i32;
-    let page_used_font_indexes = collect_page_used_font_indexes(layout, font_provider);
-    let used_font_indexes = collect_used_font_indexes(&page_used_font_indexes);
-    let mut next_object_id = first_font_id;
+    let catalog_id = plan.catalog_ref;
+    let page_tree_id = plan.page_tree_ref;
     let mut font_refs = [None; 14];
-    for font_idx in &used_font_indexes {
-        font_refs[*font_idx] = Some(Ref::new(next_object_id));
-        next_object_id += 1;
+    for font in &plan.builtin_fonts {
+        font_refs[font.font_index] = Some(font.font_ref);
     }
-    let symbol_to_unicode_ref = font_index_for_resource(SYMBOL_REGULAR)
-        .and_then(|index| font_refs[index])
-        .map(|_| next_ref(&mut next_object_id));
-    let zapf_dingbats_to_unicode_ref = font_index_for_resource(ZAPF_DINGBATS_REGULAR)
-        .and_then(|index| font_refs[index])
-        .map(|_| next_ref(&mut next_object_id));
-    let extended_latin_usage = collect_extended_latin_font_usage(layout, font_provider);
-    let mut extended_latin_to_unicode_refs = [None; 14];
-    for (font_idx, usage) in extended_latin_usage.iter().enumerate() {
-        if !usage.is_empty() {
-            extended_latin_to_unicode_refs[font_idx] = Some(next_ref(&mut next_object_id));
-        }
-    }
-    let supplied_fonts = collect_supplied_pdf_fonts(layout, font_provider, &mut next_object_id);
-    let page_supplied_font_indexes =
-        collect_page_supplied_font_indexes(layout, font_provider, &supplied_fonts);
-    let first_image_id = next_object_id;
-
-    let page_refs = (0..layout.pages.len())
-        .map(|idx| Ref::new(first_page_id + idx as i32))
+    let page_refs = plan
+        .pages
+        .iter()
+        .map(|page| page.page_ref)
         .collect::<Vec<_>>();
-    let image_refs = collect_image_refs(layout, first_image_id);
 
     pdf.catalog(catalog_id).pages(page_tree_id);
     pdf.pages(page_tree_id)
         .kids(page_refs.iter().copied())
         .count(page_refs.len() as i32);
 
+    let mut page_image_start = 0usize;
     for (idx, page) in layout.pages.iter().enumerate() {
-        let page_id = page_refs[idx];
-        let content_id = Ref::new(first_content_id + idx as i32);
+        let planned_page = &plan.pages[idx];
+        let page_id = planned_page.page_ref;
+        let content_id = planned_page.content_ref;
 
         let mut page_writer = pdf.page(page_id);
         page_writer.parent(page_tree_id);
@@ -103,41 +70,40 @@ fn try_render_pdf_with_font_provider(
             let mut resources = page_writer.resources();
             {
                 let mut fonts = resources.fonts();
-                for font_idx in &page_used_font_indexes[idx] {
+                for font_idx in &planned_page.builtin_font_indexes {
                     let (resource_name, _base_font) = BUILTIN_FONTS[*font_idx];
                     if let Some(font_ref) = font_refs[*font_idx] {
                         fonts.pair(Name(resource_name), font_ref);
                     }
                 }
-                for supplied_idx in &page_supplied_font_indexes[idx] {
-                    let supplied = &supplied_fonts[*supplied_idx];
+                for supplied_idx in &planned_page.supplied_font_indexes {
+                    let supplied = &plan.supplied_fonts[*supplied_idx];
                     fonts.pair(Name(&supplied.resource_name), supplied.type0_ref);
                 }
             }
-            if let Some(page_images) = image_refs.get(idx)
-                && !page_images.is_empty()
-            {
+            let page_image_end = page_image_start + planned_page.image_count;
+            let page_images = &plan.images[page_image_start..page_image_end];
+            if !page_images.is_empty() {
                 let mut x_objects = resources.x_objects();
                 for image in page_images {
-                    x_objects.pair(Name(&image.name), image.id);
+                    x_objects.pair(Name(&image.name), image.image_ref);
                 }
             }
-            let opacity_pairs = collect_page_opacity_pairs(page);
-            if page_uses_passive_jpeg_luminosity_blend(page) || !opacity_pairs.is_empty() {
+            if planned_page.uses_luminosity_blend || !planned_page.opacity_pairs.is_empty() {
                 let mut ext_g_states = resources.ext_g_states();
-                if page_uses_passive_jpeg_luminosity_blend(page) {
+                if planned_page.uses_luminosity_blend {
                     ext_g_states
                         .insert(Name(PASSIVE_JPEG_LUMINOSITY_GS))
                         .start::<pdf_writer::writers::ExtGraphicsState>()
                         .blend_mode(BlendMode::Luminosity);
                 }
-                for (fill_percent, stroke_percent) in opacity_pairs {
-                    let name = passive_shape_alpha_name(fill_percent, stroke_percent);
+                for (fill_percent, stroke_percent) in &planned_page.opacity_pairs {
+                    let name = passive_shape_alpha_name(*fill_percent, *stroke_percent);
                     let mut state = ext_g_states
                         .insert(Name(&name))
                         .start::<pdf_writer::writers::ExtGraphicsState>();
-                    state.non_stroking_alpha(f32::from(fill_percent) / 100.0);
-                    state.stroking_alpha(f32::from(stroke_percent) / 100.0);
+                    state.non_stroking_alpha(f32::from(*fill_percent) / 100.0);
+                    state.stroking_alpha(f32::from(*stroke_percent) / 100.0);
                 }
             }
         }
@@ -145,46 +111,56 @@ fn try_render_pdf_with_font_provider(
 
         let mut content = Content::new();
         let mut image_ref_cursor = 0usize;
-        let page_images = image_refs.get(idx).map(Vec::as_slice).unwrap_or(&[]);
+        let page_image_end = page_image_start + planned_page.image_count;
+        let page_images = &plan.images[page_image_start..page_image_end];
+        let mut text_encoding_cursor = 0usize;
         for item in &page.items {
             draw_layout_item(
                 &mut content,
                 item,
                 layout,
-                font_provider,
-                &supplied_fonts,
+                &plan.supplied_fonts,
+                &planned_page.text_encodings,
+                &mut text_encoding_cursor,
                 page_images,
                 &mut image_ref_cursor,
             );
         }
+        if image_ref_cursor != page_images.len()
+            || text_encoding_cursor != planned_page.text_encodings.len()
+        {
+            return Err(PdfRenderError::InternalPlanMismatch {
+                context: "page content resource cursors",
+            });
+        }
         pdf.stream(content_id, &content.finish());
+        page_image_start = page_image_end;
     }
 
-    for font_idx in used_font_indexes {
-        let Some(font_ref) = font_refs[font_idx] else {
-            continue;
-        };
+    for planned_font in &plan.builtin_fonts {
+        let font_idx = planned_font.font_index;
+        let font_ref = planned_font.font_ref;
         let (_resource_name, base_font) = BUILTIN_FONTS[font_idx];
         let mut font = pdf.type1_font(font_ref);
         font.base_font(Name(base_font));
         if base_font == b"Symbol" {
-            if let Some(to_unicode_ref) = symbol_to_unicode_ref {
+            if let Some(to_unicode_ref) = planned_font.to_unicode_ref {
                 font.to_unicode(to_unicode_ref);
             }
         } else if base_font == b"ZapfDingbats" {
-            if let Some(to_unicode_ref) = zapf_dingbats_to_unicode_ref {
+            if let Some(to_unicode_ref) = planned_font.to_unicode_ref {
                 font.to_unicode(to_unicode_ref);
             }
-        } else if !extended_latin_usage[font_idx].is_empty() {
+        } else if !planned_font.extended_latin_usage.is_empty() {
             {
                 let mut encoding = font.encoding_custom();
                 encoding.base_encoding(Name(b"WinAnsiEncoding"));
                 let mut differences = encoding.differences();
-                for entry in &extended_latin_usage[font_idx].entries {
+                for entry in &planned_font.extended_latin_usage.entries {
                     differences.consecutive(entry.byte, [Name(entry.glyph_name)]);
                 }
             }
-            if let Some(to_unicode_ref) = extended_latin_to_unicode_refs[font_idx] {
+            if let Some(to_unicode_ref) = planned_font.to_unicode_ref {
                 font.to_unicode(to_unicode_ref);
             }
         } else {
@@ -192,31 +168,51 @@ fn try_render_pdf_with_font_provider(
         }
     }
 
-    if let Some(to_unicode_ref) = symbol_to_unicode_ref {
-        let symbol_to_unicode =
-            passive_to_unicode_cmap(b"OpenRtfConverter-Symbol", PASSIVE_SYMBOL_TO_UNICODE)?;
-        pdf.stream(to_unicode_ref, &symbol_to_unicode);
-    }
-    if let Some(to_unicode_ref) = zapf_dingbats_to_unicode_ref {
-        let zapf_dingbats_to_unicode = passive_to_unicode_cmap(
-            b"OpenRtfConverter-ZapfDingbats",
+    for (resource, name, entries) in [
+        (
+            SYMBOL_REGULAR,
+            b"OpenRtfConverter-Symbol".as_slice(),
+            PASSIVE_SYMBOL_TO_UNICODE,
+        ),
+        (
+            ZAPF_DINGBATS_REGULAR,
+            b"OpenRtfConverter-ZapfDingbats".as_slice(),
             PASSIVE_ZAPF_DINGBATS_TO_UNICODE,
-        )?;
-        pdf.stream(to_unicode_ref, &zapf_dingbats_to_unicode);
-    }
-    for (font_idx, to_unicode_ref) in extended_latin_to_unicode_refs.iter().enumerate() {
-        let Some(to_unicode_ref) = *to_unicode_ref else {
+        ),
+    ] {
+        let Some(font_index) = font_index_for_resource(resource) else {
             continue;
         };
-        let entries = extended_latin_usage[font_idx].to_unicode_entries();
-        let extended_latin_to_unicode =
-            passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", &entries)?;
-        pdf.stream(to_unicode_ref, &extended_latin_to_unicode);
+        let Some(to_unicode_ref) = plan
+            .builtin_fonts
+            .iter()
+            .find(|font| font.font_index == font_index)
+            .and_then(|font| font.to_unicode_ref)
+        else {
+            continue;
+        };
+        let to_unicode = passive_to_unicode_cmap(name, entries)?;
+        pdf.stream(to_unicode_ref, &to_unicode);
     }
-    write_supplied_pdf_fonts(&mut pdf, font_provider, &supplied_fonts)?;
+    for planned_font in &plan.builtin_fonts {
+        if planned_font.extended_latin_usage.is_empty() {
+            continue;
+        }
+        let Some(to_unicode_ref) = planned_font.to_unicode_ref else {
+            return Err(PdfRenderError::InternalPlanMismatch {
+                context: "extended Latin CMap reference",
+            });
+        };
+        let entries = planned_font.extended_latin_usage.to_unicode_entries();
+        let to_unicode = passive_to_unicode_cmap(b"OpenRtfConverter-ExtendedLatin", &entries)?;
+        pdf.stream(to_unicode_ref, &to_unicode);
+    }
+    write_supplied_pdf_fonts(&mut pdf, font_provider, &plan.supplied_fonts)?;
 
+    let mut page_image_start = 0usize;
     for (page_idx, page) in layout.pages.iter().enumerate() {
-        let page_images = image_refs.get(page_idx).map(Vec::as_slice).unwrap_or(&[]);
+        let page_image_end = page_image_start + plan.pages[page_idx].image_count;
+        let page_images = &plan.images[page_image_start..page_image_end];
         let mut image_ref_cursor = 0usize;
         page.for_each_image_fragment(&mut |fragment| {
             if !image_format_uses_xobject(fragment.image.format) {
@@ -231,17 +227,17 @@ fn try_render_pdf_with_font_provider(
                         image_ref_cursor = image_ref_cursor.saturating_add(1);
                         write_passive_image_xobject(
                             &mut pdf,
-                            image_ref.id,
+                            image_ref.image_ref,
                             image.format,
                             image.width_px,
                             image.height_px,
                             &image.bytes,
                             &image.palette,
                             image.tone_adjustment,
-                            image_ref.alpha_mask_id,
+                            image_ref.alpha_mask_ref,
                         );
                         if let (Some(alpha_mask), Some(alpha_mask_id)) =
-                            (image.alpha_mask.as_ref(), image_ref.alpha_mask_id)
+                            (image.alpha_mask.as_ref(), image_ref.alpha_mask_ref)
                         {
                             write_image_alpha_mask(
                                 &mut pdf,
@@ -275,19 +271,19 @@ fn try_render_pdf_with_font_provider(
                 | ImageFormat::PngIndexed
                 | ImageFormat::Rgb8 => write_passive_image_xobject(
                     &mut pdf,
-                    image_ref.id,
+                    image_ref.image_ref,
                     fragment.image.format,
                     fragment.image.width_px,
                     fragment.image.height_px,
                     &fragment.image.bytes,
                     &fragment.image.palette,
                     fragment.image.tone_adjustment,
-                    image_ref.alpha_mask_id,
+                    image_ref.alpha_mask_ref,
                 ),
                 ImageFormat::WmfVector | ImageFormat::Placeholder => {}
             }
             if let (Some(alpha_mask), Some(alpha_mask_id)) =
-                (fragment.image.alpha_mask.as_ref(), image_ref.alpha_mask_id)
+                (fragment.image.alpha_mask.as_ref(), image_ref.alpha_mask_ref)
             {
                 write_image_alpha_mask(
                     &mut pdf,
@@ -298,6 +294,12 @@ fn try_render_pdf_with_font_provider(
                 );
             }
         });
+        if image_ref_cursor != page_images.len() {
+            return Err(PdfRenderError::InvalidImageReference {
+                page_index: page_idx,
+            });
+        }
+        page_image_start = page_image_end;
     }
 
     Ok(pdf.finish())
@@ -305,12 +307,5 @@ fn try_render_pdf_with_font_provider(
 
 pub(crate) fn render_pdf_plan(plan: &PdfPlan<'_, '_>) -> Result<Vec<u8>, PdfRenderError> {
     plan.validate()?;
-    if estimate_passive_pdf_object_count(plan.layout(), Some(plan.font_session().provider()))
-        != plan.object_count()
-    {
-        return Err(PdfRenderError::InternalPlanMismatch {
-            context: "planned object count",
-        });
-    }
-    try_render_pdf_with_font_provider(plan.layout(), Some(plan.font_session().provider()))
+    try_render_pdf_plan(plan)
 }

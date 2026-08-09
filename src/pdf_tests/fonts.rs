@@ -889,7 +889,7 @@
 
     #[test]
     fn invalid_supplied_font_reference_returns_typed_error() {
-        let supplied = SuppliedPdfFont {
+        let supplied = PlannedSuppliedFont {
             asset_index: usize::MAX,
             resource_name: b"TF1".to_vec(),
             base_name: b"Invalid".to_vec(),

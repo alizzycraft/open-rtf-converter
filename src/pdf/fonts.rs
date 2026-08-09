@@ -68,7 +68,7 @@ pub(in crate::pdf) fn standards_compliant_to_unicode_cmap(
 pub(in crate::pdf) fn write_supplied_pdf_fonts(
     pdf: &mut Pdf,
     font_provider: Option<&FontProvider>,
-    supplied_fonts: &[SuppliedPdfFont],
+    supplied_fonts: &[PlannedSuppliedFont],
 ) -> Result<(), PdfRenderError> {
     let Some(font_provider) = font_provider else {
         return supplied_fonts

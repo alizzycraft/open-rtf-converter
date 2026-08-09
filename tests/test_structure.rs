@@ -94,3 +94,24 @@ fn production_model_pipeline_has_no_semantic_sentinel_protocols() {
         );
     }
 }
+
+#[test]
+fn production_pdf_writer_has_one_plan_backed_resource_path() {
+    let writer = production_source("src/pdf/writer.rs");
+
+    for retired in [
+        "try_render_pdf_with_font_provider",
+        "collect_page_used_font_indexes",
+        "collect_supplied_pdf_fonts",
+        "collect_page_supplied_font_indexes",
+        "collect_image_refs",
+        "count_image_xobjects",
+    ] {
+        assert!(
+            !writer.contains(retired),
+            "PDF writer still contains duplicate resource path {retired}"
+        );
+    }
+    assert!(writer.contains("fn try_render_pdf_plan("));
+    assert!(writer.contains("render_pdf_plan(&plan)"));
+}

@@ -6,9 +6,10 @@ pub(in crate::pdf) fn draw_layout_item(
     content: &mut Content,
     item: &LayoutItem,
     layout: &LayoutDocument,
-    font_provider: Option<&FontProvider>,
-    supplied_fonts: &[SuppliedPdfFont],
-    page_images: &[PdfImageRef],
+    supplied_fonts: &[PlannedSuppliedFont],
+    page_text_encodings: &[Option<SuppliedTextEncoding>],
+    text_encoding_cursor: &mut usize,
+    page_images: &[PlannedImage],
     image_ref_cursor: &mut usize,
 ) {
     let mut item = item;
@@ -27,7 +28,11 @@ pub(in crate::pdf) fn draw_layout_item(
                 return;
             }
             LayoutItem::Text(fragment) => {
-                draw_text_layout_item(content, fragment, layout, font_provider, supplied_fonts);
+                let supplied_encoding = page_text_encodings
+                    .get(*text_encoding_cursor)
+                    .and_then(Option::as_ref);
+                *text_encoding_cursor = (*text_encoding_cursor).saturating_add(1);
+                draw_text_layout_item(content, fragment, layout, supplied_fonts, supplied_encoding);
                 return;
             }
             LayoutItem::Underline {
@@ -187,8 +192,9 @@ pub(in crate::pdf) fn draw_layout_item(
                     content,
                     nested,
                     layout,
-                    font_provider,
                     supplied_fonts,
+                    page_text_encodings,
+                    text_encoding_cursor,
                     page_images,
                     image_ref_cursor,
                 );
@@ -210,8 +216,9 @@ pub(in crate::pdf) fn draw_layout_item(
                     content,
                     nested,
                     layout,
-                    font_provider,
                     supplied_fonts,
+                    page_text_encodings,
+                    text_encoding_cursor,
                     page_images,
                     image_ref_cursor,
                 );
@@ -226,8 +233,8 @@ pub(in crate::pdf) fn draw_text_layout_item(
     content: &mut Content,
     fragment: &TextFragment,
     layout: &LayoutDocument,
-    font_provider: Option<&FontProvider>,
-    supplied_fonts: &[SuppliedPdfFont],
+    supplied_fonts: &[PlannedSuppliedFont],
+    supplied_encoding: Option<&SuppliedTextEncoding>,
 ) {
     if text_fragment_renders_as_passive_vector_only(fragment) {
         draw_passive_vector_only_dingbat_text(content, fragment, layout);
@@ -235,26 +242,17 @@ pub(in crate::pdf) fn draw_text_layout_item(
     }
     let visual_text = passive_visual_text_for_fragment(fragment);
     let text = visual_text.as_deref().unwrap_or(&fragment.text);
-    let supplied_encoding = encode_supplied_text_fragment_with_text(
-        fragment,
-        text,
-        layout,
-        font_provider,
-        supplied_fonts,
-    );
     let mut base_encoded = Vec::new();
-    let font_resource = if let Some(supplied) = supplied_encoding.as_ref() {
+    let font_resource = if let Some(supplied) = supplied_encoding {
         supplied_fonts[supplied.font_index].resource_name.as_slice()
     } else {
         base_encoded = encode_pdf_text_for_font(text, fragment.font_family);
         font_name_for_style(fragment.font_family, &fragment.style).0
     };
     let passive_kerning_family = supplied_encoding.is_none().then_some(fragment.font_family);
-    let supplied_positioning_points = supplied_encoding
-        .as_ref()
-        .map(|supplied| supplied.positioning_points.as_slice());
+    let supplied_positioning_points =
+        supplied_encoding.map(|supplied| supplied.positioning_points.as_slice());
     let encoded = supplied_encoding
-        .as_ref()
         .map(|supplied| supplied.encoded.as_slice())
         .unwrap_or(base_encoded.as_slice());
     if fragment.style.shadow {

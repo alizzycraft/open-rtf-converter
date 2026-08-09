@@ -5,7 +5,7 @@ use super::*;
 pub(in crate::pdf) fn draw_passive_wmf_vector_image(
     content: &mut Content,
     fragment: &crate::layout::ImageFragment,
-    page_images: &[PdfImageRef],
+    page_images: &[PlannedImage],
     image_ref_cursor: &mut usize,
 ) {
     let draw = image_draw_rect(fragment);

@@ -15,7 +15,9 @@ use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str};
 use thiserror::Error;
 use ttf_parser::{Face, name_id};
 
-use crate::fonts::{FontAsset, FontProvider, FontSession, font_asset_pair_kerning_points};
+use crate::fonts::{
+    FontAsset, FontProvider, FontSession, PreparedFontCatalog, font_asset_pair_kerning_points,
+};
 use crate::layout::{
     LayoutDocument, LayoutItem, LineCap, LineJoin, LineStyle, PdfColor, PdfFontFamily,
     TextFragment, TextRotation, passive_pair_kerning_points, passive_supplied_font_fallback_name,
@@ -244,7 +246,7 @@ const PASSIVE_ZAPF_DINGBATS_TO_UNICODE: &[(u8, char)] = &[
 ];
 
 #[derive(Debug, Clone, Default)]
-struct ExtendedLatinUsage {
+pub(crate) struct ExtendedLatinUsage {
     entries: Vec<ExtendedLatinEntry>,
 }
 
@@ -278,22 +280,8 @@ struct ExtendedLatinEntry {
     glyph_name: &'static [u8],
 }
 
-#[derive(Debug, Clone)]
-struct SuppliedPdfFont {
-    asset_index: usize,
-    resource_name: Vec<u8>,
-    base_name: Vec<u8>,
-    type0_ref: Ref,
-    cid_ref: Ref,
-    descriptor_ref: Ref,
-    font_file_ref: Ref,
-    cid_to_gid_map_ref: Ref,
-    to_unicode_ref: Ref,
-    used_glyphs: Vec<SuppliedGlyph>,
-}
-
 #[derive(Debug, Copy, Clone, PartialEq)]
-struct SuppliedGlyph {
+pub(crate) struct SuppliedGlyph {
     cid: u16,
     gid: u16,
     unicode: char,
@@ -301,7 +289,7 @@ struct SuppliedGlyph {
 }
 
 #[derive(Debug, Clone)]
-struct SuppliedTextEncoding {
+pub(crate) struct SuppliedTextEncoding {
     font_index: usize,
     encoded: Vec<u8>,
     positioning_points: Vec<f32>,
